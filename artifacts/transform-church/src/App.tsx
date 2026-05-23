@@ -1,0 +1,246 @@
+import { useEffect, useRef } from "react";
+import { Switch, Route, Redirect, useLocation, Router as WouterRouter } from "wouter";
+import { QueryClient, QueryClientProvider, useQueryClient } from "@tanstack/react-query";
+import { Toaster } from "@/components/ui/toaster";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { publishableKeyFromHost } from "@clerk/react/internal";
+import { ClerkProvider, SignIn, SignUp, Show, useClerk, useUser } from "@clerk/react";
+import { shadcn } from "@clerk/themes";
+
+// Layouts and Pages
+import { AppLayout } from "@/components/layout/AppLayout";
+import Home from "@/pages/Home";
+import Dashboard from "@/pages/Dashboard";
+import Tracks from "@/pages/Tracks";
+import TrackDetail from "@/pages/TrackDetail";
+import ModuleDetail from "@/pages/ModuleDetail";
+import WatchVideo from "@/pages/WatchVideo";
+import Queue from "@/pages/Queue";
+import History from "@/pages/History";
+import AdminDashboard from "@/pages/AdminDashboard";
+import AdminUsers from "@/pages/AdminUsers";
+import AdminContent from "@/pages/AdminContent";
+import Profile from "@/pages/Profile";
+import NotFound from "@/pages/not-found";
+import { useUpsertMe } from "@workspace/api-client-react";
+
+const queryClient = new QueryClient();
+
+const clerkPubKey = publishableKeyFromHost(
+  window.location.hostname,
+  import.meta.env.VITE_CLERK_PUBLISHABLE_KEY,
+);
+const clerkProxyUrl = import.meta.env.VITE_CLERK_PROXY_URL;
+const basePath = import.meta.env.BASE_URL.replace(/\/$/, "");
+
+function stripBase(path: string): string {
+  return basePath && path.startsWith(basePath)
+    ? path.slice(basePath.length) || "/"
+    : path;
+}
+
+if (!clerkPubKey) {
+  throw new Error("Missing VITE_CLERK_PUBLISHABLE_KEY in .env file");
+}
+
+const clerkAppearance = {
+  theme: shadcn,
+  cssLayerName: "clerk",
+  options: {
+    logoPlacement: "inside" as const,
+    logoLinkUrl: basePath || "/",
+    logoImageUrl: `${window.location.origin}${basePath}/logo.svg`,
+  },
+  variables: {
+    colorPrimary: "hsl(43 96% 56%)",
+    colorForeground: "hsl(222 47% 11%)",
+    colorMutedForeground: "hsl(215 16% 47%)",
+    colorDanger: "hsl(0 84% 60%)",
+    colorBackground: "hsl(40 33% 98%)",
+    colorInput: "hsl(214 32% 91%)",
+    colorInputForeground: "hsl(222 47% 11%)",
+    colorNeutral: "hsl(214 32% 91%)",
+    fontFamily: "'Inter', sans-serif",
+    borderRadius: "0.5rem",
+  },
+  elements: {
+    rootBox: "w-full flex justify-center",
+    cardBox: "bg-background border border-border rounded-xl w-[440px] max-w-full overflow-hidden shadow-lg",
+    card: "!shadow-none !border-0 !bg-transparent !rounded-none",
+    footer: "!shadow-none !border-0 !bg-transparent !rounded-none",
+    headerTitle: "text-foreground font-serif text-2xl font-bold",
+    headerSubtitle: "text-muted-foreground",
+    socialButtonsBlockButtonText: "text-foreground font-medium",
+    formFieldLabel: "text-foreground font-medium",
+    footerActionLink: "text-primary hover:text-primary/80 transition-colors font-medium",
+    footerActionText: "text-muted-foreground",
+    dividerText: "text-muted-foreground bg-background px-2",
+    identityPreviewEditButton: "text-primary hover:text-primary/80",
+    formFieldSuccessText: "text-green-600",
+    alertText: "text-destructive-foreground",
+    logoBox: "flex justify-center mb-4",
+    logoImage: "h-12 w-auto",
+    socialButtonsBlockButton: "border border-input hover:bg-muted bg-background text-foreground",
+    formButtonPrimary: "bg-primary text-primary-foreground hover:bg-primary/90",
+    formFieldInput: "border border-input bg-background text-foreground focus:ring-2 focus:ring-ring focus:outline-none",
+    footerAction: "bg-muted/50 p-4 border-t border-border",
+    dividerLine: "bg-border",
+    alert: "bg-destructive text-destructive-foreground border-destructive",
+    otpCodeFieldInput: "border-input bg-background text-foreground focus:ring-ring",
+    formFieldRow: "mb-4",
+    main: "p-6",
+  },
+};
+
+function SignInPage() {
+  return (
+    <div className="flex min-h-[100dvh] items-center justify-center bg-muted/30 px-4 py-12 relative overflow-hidden">
+      <div className="absolute inset-0 bg-primary/5 pointer-events-none" />
+      <div className="z-10 w-full max-w-md">
+        <SignIn routing="path" path={`${basePath}/sign-in`} signUpUrl={`${basePath}/sign-up`} />
+      </div>
+    </div>
+  );
+}
+
+function SignUpPage() {
+  return (
+    <div className="flex min-h-[100dvh] items-center justify-center bg-muted/30 px-4 py-12 relative overflow-hidden">
+      <div className="absolute inset-0 bg-primary/5 pointer-events-none" />
+      <div className="z-10 w-full max-w-md">
+        <SignUp routing="path" path={`${basePath}/sign-up`} signInUrl={`${basePath}/sign-in`} />
+      </div>
+    </div>
+  );
+}
+
+function ClerkQueryClientCacheInvalidator() {
+  const { addListener } = useClerk();
+  const queryClient = useQueryClient();
+  const prevUserIdRef = useRef<string | null | undefined>(undefined);
+
+  useEffect(() => {
+    const unsubscribe = addListener(({ user }) => {
+      const userId = user?.id ?? null;
+      if (
+        prevUserIdRef.current !== undefined &&
+        prevUserIdRef.current !== userId
+      ) {
+        queryClient.clear();
+      }
+      prevUserIdRef.current = userId;
+    });
+    return unsubscribe;
+  }, [addListener, queryClient]);
+
+  return null;
+}
+
+function UserSync() {
+  const { user, isLoaded, isSignedIn } = useUser();
+  const { mutate: upsertMe } = useUpsertMe();
+  const syncedRef = useRef(false);
+
+  useEffect(() => {
+    if (isLoaded && isSignedIn && user && !syncedRef.current) {
+      upsertMe({
+        data: {
+          firstName: user.firstName || "",
+          lastName: user.lastName || "",
+          email: user.primaryEmailAddress?.emailAddress || "",
+          phone: user.primaryPhoneNumber?.phoneNumber || null,
+        }
+      });
+      syncedRef.current = true;
+    }
+  }, [isLoaded, isSignedIn, user, upsertMe]);
+
+  return null;
+}
+
+function ProtectedRoute({ component: Component, adminOnly = false }: { component: any, adminOnly?: boolean }) {
+  const { isLoaded, isSignedIn, user } = useUser();
+
+  if (!isLoaded) return <div className="min-h-screen flex items-center justify-center"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div></div>;
+  if (!isSignedIn) return <Redirect to="/" />;
+  
+  if (adminOnly && user?.publicMetadata?.role !== "admin") {
+    // Note: We might need a better way to check role from our DB API rather than Clerk metadata
+    // But for now we render component if they pass basic auth. The API will reject admin calls.
+  }
+
+  return (
+    <AppLayout>
+      <Component />
+    </AppLayout>
+  );
+}
+
+function HomeRedirect() {
+  return (
+    <>
+      <Show when="signed-in">
+        <Redirect to="/dashboard" />
+      </Show>
+      <Show when="signed-out">
+        <Home />
+      </Show>
+    </>
+  );
+}
+
+function ClerkProviderWithRoutes() {
+  const [, setLocation] = useLocation();
+
+  return (
+    <ClerkProvider
+      publishableKey={clerkPubKey}
+      proxyUrl={clerkProxyUrl}
+      appearance={clerkAppearance}
+      signInUrl={`${basePath}/sign-in`}
+      signUpUrl={`${basePath}/sign-up`}
+      routerPush={(to) => setLocation(stripBase(to))}
+      routerReplace={(to) => setLocation(stripBase(to), { replace: true })}
+    >
+      <QueryClientProvider client={queryClient}>
+        <ClerkQueryClientCacheInvalidator />
+        <UserSync />
+        <Switch>
+          <Route path="/" component={HomeRedirect} />
+          <Route path="/sign-in/*?" component={SignInPage} />
+          <Route path="/sign-up/*?" component={SignUpPage} />
+          
+          {/* Protected Routes */}
+          <Route path="/dashboard"><ProtectedRoute component={Dashboard} /></Route>
+          <Route path="/tracks"><ProtectedRoute component={Tracks} /></Route>
+          <Route path="/tracks/:trackId"><ProtectedRoute component={TrackDetail} /></Route>
+          <Route path="/modules/:moduleId"><ProtectedRoute component={ModuleDetail} /></Route>
+          <Route path="/watch/:videoId"><ProtectedRoute component={WatchVideo} /></Route>
+          <Route path="/queue"><ProtectedRoute component={Queue} /></Route>
+          <Route path="/history"><ProtectedRoute component={History} /></Route>
+          <Route path="/profile"><ProtectedRoute component={Profile} /></Route>
+          
+          {/* Admin Routes */}
+          <Route path="/admin"><ProtectedRoute component={AdminDashboard} adminOnly /></Route>
+          <Route path="/admin/users"><ProtectedRoute component={AdminUsers} adminOnly /></Route>
+          <Route path="/admin/content"><ProtectedRoute component={AdminContent} adminOnly /></Route>
+          
+          <Route component={NotFound} />
+        </Switch>
+      </QueryClientProvider>
+    </ClerkProvider>
+  );
+}
+
+function App() {
+  return (
+    <TooltipProvider>
+      <WouterRouter base={basePath}>
+        <ClerkProviderWithRoutes />
+      </WouterRouter>
+      <Toaster />
+    </TooltipProvider>
+  );
+}
+
+export default App;

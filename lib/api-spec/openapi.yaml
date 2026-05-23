@@ -1,22 +1,41 @@
 openapi: 3.1.0
 info:
-  # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: Transform Church Leadership Training Platform API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: users
+    description: User profile and sync
+  - name: tracks
+    description: Training tracks
+  - name: modules
+    description: Training modules
+  - name: videos
+    description: Training videos
+  - name: watchHistory
+    description: Video watch history and progress
+  - name: queue
+    description: Personal video queue
+  - name: quizzes
+    description: Quiz questions and results
+  - name: assignments
+    description: Module assignments
+  - name: admin
+    description: Admin-only operations
+  - name: dashboard
+    description: Dashboard summary data
+
 paths:
   /healthz:
     get:
       operationId: healthCheck
       tags: [health]
       summary: Health check
-      description: Returns server health status
       responses:
         "200":
           description: Healthy
@@ -24,6 +43,638 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  # ── User ────────────────────────────────────────────────────────────────
+  /users/me:
+    get:
+      operationId: getMe
+      tags: [users]
+      summary: Get current user profile
+      responses:
+        "200":
+          description: Current user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "401":
+          description: Unauthorized
+    put:
+      operationId: upsertMe
+      tags: [users]
+      summary: Create or update current user (called on first sign-in)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UserInput"
+      responses:
+        "200":
+          description: Upserted user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+
+  # ── Dashboard ───────────────────────────────────────────────────────────
+  /dashboard/summary:
+    get:
+      operationId: getDashboardSummary
+      tags: [dashboard]
+      summary: Get student dashboard summary (assigned modules, progress, queue count)
+      responses:
+        "200":
+          description: Dashboard summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardSummary"
+
+  # ── Tracks ──────────────────────────────────────────────────────────────
+  /tracks:
+    get:
+      operationId: listTracks
+      tags: [tracks]
+      summary: List all training tracks
+      responses:
+        "200":
+          description: List of tracks
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Track"
+    post:
+      operationId: createTrack
+      tags: [tracks]
+      summary: Create a new track (admin only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TrackInput"
+      responses:
+        "201":
+          description: Created track
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Track"
+
+  /tracks/{trackId}:
+    get:
+      operationId: getTrack
+      tags: [tracks]
+      summary: Get a single track with its modules
+      parameters:
+        - name: trackId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Track with modules
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TrackWithModules"
+        "404":
+          description: Not found
+    patch:
+      operationId: updateTrack
+      tags: [tracks]
+      summary: Update a track (admin only)
+      parameters:
+        - name: trackId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TrackUpdate"
+      responses:
+        "200":
+          description: Updated track
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Track"
+    delete:
+      operationId: deleteTrack
+      tags: [tracks]
+      summary: Delete a track (admin only)
+      parameters:
+        - name: trackId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  # ── Modules ─────────────────────────────────────────────────────────────
+  /modules:
+    get:
+      operationId: listModules
+      tags: [modules]
+      summary: List all modules (optionally filter by trackId)
+      parameters:
+        - name: trackId
+          in: query
+          required: false
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: List of modules
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Module"
+    post:
+      operationId: createModule
+      tags: [modules]
+      summary: Create a new module (admin only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ModuleInput"
+      responses:
+        "201":
+          description: Created module
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Module"
+
+  /modules/{moduleId}:
+    get:
+      operationId: getModule
+      tags: [modules]
+      summary: Get a single module with its videos and quiz status
+      parameters:
+        - name: moduleId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Module detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModuleDetail"
+        "404":
+          description: Not found
+    patch:
+      operationId: updateModule
+      tags: [modules]
+      summary: Update a module (admin only)
+      parameters:
+        - name: moduleId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ModuleUpdate"
+      responses:
+        "200":
+          description: Updated module
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Module"
+    delete:
+      operationId: deleteModule
+      tags: [modules]
+      summary: Delete a module (admin only)
+      parameters:
+        - name: moduleId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  # ── Videos ──────────────────────────────────────────────────────────────
+  /videos:
+    get:
+      operationId: listVideos
+      tags: [videos]
+      summary: List videos (optionally filter by moduleId)
+      parameters:
+        - name: moduleId
+          in: query
+          required: false
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: List of videos
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Video"
+    post:
+      operationId: createVideo
+      tags: [videos]
+      summary: Create a new video (admin only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VideoInput"
+      responses:
+        "201":
+          description: Created video
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Video"
+
+  /videos/{videoId}:
+    get:
+      operationId: getVideo
+      tags: [videos]
+      summary: Get a single video
+      parameters:
+        - name: videoId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Video
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Video"
+        "404":
+          description: Not found
+    patch:
+      operationId: updateVideo
+      tags: [videos]
+      summary: Update a video (admin only)
+      parameters:
+        - name: videoId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VideoUpdate"
+      responses:
+        "200":
+          description: Updated video
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Video"
+    delete:
+      operationId: deleteVideo
+      tags: [videos]
+      summary: Delete a video (admin only)
+      parameters:
+        - name: videoId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  # ── Watch History ────────────────────────────────────────────────────────
+  /watch-history:
+    get:
+      operationId: listWatchHistory
+      tags: [watchHistory]
+      summary: Get current user's watch history
+      responses:
+        "200":
+          description: Watch history list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/WatchHistoryEntry"
+
+  /watch-history/{videoId}:
+    put:
+      operationId: upsertWatchProgress
+      tags: [watchHistory]
+      summary: Update watch progress for a video
+      parameters:
+        - name: videoId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WatchProgressInput"
+      responses:
+        "200":
+          description: Updated watch history entry
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WatchHistoryEntry"
+
+  # ── Queue ────────────────────────────────────────────────────────────────
+  /queue:
+    get:
+      operationId: listQueue
+      tags: [queue]
+      summary: Get current user's video queue
+      responses:
+        "200":
+          description: Queue items
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/QueueItem"
+
+  /queue/{videoId}:
+    post:
+      operationId: addToQueue
+      tags: [queue]
+      summary: Add a video to personal queue
+      parameters:
+        - name: videoId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "201":
+          description: Added to queue
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QueueItem"
+    delete:
+      operationId: removeFromQueue
+      tags: [queue]
+      summary: Remove a video from personal queue
+      parameters:
+        - name: videoId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Removed
+
+  # ── Quizzes ─────────────────────────────────────────────────────────────
+  /modules/{moduleId}/quiz:
+    get:
+      operationId: getQuiz
+      tags: [quizzes]
+      summary: Get quiz questions for a module
+      parameters:
+        - name: moduleId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Quiz questions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/QuizQuestion"
+    post:
+      operationId: createQuizQuestion
+      tags: [quizzes]
+      summary: Add a quiz question to a module (admin only)
+      parameters:
+        - name: moduleId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/QuizQuestionInput"
+      responses:
+        "201":
+          description: Created question
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QuizQuestion"
+
+  /modules/{moduleId}/quiz/submit:
+    post:
+      operationId: submitQuiz
+      tags: [quizzes]
+      summary: Submit quiz answers and get result
+      parameters:
+        - name: moduleId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/QuizSubmission"
+      responses:
+        "200":
+          description: Quiz result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QuizResult"
+
+  /modules/{moduleId}/quiz/result:
+    get:
+      operationId: getQuizResult
+      tags: [quizzes]
+      summary: Get current user's quiz result for a module
+      parameters:
+        - name: moduleId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Quiz result (or null if not taken)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QuizResult"
+        "404":
+          description: Not taken yet
+
+  /quizzes/questions/{questionId}:
+    delete:
+      operationId: deleteQuizQuestion
+      tags: [quizzes]
+      summary: Delete a quiz question (admin only)
+      parameters:
+        - name: questionId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  # ── Assignments ─────────────────────────────────────────────────────────
+  /assignments:
+    get:
+      operationId: listMyAssignments
+      tags: [assignments]
+      summary: List current user's module assignments
+      responses:
+        "200":
+          description: Assignments with module info
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Assignment"
+
+  # ── Admin ────────────────────────────────────────────────────────────────
+  /admin/users:
+    get:
+      operationId: adminListUsers
+      tags: [admin]
+      summary: List all users with contact info (admin only)
+      responses:
+        "200":
+          description: All users
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/UserWithProgress"
+
+  /admin/users/{userId}/role:
+    patch:
+      operationId: updateUserRole
+      tags: [admin]
+      summary: Update a user's role (admin only)
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RoleUpdate"
+      responses:
+        "200":
+          description: Updated user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+
+  /admin/assignments:
+    post:
+      operationId: createAssignment
+      tags: [admin]
+      summary: Assign a module to one or more users (admin only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AssignmentInput"
+      responses:
+        "201":
+          description: Created assignments
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Assignment"
+
+  /admin/assignments/{assignmentId}:
+    delete:
+      operationId: deleteAssignment
+      tags: [admin]
+      summary: Delete an assignment (admin only)
+      parameters:
+        - name: assignmentId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /admin/progress-matrix:
+    get:
+      operationId: getProgressMatrix
+      tags: [admin]
+      summary: Get pass/fail matrix for all users across all modules (admin only)
+      responses:
+        "200":
+          description: Progress matrix
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProgressMatrix"
+
+# ── Schemas ────────────────────────────────────────────────────────────────
 components:
   schemas:
     HealthStatus:
@@ -31,6 +682,482 @@ components:
       properties:
         status:
           type: string
-      required:
-        - status
+      required: [status]
 
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+        clerkId:
+          type: string
+        firstName:
+          type: string
+        lastName:
+          type: string
+        email:
+          type: string
+        phone:
+          type: ["string", "null"]
+        role:
+          type: string
+          enum: [student, admin]
+        createdAt:
+          type: string
+      required: [id, clerkId, firstName, lastName, email, role, createdAt]
+
+    UserInput:
+      type: object
+      properties:
+        firstName:
+          type: string
+        lastName:
+          type: string
+        email:
+          type: string
+        phone:
+          type: ["string", "null"]
+      required: [firstName, lastName, email]
+
+    RoleUpdate:
+      type: object
+      properties:
+        role:
+          type: string
+          enum: [student, admin]
+      required: [role]
+
+    Track:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        description:
+          type: ["string", "null"]
+        imageUrl:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+      required: [id, name, createdAt]
+
+    TrackInput:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: ["string", "null"]
+        imageUrl:
+          type: ["string", "null"]
+      required: [name]
+
+    TrackUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: ["string", "null"]
+        imageUrl:
+          type: ["string", "null"]
+
+    TrackWithModules:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        description:
+          type: ["string", "null"]
+        imageUrl:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+        modules:
+          type: array
+          items:
+            $ref: "#/components/schemas/Module"
+      required: [id, name, createdAt, modules]
+
+    Module:
+      type: object
+      properties:
+        id:
+          type: integer
+        trackId:
+          type: integer
+        title:
+          type: string
+        description:
+          type: ["string", "null"]
+        order:
+          type: integer
+        createdAt:
+          type: string
+      required: [id, trackId, title, order, createdAt]
+
+    ModuleInput:
+      type: object
+      properties:
+        trackId:
+          type: integer
+        title:
+          type: string
+        description:
+          type: ["string", "null"]
+        order:
+          type: integer
+      required: [trackId, title, order]
+
+    ModuleUpdate:
+      type: object
+      properties:
+        title:
+          type: string
+        description:
+          type: ["string", "null"]
+        order:
+          type: integer
+
+    ModuleDetail:
+      type: object
+      properties:
+        id:
+          type: integer
+        trackId:
+          type: integer
+        title:
+          type: string
+        description:
+          type: ["string", "null"]
+        order:
+          type: integer
+        createdAt:
+          type: string
+        videos:
+          type: array
+          items:
+            $ref: "#/components/schemas/VideoWithProgress"
+        quizResult:
+          $ref: "#/components/schemas/QuizResult"
+        quizUnlocked:
+          type: boolean
+      required: [id, trackId, title, order, createdAt, videos, quizUnlocked]
+
+    Video:
+      type: object
+      properties:
+        id:
+          type: integer
+        moduleId:
+          type: integer
+        title:
+          type: string
+        description:
+          type: ["string", "null"]
+        url:
+          type: string
+        thumbnailUrl:
+          type: ["string", "null"]
+        durationSeconds:
+          type: ["integer", "null"]
+        order:
+          type: integer
+        createdAt:
+          type: string
+      required: [id, moduleId, title, url, order, createdAt]
+
+    VideoInput:
+      type: object
+      properties:
+        moduleId:
+          type: integer
+        title:
+          type: string
+        description:
+          type: ["string", "null"]
+        url:
+          type: string
+        thumbnailUrl:
+          type: ["string", "null"]
+        durationSeconds:
+          type: ["integer", "null"]
+        order:
+          type: integer
+      required: [moduleId, title, url, order]
+
+    VideoUpdate:
+      type: object
+      properties:
+        title:
+          type: string
+        description:
+          type: ["string", "null"]
+        url:
+          type: string
+        thumbnailUrl:
+          type: ["string", "null"]
+        durationSeconds:
+          type: ["integer", "null"]
+        order:
+          type: integer
+
+    VideoWithProgress:
+      type: object
+      properties:
+        id:
+          type: integer
+        moduleId:
+          type: integer
+        title:
+          type: string
+        description:
+          type: ["string", "null"]
+        url:
+          type: string
+        thumbnailUrl:
+          type: ["string", "null"]
+        durationSeconds:
+          type: ["integer", "null"]
+        order:
+          type: integer
+        createdAt:
+          type: string
+        progressPercent:
+          type: ["integer", "null"]
+        completed:
+          type: boolean
+        inQueue:
+          type: boolean
+      required: [id, moduleId, title, url, order, createdAt, completed, inQueue]
+
+    WatchHistoryEntry:
+      type: object
+      properties:
+        id:
+          type: integer
+        userId:
+          type: string
+        videoId:
+          type: integer
+        video:
+          $ref: "#/components/schemas/Video"
+        progressPercent:
+          type: integer
+        completed:
+          type: boolean
+        lastWatchedAt:
+          type: string
+      required: [id, userId, videoId, video, progressPercent, completed, lastWatchedAt]
+
+    WatchProgressInput:
+      type: object
+      properties:
+        progressPercent:
+          type: integer
+          minimum: 0
+          maximum: 100
+        completed:
+          type: boolean
+      required: [progressPercent]
+
+    QueueItem:
+      type: object
+      properties:
+        id:
+          type: integer
+        userId:
+          type: string
+        videoId:
+          type: integer
+        video:
+          $ref: "#/components/schemas/Video"
+        addedAt:
+          type: string
+      required: [id, userId, videoId, video, addedAt]
+
+    QuizQuestion:
+      type: object
+      properties:
+        id:
+          type: integer
+        moduleId:
+          type: integer
+        questionText:
+          type: string
+        options:
+          type: array
+          items:
+            type: string
+        correctIndex:
+          type: integer
+        order:
+          type: integer
+      required: [id, moduleId, questionText, options, correctIndex, order]
+
+    QuizQuestionInput:
+      type: object
+      properties:
+        questionText:
+          type: string
+        options:
+          type: array
+          items:
+            type: string
+        correctIndex:
+          type: integer
+        order:
+          type: integer
+      required: [questionText, options, correctIndex, order]
+
+    QuizSubmission:
+      type: object
+      properties:
+        answers:
+          type: array
+          items:
+            type: object
+            properties:
+              questionId:
+                type: integer
+              selectedIndex:
+                type: integer
+            required: [questionId, selectedIndex]
+      required: [answers]
+
+    QuizResult:
+      type: object
+      properties:
+        id:
+          type: integer
+        userId:
+          type: string
+        moduleId:
+          type: integer
+        score:
+          type: integer
+        totalQuestions:
+          type: integer
+        passed:
+          type: boolean
+        takenAt:
+          type: string
+      required: [id, userId, moduleId, score, totalQuestions, passed, takenAt]
+
+    Assignment:
+      type: object
+      properties:
+        id:
+          type: integer
+        userId:
+          type: string
+        moduleId:
+          type: integer
+        module:
+          $ref: "#/components/schemas/Module"
+        assignedBy:
+          type: string
+        assignedAt:
+          type: string
+        dueDate:
+          type: ["string", "null"]
+        quizResult:
+          $ref: "#/components/schemas/QuizResult"
+      required: [id, userId, moduleId, module, assignedBy, assignedAt]
+
+    AssignmentInput:
+      type: object
+      properties:
+        userIds:
+          type: array
+          items:
+            type: string
+        moduleId:
+          type: integer
+        dueDate:
+          type: ["string", "null"]
+      required: [userIds, moduleId]
+
+    DashboardSummary:
+      type: object
+      properties:
+        assignedModules:
+          type: array
+          items:
+            $ref: "#/components/schemas/Assignment"
+        totalModulesAvailable:
+          type: integer
+        totalModulesCompleted:
+          type: integer
+        totalVideosWatched:
+          type: integer
+        queueCount:
+          type: integer
+        recentActivity:
+          type: array
+          items:
+            $ref: "#/components/schemas/WatchHistoryEntry"
+      required: [assignedModules, totalModulesAvailable, totalModulesCompleted, totalVideosWatched, queueCount, recentActivity]
+
+    UserWithProgress:
+      type: object
+      properties:
+        id:
+          type: string
+        clerkId:
+          type: string
+        firstName:
+          type: string
+        lastName:
+          type: string
+        email:
+          type: string
+        phone:
+          type: ["string", "null"]
+        role:
+          type: string
+          enum: [student, admin]
+        createdAt:
+          type: string
+        quizResults:
+          type: array
+          items:
+            $ref: "#/components/schemas/QuizResult"
+        assignmentCount:
+          type: integer
+      required: [id, clerkId, firstName, lastName, email, role, createdAt, quizResults, assignmentCount]
+
+    ProgressMatrix:
+      type: object
+      properties:
+        modules:
+          type: array
+          items:
+            $ref: "#/components/schemas/Module"
+        rows:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProgressRow"
+      required: [modules, rows]
+
+    ProgressRow:
+      type: object
+      properties:
+        user:
+          $ref: "#/components/schemas/User"
+        results:
+          type: array
+          items:
+            type: object
+            properties:
+              moduleId:
+                type: integer
+              passed:
+                type: ["boolean", "null"]
+              score:
+                type: ["integer", "null"]
+            required: [moduleId]
+      required: [user, results]
