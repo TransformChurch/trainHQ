@@ -38,7 +38,7 @@ router.post("/", requireAdmin, async (req, res) => {
 // GET /videos/:videoId
 router.get("/:videoId", requireAuth, async (req, res) => {
   try {
-    const videoId = parseInt(req.params.videoId);
+    const videoId = parseInt(req.params.videoId as string);
     const videos = await db.select().from(videosTable).where(eq(videosTable.id, videoId)).limit(1);
     if (!videos[0]) {
       res.status(404).json({ error: "Not found" });
@@ -54,7 +54,7 @@ router.get("/:videoId", requireAuth, async (req, res) => {
 // PATCH /videos/:videoId
 router.patch("/:videoId", requireAdmin, async (req, res) => {
   try {
-    const videoId = parseInt(req.params.videoId);
+    const videoId = parseInt(req.params.videoId as string);
     const parsed = UpdateVideoBody.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ error: "Invalid input" });
@@ -75,7 +75,7 @@ router.patch("/:videoId", requireAdmin, async (req, res) => {
 // DELETE /videos/:videoId
 router.delete("/:videoId", requireAdmin, async (req, res) => {
   try {
-    const videoId = parseInt(req.params.videoId);
+    const videoId = parseInt(req.params.videoId as string);
     await db.delete(videosTable).where(eq(videosTable.id, videoId));
     res.status(204).send();
   } catch {

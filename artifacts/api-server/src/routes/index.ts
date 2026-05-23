@@ -21,7 +21,6 @@ router.use("/videos", videosRouter);
 router.use("/watch-history", watchHistoryRouter);
 router.use("/queue", queueRouter);
 router.use("/quizzes", quizzesRouter);
-router.use("/modules", quizzesRouter);
 router.use("/assignments", assignmentsRouter);
 router.use("/admin", adminRouter);
 router.use("/dashboard", dashboardRouter);

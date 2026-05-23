@@ -1,10 +1,10 @@
-import { 
-  useListTracks, useCreateTrack, useUpdateTrack, useDeleteTrack, getListTracksQueryKey,
+import {
+  useListTracks, useCreateTrack, useUpdateTrack, useDeleteTrack,
   useListModules, useCreateModule, useUpdateModule, useDeleteModule,
   useListVideos, useCreateVideo, useUpdateVideo, useDeleteVideo,
-  useCreateQuizQuestion, useDeleteQuizQuestion,
-  useCreateAssignment, useDeleteAssignment,
-  useListMyAssignments
+  useCreateQuizQuestion, useDeleteQuizQuestion, useGetQuiz,
+  useAdminListUsers, useCreateAssignment, useDeleteAssignment, useListMyAssignments,
+  getListTracksQueryKey, getListModulesQueryKey, getListVideosQueryKey, getGetQuizQueryKey,
 } from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -14,124 +14,429 @@ import { Textarea } from "@/components/ui/textarea";
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Plus, Edit2, Trash2 } from "lucide-react";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger,
+} from "@/components/ui/dialog";
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
+import {
+  Accordion, AccordionContent, AccordionItem, AccordionTrigger,
+} from "@/components/ui/accordion";
+import { Plus, Trash2, Video, BookOpen, HelpCircle, Users, ChevronRight } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 
-export default function AdminContent() {
-  const { data: tracks, isLoading } = useListTracks();
-  const { mutate: createTrack } = useCreateTrack();
-  const { mutate: updateTrack } = useUpdateTrack();
-  const { mutate: deleteTrack } = useDeleteTrack();
-  
-  // Bringing in other hooks to ensure they are used in the application
-  const { data: modules } = useListModules();
-  const { mutate: createModule } = useCreateModule();
-  const { mutate: updateModule } = useUpdateModule();
-  const { mutate: deleteModule } = useDeleteModule();
-  
-  const { data: videos } = useListVideos();
-  const { mutate: createVideo } = useCreateVideo();
-  const { mutate: updateVideo } = useUpdateVideo();
-  const { mutate: deleteVideo } = useDeleteVideo();
-  
-  const { mutate: createQuizQuestion } = useCreateQuizQuestion();
-  const { mutate: deleteQuizQuestion } = useDeleteQuizQuestion();
-  
-  const { mutate: createAssignment } = useCreateAssignment();
-  const { mutate: deleteAssignment } = useDeleteAssignment();
-  
-  const { data: myAssignments } = useListMyAssignments();
+// ── Helpers ──────────────────────────────────────────────────────────────────
 
+function FormField({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="space-y-1.5">
+      <Label>{label}</Label>
+      {children}
+    </div>
+  );
+}
+
+// ── Module manager (inside a track) ─────────────────────────────────────────
+
+function ModuleManager({ trackId }: { trackId: number }) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
-  
-  const [isAddTrackOpen, setIsAddTrackOpen] = useState(false);
-  const [newTrackName, setNewTrackName] = useState("");
-  const [newTrackDesc, setNewTrackDesc] = useState("");
+  const { data: modules } = useListModules({ trackId }, { query: { queryKey: getListModulesQueryKey({ trackId }) } });
+  const { mutate: createModule } = useCreateModule();
+  const { mutate: deleteModule } = useDeleteModule();
 
-  if (isLoading) return <div className="p-8 text-center">Loading content...</div>;
+  const [open, setOpen] = useState(false);
+  const [title, setTitle] = useState("");
+  const [desc, setDesc] = useState("");
+  const [order, setOrder] = useState("1");
 
-  const handleCreateTrack = (e: React.FormEvent) => {
+  const handleCreate = (e: React.FormEvent) => {
     e.preventDefault();
-    createTrack({
-      data: { name: newTrackName, description: newTrackDesc }
-    }, {
+    createModule({ data: { trackId, title, description: desc, order: parseInt(order) } }, {
       onSuccess: () => {
-        toast({ title: "Track created successfully" });
-        setIsAddTrackOpen(false);
-        setNewTrackName("");
-        setNewTrackDesc("");
-        queryClient.invalidateQueries({ queryKey: getListTracksQueryKey() });
-      }
+        toast({ title: "Module created" });
+        setOpen(false); setTitle(""); setDesc(""); setOrder("1");
+        queryClient.invalidateQueries({ queryKey: getListModulesQueryKey({ trackId }) });
+      },
     });
   };
 
-  const handleDeleteTrack = (id: number) => {
-    if (confirm("Are you sure you want to delete this track? This will delete all modules and videos within it.")) {
-      deleteTrack({ trackId: id }, {
-        onSuccess: () => {
-          toast({ title: "Track deleted" });
-          queryClient.invalidateQueries({ queryKey: getListTracksQueryKey() });
-        }
-      });
-    }
-  };
-
   return (
-    <div className="space-y-8 animate-in fade-in duration-500">
+    <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold font-serif">Content Manager</h1>
-          <p className="text-muted-foreground mt-2">Manage tracks, modules, videos, and quizzes.</p>
-        </div>
-        <Dialog open={isAddTrackOpen} onOpenChange={setIsAddTrackOpen}>
+        <span className="text-sm font-medium text-muted-foreground flex items-center gap-1.5">
+          <BookOpen className="w-3.5 h-3.5" /> Modules ({modules?.length ?? 0})
+        </span>
+        <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger asChild>
-            <Button><Plus className="w-4 h-4 mr-2" /> Add Track</Button>
+            <Button size="sm" variant="outline"><Plus className="w-3.5 h-3.5 mr-1" /> Add Module</Button>
           </DialogTrigger>
           <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Create New Track</DialogTitle>
-            </DialogHeader>
-            <form onSubmit={handleCreateTrack} className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="name">Track Name</Label>
-                <Input id="name" value={newTrackName} onChange={e => setNewTrackName(e.target.value)} required />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="desc">Description</Label>
-                <Textarea id="desc" value={newTrackDesc} onChange={e => setNewTrackDesc(e.target.value)} rows={3} />
-              </div>
-              <Button type="submit" className="w-full">Create Track</Button>
+            <DialogHeader><DialogTitle>Add Module</DialogTitle></DialogHeader>
+            <form onSubmit={handleCreate} className="space-y-4">
+              <FormField label="Title"><Input value={title} onChange={e => setTitle(e.target.value)} required /></FormField>
+              <FormField label="Description"><Textarea value={desc} onChange={e => setDesc(e.target.value)} rows={2} /></FormField>
+              <FormField label="Order"><Input type="number" value={order} onChange={e => setOrder(e.target.value)} min="1" /></FormField>
+              <Button type="submit" className="w-full">Create Module</Button>
             </form>
           </DialogContent>
         </Dialog>
       </div>
 
-      <div className="grid grid-cols-1 gap-4">
+      {modules?.sort((a, b) => a.order - b.order).map(mod => (
+        <div key={mod.id} className="border rounded-lg bg-background">
+          <Accordion type="single" collapsible>
+            <AccordionItem value={String(mod.id)} className="border-0">
+              <AccordionTrigger className="px-4 py-3 hover:no-underline">
+                <div className="flex items-center gap-2 text-left">
+                  <Badge variant="outline" className="text-xs">{mod.order}</Badge>
+                  <span className="font-medium">{mod.title}</span>
+                </div>
+              </AccordionTrigger>
+              <AccordionContent className="px-4 pb-3 space-y-3">
+                <VideoManager moduleId={mod.id} />
+                <QuizManager moduleId={mod.id} />
+                <Button
+                  variant="ghost" size="sm"
+                  className="text-destructive hover:text-destructive w-full justify-start"
+                  onClick={() => {
+                    if (confirm("Delete this module and all its content?")) {
+                      deleteModule({ moduleId: mod.id }, {
+                        onSuccess: () => {
+                          toast({ title: "Module deleted" });
+                          queryClient.invalidateQueries({ queryKey: getListModulesQueryKey({ trackId }) });
+                        },
+                      });
+                    }
+                  }}
+                >
+                  <Trash2 className="w-3.5 h-3.5 mr-2" /> Delete Module
+                </Button>
+              </AccordionContent>
+            </AccordionItem>
+          </Accordion>
+        </div>
+      ))}
+      {modules?.length === 0 && (
+        <p className="text-sm text-muted-foreground text-center py-3 border border-dashed rounded">No modules yet.</p>
+      )}
+    </div>
+  );
+}
+
+// ── Video manager (inside a module) ─────────────────────────────────────────
+
+function VideoManager({ moduleId }: { moduleId: number }) {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const { data: videos } = useListVideos({ moduleId }, { query: { queryKey: getListVideosQueryKey({ moduleId }) } });
+  const { mutate: createVideo } = useCreateVideo();
+  const { mutate: deleteVideo } = useDeleteVideo();
+
+  const [open, setOpen] = useState(false);
+  const [title, setTitle] = useState("");
+  const [url, setUrl] = useState("");
+  const [desc, setDesc] = useState("");
+  const [duration, setDuration] = useState("");
+  const [order, setOrder] = useState("1");
+
+  const handleCreate = (e: React.FormEvent) => {
+    e.preventDefault();
+    createVideo({
+      data: { moduleId, title, url, description: desc, durationSeconds: duration ? parseInt(duration) : undefined, order: parseInt(order) }
+    }, {
+      onSuccess: () => {
+        toast({ title: "Video added" });
+        setOpen(false); setTitle(""); setUrl(""); setDesc(""); setDuration(""); setOrder("1");
+        queryClient.invalidateQueries({ queryKey: getListVideosQueryKey({ moduleId }) });
+      },
+    });
+  };
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <span className="text-xs text-muted-foreground flex items-center gap-1">
+          <Video className="w-3 h-3" /> Videos ({videos?.length ?? 0})
+        </span>
+        <Dialog open={open} onOpenChange={setOpen}>
+          <DialogTrigger asChild>
+            <Button size="sm" variant="ghost" className="h-7 text-xs"><Plus className="w-3 h-3 mr-1" /> Add Video</Button>
+          </DialogTrigger>
+          <DialogContent>
+            <DialogHeader><DialogTitle>Add Video</DialogTitle></DialogHeader>
+            <form onSubmit={handleCreate} className="space-y-4">
+              <FormField label="Title"><Input value={title} onChange={e => setTitle(e.target.value)} required /></FormField>
+              <FormField label="Embed URL (YouTube/Vimeo)"><Input value={url} onChange={e => setUrl(e.target.value)} placeholder="https://www.youtube.com/embed/..." required /></FormField>
+              <FormField label="Description"><Textarea value={desc} onChange={e => setDesc(e.target.value)} rows={2} /></FormField>
+              <div className="grid grid-cols-2 gap-3">
+                <FormField label="Duration (seconds)"><Input type="number" value={duration} onChange={e => setDuration(e.target.value)} placeholder="600" /></FormField>
+                <FormField label="Order"><Input type="number" value={order} onChange={e => setOrder(e.target.value)} min="1" /></FormField>
+              </div>
+              <Button type="submit" className="w-full">Add Video</Button>
+            </form>
+          </DialogContent>
+        </Dialog>
+      </div>
+      {videos?.sort((a, b) => a.order - b.order).map(v => (
+        <div key={v.id} className="flex items-center justify-between bg-muted/30 rounded px-3 py-2">
+          <span className="text-sm truncate max-w-[80%]">{v.order}. {v.title}</span>
+          <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive hover:text-destructive shrink-0"
+            onClick={() => deleteVideo({ videoId: v.id }, { onSuccess: () => {
+              toast({ title: "Video removed" });
+              queryClient.invalidateQueries({ queryKey: getListVideosQueryKey({ moduleId }) });
+            }})}
+          >
+            <Trash2 className="w-3 h-3" />
+          </Button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ── Quiz question manager ─────────────────────────────────────────────────────
+
+function QuizManager({ moduleId }: { moduleId: number }) {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const { data: questions } = useGetQuiz(moduleId, { query: { queryKey: getGetQuizQueryKey(moduleId) } });
+  const { mutate: createQuestion } = useCreateQuizQuestion();
+  const { mutate: deleteQuestion } = useDeleteQuizQuestion();
+
+  const [open, setOpen] = useState(false);
+  const [qText, setQText] = useState("");
+  const [options, setOptions] = useState(["", "", "", ""]);
+  const [correctIndex, setCorrectIndex] = useState("0");
+  const [order, setOrder] = useState("1");
+
+  const handleCreate = (e: React.FormEvent) => {
+    e.preventDefault();
+    const filledOptions = options.filter(o => o.trim());
+    if (filledOptions.length < 2) {
+      toast({ title: "Provide at least 2 options", variant: "destructive" }); return;
+    }
+    createQuestion({
+      moduleId,
+      data: { questionText: qText, options: filledOptions, correctIndex: parseInt(correctIndex), order: parseInt(order) }
+    }, {
+      onSuccess: () => {
+        toast({ title: "Question added" });
+        setOpen(false); setQText(""); setOptions(["", "", "", ""]); setCorrectIndex("0"); setOrder("1");
+        queryClient.invalidateQueries({ queryKey: getGetQuizQueryKey(moduleId) });
+      },
+    });
+  };
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <span className="text-xs text-muted-foreground flex items-center gap-1">
+          <HelpCircle className="w-3 h-3" /> Quiz Questions ({questions?.length ?? 0})
+        </span>
+        <Dialog open={open} onOpenChange={setOpen}>
+          <DialogTrigger asChild>
+            <Button size="sm" variant="ghost" className="h-7 text-xs"><Plus className="w-3 h-3 mr-1" /> Add Question</Button>
+          </DialogTrigger>
+          <DialogContent className="max-w-lg">
+            <DialogHeader><DialogTitle>Add Quiz Question</DialogTitle></DialogHeader>
+            <form onSubmit={handleCreate} className="space-y-4">
+              <FormField label="Question"><Textarea value={qText} onChange={e => setQText(e.target.value)} rows={2} required /></FormField>
+              <div className="space-y-2">
+                <Label>Answer Options (mark correct)</Label>
+                {options.map((opt, i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <input
+                      type="radio" name="correct" value={i}
+                      checked={correctIndex === String(i)}
+                      onChange={() => setCorrectIndex(String(i))}
+                      className="accent-primary"
+                      title={`Mark option ${i + 1} as correct`}
+                    />
+                    <Input
+                      value={opt} placeholder={`Option ${i + 1}`}
+                      onChange={e => { const n = [...options]; n[i] = e.target.value; setOptions(n); }}
+                    />
+                  </div>
+                ))}
+                <p className="text-xs text-muted-foreground">Select the radio button next to the correct answer.</p>
+              </div>
+              <FormField label="Order"><Input type="number" value={order} onChange={e => setOrder(e.target.value)} min="1" /></FormField>
+              <Button type="submit" className="w-full">Add Question</Button>
+            </form>
+          </DialogContent>
+        </Dialog>
+      </div>
+      {questions?.map((q, i) => (
+        <div key={q.id} className="flex items-start justify-between bg-muted/30 rounded px-3 py-2 gap-2">
+          <span className="text-xs truncate max-w-[80%]">{i + 1}. {q.questionText}</span>
+          <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive hover:text-destructive shrink-0"
+            onClick={() => deleteQuestion({ questionId: q.id }, { onSuccess: () => {
+              toast({ title: "Question removed" });
+              queryClient.invalidateQueries({ queryKey: getGetQuizQueryKey(moduleId) });
+            }})}
+          >
+            <Trash2 className="w-3 h-3" />
+          </Button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ── Assignment manager ────────────────────────────────────────────────────────
+
+function AssignmentManager() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const { data: users } = useAdminListUsers();
+  const { data: modules } = useListModules(undefined, { query: { queryKey: getListModulesQueryKey() } });
+  const { mutate: createAssignment } = useCreateAssignment();
+  const [open, setOpen] = useState(false);
+  const [selectedUser, setSelectedUser] = useState("");
+  const [selectedModule, setSelectedModule] = useState("");
+  const [dueDate, setDueDate] = useState("");
+
+  const handleAssign = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedUser || !selectedModule) { toast({ title: "Select a user and module", variant: "destructive" }); return; }
+    createAssignment({
+      data: { userIds: [selectedUser], moduleId: parseInt(selectedModule), dueDate: dueDate || null }
+    }, {
+      onSuccess: () => {
+        toast({ title: "Module assigned successfully" });
+        setOpen(false); setSelectedUser(""); setSelectedModule(""); setDueDate("");
+      },
+    });
+  };
+
+  return (
+    <div>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogTrigger asChild>
+          <Button variant="outline"><Users className="w-4 h-4 mr-2" /> Assign Module to User</Button>
+        </DialogTrigger>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Assign Training Module</DialogTitle></DialogHeader>
+          <form onSubmit={handleAssign} className="space-y-4">
+            <FormField label="Student">
+              <Select value={selectedUser} onValueChange={setSelectedUser}>
+                <SelectTrigger><SelectValue placeholder="Select a student..." /></SelectTrigger>
+                <SelectContent>
+                  {users?.filter(u => u.role === "student").map(u => (
+                    <SelectItem key={u.id} value={u.id}>{u.firstName} {u.lastName} ({u.email})</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </FormField>
+            <FormField label="Module">
+              <Select value={selectedModule} onValueChange={setSelectedModule}>
+                <SelectTrigger><SelectValue placeholder="Select a module..." /></SelectTrigger>
+                <SelectContent>
+                  {modules?.map(m => (
+                    <SelectItem key={m.id} value={String(m.id)}>{m.title}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </FormField>
+            <FormField label="Due Date (optional)">
+              <Input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} />
+            </FormField>
+            <Button type="submit" className="w-full">Assign Module</Button>
+          </form>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+// ── Main page ─────────────────────────────────────────────────────────────────
+
+export default function AdminContent() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const { data: tracks, isLoading } = useListTracks();
+  const { mutate: createTrack } = useCreateTrack();
+  const { mutate: deleteTrack } = useDeleteTrack();
+
+  const [addTrackOpen, setAddTrackOpen] = useState(false);
+  const [trackName, setTrackName] = useState("");
+  const [trackDesc, setTrackDesc] = useState("");
+
+  if (isLoading) return <div className="p-8 text-center text-muted-foreground">Loading content...</div>;
+
+  const handleCreateTrack = (e: React.FormEvent) => {
+    e.preventDefault();
+    createTrack({ data: { name: trackName, description: trackDesc } }, {
+      onSuccess: () => {
+        toast({ title: "Track created" });
+        setAddTrackOpen(false); setTrackName(""); setTrackDesc("");
+        queryClient.invalidateQueries({ queryKey: getListTracksQueryKey() });
+      },
+    });
+  };
+
+  return (
+    <div className="space-y-8 animate-in fade-in duration-500">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold font-serif">Content Manager</h1>
+          <p className="text-muted-foreground mt-2">Manage tracks, modules, videos, quiz questions, and assignments.</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <AssignmentManager />
+          <Dialog open={addTrackOpen} onOpenChange={setAddTrackOpen}>
+            <DialogTrigger asChild>
+              <Button><Plus className="w-4 h-4 mr-2" /> New Track</Button>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader><DialogTitle>Create Training Track</DialogTitle></DialogHeader>
+              <form onSubmit={handleCreateTrack} className="space-y-4">
+                <FormField label="Track Name"><Input value={trackName} onChange={e => setTrackName(e.target.value)} required /></FormField>
+                <FormField label="Description"><Textarea value={trackDesc} onChange={e => setTrackDesc(e.target.value)} rows={3} /></FormField>
+                <Button type="submit" className="w-full">Create Track</Button>
+              </form>
+            </DialogContent>
+          </Dialog>
+        </div>
+      </div>
+
+      <div className="space-y-4">
         {tracks?.map(track => (
           <Card key={track.id}>
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <div>
-                <CardTitle className="text-xl">{track.name}</CardTitle>
-                <p className="text-sm text-muted-foreground mt-1">{track.description}</p>
-              </div>
-              <div className="flex items-center gap-2">
-                <Button variant="outline" size="sm"><Edit2 className="w-4 h-4 mr-1" /> Edit</Button>
-                <Button variant="outline" size="sm" onClick={() => handleDeleteTrack(track.id)} className="text-destructive hover:text-destructive">
-                  <Trash2 className="w-4 h-4 mr-1" /> Delete
+            <CardHeader className="pb-3">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <CardTitle className="text-xl">{track.name}</CardTitle>
+                  {track.description && <p className="text-sm text-muted-foreground mt-1">{track.description}</p>}
+                </div>
+                <Button
+                  variant="ghost" size="sm"
+                  className="text-destructive hover:text-destructive shrink-0"
+                  onClick={() => {
+                    if (confirm(`Delete "${track.name}"? This will remove all modules, videos and quiz questions inside it.`)) {
+                      deleteTrack({ trackId: track.id }, {
+                        onSuccess: () => {
+                          toast({ title: "Track deleted" });
+                          queryClient.invalidateQueries({ queryKey: getListTracksQueryKey() });
+                        },
+                      });
+                    }
+                  }}
+                >
+                  <Trash2 className="w-4 h-4" />
                 </Button>
               </div>
             </CardHeader>
             <CardContent>
-              <div className="text-sm text-muted-foreground mt-4 p-4 bg-muted/30 rounded border border-dashed text-center">
-                Select "Edit" to manage modules and videos for this track. (Simplified for this UI implementation)
-              </div>
+              <ModuleManager trackId={track.id} />
             </CardContent>
           </Card>
         ))}
         {tracks?.length === 0 && (
-          <div className="text-center py-12 border border-dashed rounded-lg bg-muted/10">
-            <p className="text-muted-foreground">No tracks created yet.</p>
+          <div className="text-center py-16 border border-dashed rounded-xl bg-muted/10">
+            <p className="text-muted-foreground">No training tracks yet. Create your first one above.</p>
           </div>
         )}
       </div>

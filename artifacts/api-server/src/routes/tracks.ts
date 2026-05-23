@@ -35,7 +35,7 @@ router.post("/", requireAdmin, async (req, res) => {
 // GET /tracks/:trackId
 router.get("/:trackId", requireAuth, async (req, res) => {
   try {
-    const trackId = parseInt(req.params.trackId);
+    const trackId = parseInt(req.params.trackId as string);
     const tracks = await db.select().from(tracksTable).where(eq(tracksTable.id, trackId)).limit(1);
     if (!tracks[0]) {
       res.status(404).json({ error: "Not found" });
@@ -56,7 +56,7 @@ router.get("/:trackId", requireAuth, async (req, res) => {
 // PATCH /tracks/:trackId
 router.patch("/:trackId", requireAdmin, async (req, res) => {
   try {
-    const trackId = parseInt(req.params.trackId);
+    const trackId = parseInt(req.params.trackId as string);
     const parsed = UpdateTrackBody.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ error: "Invalid input" });
@@ -77,7 +77,7 @@ router.patch("/:trackId", requireAdmin, async (req, res) => {
 // DELETE /tracks/:trackId
 router.delete("/:trackId", requireAdmin, async (req, res) => {
   try {
-    const trackId = parseInt(req.params.trackId);
+    const trackId = parseInt(req.params.trackId as string);
     await db.delete(tracksTable).where(eq(tracksTable.id, trackId));
     res.status(204).send();
   } catch {

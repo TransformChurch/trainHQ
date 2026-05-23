@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { getAuth } from "@clerk/express";
-import { db, usersTable, assignmentsTable, modulesTable, quizResultsTable, watchHistoryTable, queueTable } from "@workspace/db";
+import { db, usersTable, assignmentsTable, modulesTable, quizResultsTable } from "@workspace/db";
 import { eq, and } from "drizzle-orm";
 import { requireAdmin, getDbUser } from "../middlewares/requireAuth";
 import { UpdateUserRoleBody, CreateAssignmentBody } from "@workspace/api-zod";
@@ -47,7 +47,7 @@ router.get("/users", requireAdmin, async (req, res) => {
 // PATCH /admin/users/:userId/role
 router.patch("/users/:userId/role", requireAdmin, async (req, res) => {
   try {
-    const { userId } = req.params;
+    const userId = req.params.userId as string;
     const parsed = UpdateUserRoleBody.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ error: "Invalid input" });
@@ -84,19 +84,18 @@ router.post("/assignments", requireAdmin, async (req, res) => {
 
     const inserted = [];
     for (const userId of userIds) {
-      // Check for duplicate
       const existing = await db
         .select()
         .from(assignmentsTable)
         .where(and(eq(assignmentsTable.userId, userId), eq(assignmentsTable.moduleId, moduleId)))
         .limit(1);
       if (existing[0]) {
-        const modules = await db.select().from(modulesTable).where(eq(modulesTable.id, moduleId)).limit(1);
+        const mods = await db.select().from(modulesTable).where(eq(modulesTable.id, moduleId)).limit(1);
         inserted.push({
           ...existing[0],
           assignedAt: existing[0].assignedAt.toISOString(),
           dueDate: existing[0].dueDate ? existing[0].dueDate.toISOString() : null,
-          module: modules[0] ? { ...modules[0], createdAt: modules[0].createdAt.toISOString() } : null,
+          module: mods[0] ? { ...mods[0], createdAt: mods[0].createdAt.toISOString() } : null,
           quizResult: null,
         });
         continue;
@@ -108,12 +107,12 @@ router.post("/assignments", requireAdmin, async (req, res) => {
         dueDate: dueDate ? new Date(dueDate) : null,
       }).returning();
       const a = rows[0];
-      const modules = await db.select().from(modulesTable).where(eq(modulesTable.id, moduleId)).limit(1);
+      const mods = await db.select().from(modulesTable).where(eq(modulesTable.id, moduleId)).limit(1);
       inserted.push({
         id: a.id,
         userId: a.userId,
         moduleId: a.moduleId,
-        module: modules[0] ? { ...modules[0], createdAt: modules[0].createdAt.toISOString() } : null,
+        module: mods[0] ? { ...mods[0], createdAt: mods[0].createdAt.toISOString() } : null,
         assignedBy: a.assignedBy,
         assignedAt: a.assignedAt.toISOString(),
         dueDate: a.dueDate ? a.dueDate.toISOString() : null,
@@ -130,7 +129,7 @@ router.post("/assignments", requireAdmin, async (req, res) => {
 // DELETE /admin/assignments/:assignmentId
 router.delete("/assignments/:assignmentId", requireAdmin, async (req, res) => {
   try {
-    const assignmentId = parseInt(req.params.assignmentId);
+    const assignmentId = parseInt(req.params.assignmentId as string);
     await db.delete(assignmentsTable).where(eq(assignmentsTable.id, assignmentId));
     res.status(204).send();
   } catch {

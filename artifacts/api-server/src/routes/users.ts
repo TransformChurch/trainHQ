@@ -26,7 +26,7 @@ router.get("/me", requireAuth, async (req, res) => {
       role: user.role,
       createdAt: user.createdAt.toISOString(),
     });
-  } catch (err) {
+  } catch {
     res.status(500).json({ error: "Internal server error" });
   }
 });
@@ -53,15 +53,14 @@ router.put("/me", requireAuth, async (req, res) => {
       const u = updated[0];
       res.json({ id: u.id, clerkId: u.clerkId, firstName: u.firstName, lastName: u.lastName, email: u.email, phone: u.phone, role: u.role, createdAt: u.createdAt.toISOString() });
     } else {
-      const id = clerkId;
       const inserted = await db
         .insert(usersTable)
-        .values({ id, clerkId, firstName, lastName, email, phone: phone ?? null, role: "student" })
+        .values({ id: clerkId, clerkId, firstName, lastName, email, phone: phone ?? null, role: "student" })
         .returning();
       const u = inserted[0];
       res.json({ id: u.id, clerkId: u.clerkId, firstName: u.firstName, lastName: u.lastName, email: u.email, phone: u.phone, role: u.role, createdAt: u.createdAt.toISOString() });
     }
-  } catch (err) {
+  } catch {
     res.status(500).json({ error: "Internal server error" });
   }
 });

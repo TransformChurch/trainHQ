@@ -44,7 +44,7 @@ router.get("/", requireAuth, async (req, res) => {
 router.put("/:videoId", requireAuth, async (req, res) => {
   try {
     const auth = getAuth(req);
-    const videoId = parseInt(req.params.videoId);
+    const videoId = parseInt(req.params.videoId as string);
     const parsed = UpsertWatchProgressBody.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ error: "Invalid input" });

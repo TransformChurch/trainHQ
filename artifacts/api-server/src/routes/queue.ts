@@ -38,14 +38,13 @@ router.get("/", requireAuth, async (req, res) => {
 router.post("/:videoId", requireAuth, async (req, res) => {
   try {
     const auth = getAuth(req);
-    const videoId = parseInt(req.params.videoId);
+    const videoId = parseInt(req.params.videoId as string);
     const dbUser = await getDbUser(auth!.userId!);
     if (!dbUser) {
       res.status(404).json({ error: "User not found" });
       return;
     }
 
-    // Check if already queued
     const existing = await db
       .select()
       .from(queueTable)
@@ -80,7 +79,7 @@ router.post("/:videoId", requireAuth, async (req, res) => {
 router.delete("/:videoId", requireAuth, async (req, res) => {
   try {
     const auth = getAuth(req);
-    const videoId = parseInt(req.params.videoId);
+    const videoId = parseInt(req.params.videoId as string);
     const dbUser = await getDbUser(auth!.userId!);
     if (!dbUser) {
       res.status(204).send();

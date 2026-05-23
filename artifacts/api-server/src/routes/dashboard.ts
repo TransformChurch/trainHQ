@@ -23,7 +23,6 @@ router.get("/summary", requireAuth, async (req, res) => {
       return;
     }
 
-    // Assigned modules
     const assignmentRows = await db
       .select({ a: assignmentsTable, module: modulesTable })
       .from(assignmentsTable)
@@ -49,9 +48,9 @@ router.get("/summary", requireAuth, async (req, res) => {
         : null,
     }));
 
-    // Stats
     const allModules = await db.select().from(modulesTable);
     const completedModuleIds = new Set(quizResults.filter(qr => qr.passed).map(qr => qr.moduleId));
+
     const watchHistory = await db
       .select({ wh: watchHistoryTable, video: videosTable })
       .from(watchHistoryTable)
@@ -65,7 +64,7 @@ router.get("/summary", requireAuth, async (req, res) => {
       .from(queueTable)
       .where(eq(queueTable.userId, dbUser.id));
 
-    const totalVideosWatched = await db
+    const completedVideos = await db
       .select()
       .from(watchHistoryTable)
       .where(and(eq(watchHistoryTable.userId, dbUser.id), eq(watchHistoryTable.completed, true)));
@@ -74,7 +73,7 @@ router.get("/summary", requireAuth, async (req, res) => {
       assignedModules,
       totalModulesAvailable: allModules.length,
       totalModulesCompleted: completedModuleIds.size,
-      totalVideosWatched: totalVideosWatched.length,
+      totalVideosWatched: completedVideos.length,
       queueCount: queueItems.length,
       recentActivity: watchHistory.map(row => ({
         id: row.wh.id,
