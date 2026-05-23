@@ -93,12 +93,20 @@ export default function AdminUsers() {
                         {result?.passed === true ? (
                           <div className="flex flex-col items-center gap-1 text-green-600">
                             <CheckCircle2 className="w-5 h-5" />
-                            <span className="text-[10px] font-medium">{result.score}%</span>
+                            <span className="text-[10px] font-medium">
+                              {result.score != null && result.totalQuestions
+                                ? Math.round((result.score / result.totalQuestions) * 100)
+                                : 0}%
+                            </span>
                           </div>
                         ) : result?.passed === false ? (
                           <div className="flex flex-col items-center gap-1 text-destructive">
                             <XCircle className="w-5 h-5" />
-                            <span className="text-[10px] font-medium">{result.score}%</span>
+                            <span className="text-[10px] font-medium">
+                              {result.score != null && result.totalQuestions
+                                ? Math.round((result.score / result.totalQuestions) * 100)
+                                : 0}%
+                            </span>
                           </div>
                         ) : (
                           <div className="flex flex-col items-center gap-1 text-muted-foreground/30">

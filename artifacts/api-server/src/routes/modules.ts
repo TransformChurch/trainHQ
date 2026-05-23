@@ -126,7 +126,7 @@ router.delete("/:moduleId", requireAdmin, async (req, res) => {
   }
 });
 
-// GET /modules/:moduleId/quiz
+// GET /modules/:moduleId/quiz — correctIndex is intentionally excluded for students
 router.get("/:moduleId/quiz", requireAuth, async (req, res) => {
   try {
     const moduleId = parseInt(req.params.moduleId as string);
@@ -135,7 +135,8 @@ router.get("/:moduleId/quiz", requireAuth, async (req, res) => {
       .from(quizQuestionsTable)
       .where(eq(quizQuestionsTable.moduleId, moduleId))
       .orderBy(quizQuestionsTable.order);
-    res.json(questions);
+    // Strip the correct answer index so students cannot trivially read answers from the network
+    res.json(questions.map(({ correctIndex: _answer, ...safe }) => safe));
   } catch {
     res.status(500).json({ error: "Internal server error" });
   }

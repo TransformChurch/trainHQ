@@ -68,7 +68,9 @@ export default function ModuleDetail() {
   };
 
   const isQuizPassed = quizResult?.passed || moduleData.quizResult?.passed;
-  const bestScore = quizResult?.score ?? moduleData.quizResult?.score;
+  const rawScore = quizResult?.score ?? moduleData.quizResult?.score;
+  const totalQ = quizResult?.totalQuestions ?? moduleData.quizResult?.totalQuestions ?? 0;
+  const bestScore = rawScore != null && totalQ > 0 ? Math.round((rawScore / totalQ) * 100) : null;
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500">

@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { Switch, Route, Redirect, useLocation, Router as WouterRouter } from "wouter";
 import { QueryClient, QueryClientProvider, useQueryClient } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
@@ -136,38 +136,74 @@ function ClerkQueryClientCacheInvalidator() {
   return null;
 }
 
-function UserSync() {
+// Context that tracks whether the first-login DB upsert has settled.
+// Protected routes wait for this before rendering so they never query the API
+// with a user that does not yet exist in our database.
+const UserSyncContext = createContext<{ synced: boolean }>({ synced: false });
+
+function UserSyncProvider({ children }: { children: React.ReactNode }) {
   const { user, isLoaded, isSignedIn } = useUser();
   const { mutate: upsertMe } = useUpsertMe();
+  const queryClient = useQueryClient();
   const syncedRef = useRef(false);
+  // Treat "not signed in" as already synced — no upsert needed.
+  const [synced, setSynced] = useState(false);
 
   useEffect(() => {
-    if (isLoaded && isSignedIn && user && !syncedRef.current) {
-      upsertMe({
-        data: {
-          firstName: user.firstName || "",
-          lastName: user.lastName || "",
-          email: user.primaryEmailAddress?.emailAddress || "",
-          phone: user.primaryPhoneNumber?.phoneNumber || null,
-        }
-      });
-      syncedRef.current = true;
+    if (!isLoaded) return;
+    if (!isSignedIn) {
+      setSynced(true);
+      return;
     }
-  }, [isLoaded, isSignedIn, user, upsertMe]);
+    if (syncedRef.current) return;
+    syncedRef.current = true;
 
-  return null;
+    upsertMe(
+      {
+        data: {
+          firstName: user?.firstName || "",
+          lastName: user?.lastName || "",
+          email: user?.primaryEmailAddress?.emailAddress || "",
+          phone: user?.primaryPhoneNumber?.phoneNumber || null,
+        },
+      },
+      {
+        onSuccess: () => {
+          // Invalidate all cached queries so they re-fetch with the user now in DB
+          queryClient.invalidateQueries();
+          setSynced(true);
+        },
+        onError: () => {
+          // Still allow the app to render — API calls will just 404 gracefully
+          setSynced(true);
+        },
+      }
+    );
+  }, [isLoaded, isSignedIn, user, upsertMe, queryClient]);
+
+  return (
+    <UserSyncContext.Provider value={{ synced }}>
+      {children}
+    </UserSyncContext.Provider>
+  );
 }
 
-function ProtectedRoute({ component: Component, adminOnly = false }: { component: any, adminOnly?: boolean }) {
-  const { isLoaded, isSignedIn, user } = useUser();
+function Spinner() {
+  return (
+    <div className="min-h-screen flex items-center justify-center">
+      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+    </div>
+  );
+}
 
-  if (!isLoaded) return <div className="min-h-screen flex items-center justify-center"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div></div>;
+function ProtectedRoute({ component: Component, adminOnly: _adminOnly = false }: { component: any, adminOnly?: boolean }) {
+  const { isLoaded, isSignedIn } = useUser();
+  const { synced } = useContext(UserSyncContext);
+
+  if (!isLoaded) return <Spinner />;
   if (!isSignedIn) return <Redirect to="/" />;
-  
-  if (adminOnly && user?.publicMetadata?.role !== "admin") {
-    // Note: We might need a better way to check role from our DB API rather than Clerk metadata
-    // But for now we render component if they pass basic auth. The API will reject admin calls.
-  }
+  // Wait for the DB upsert to complete before rendering any data-fetching page
+  if (!synced) return <Spinner />;
 
   return (
     <AppLayout>
@@ -204,7 +240,7 @@ function ClerkProviderWithRoutes() {
     >
       <QueryClientProvider client={queryClient}>
         <ClerkQueryClientCacheInvalidator />
-        <UserSync />
+        <UserSyncProvider>
         <Switch>
           <Route path="/" component={HomeRedirect} />
           <Route path="/sign-in/*?" component={SignInPage} />
@@ -227,6 +263,7 @@ function ClerkProviderWithRoutes() {
           
           <Route component={NotFound} />
         </Switch>
+        </UserSyncProvider>
       </QueryClientProvider>
     </ClerkProvider>
   );

@@ -12,4 +12,6 @@ export type ProgressRowResultsItem = {
   passed?: boolean | null;
   /** @nullable */
   score?: number | null;
+  /** @nullable */
+  totalQuestions?: number | null;
 };

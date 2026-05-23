@@ -225,7 +225,8 @@ export interface QuizQuestion {
   moduleId: number;
   questionText: string;
   options: string[];
-  correctIndex: number;
+  /** Not returned by the student-facing quiz endpoint — only present in admin/server-side contexts */
+  correctIndex?: number;
   order: number;
 }
 
@@ -301,6 +302,8 @@ export type ProgressRowResultsItem = {
   passed?: boolean | null;
   /** @nullable */
   score?: number | null;
+  /** @nullable */
+  totalQuestions?: number | null;
 };
 
 export interface ProgressRow {

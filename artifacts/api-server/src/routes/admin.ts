@@ -167,6 +167,7 @@ router.get("/progress-matrix", requireAdmin, async (req, res) => {
           moduleId: mod.id,
           passed: result?.passed ?? null,
           score: result?.score ?? null,
+          totalQuestions: result?.totalQuestions ?? null,
         };
       }),
     }));
