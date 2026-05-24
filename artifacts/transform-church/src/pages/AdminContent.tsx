@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -23,7 +23,7 @@ import {
 import {
   Accordion, AccordionContent, AccordionItem, AccordionTrigger,
 } from "@/components/ui/accordion";
-import { Plus, Trash2, Video, BookOpen, HelpCircle, Users, Pencil } from "lucide-react";
+import { Plus, Trash2, Video, BookOpen, HelpCircle, Users, Pencil, Globe, Lock, Mail } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import type { Video as VideoType, QuizQuestion } from "@workspace/api-client-react";
 
@@ -46,6 +46,7 @@ async function apiFetch(path: string, opts?: RequestInit) {
     ...opts,
   });
   if (!res.ok) throw new Error(await res.text());
+  if (res.status === 204) return null;
   return res;
 }
 
@@ -208,16 +209,34 @@ function ModuleManager({ trackId }: { trackId: number }) {
   const [title, setTitle] = useState("");
   const [desc, setDesc] = useState("");
   const [order, setOrder] = useState("1");
+  const [isPublic, setIsPublic] = useState(true);
+  const [togglingId, setTogglingId] = useState<number | null>(null);
 
   const handleCreate = (e: React.FormEvent) => {
     e.preventDefault();
-    createModule({ data: { trackId, title, description: desc, order: parseInt(order) } }, {
+    createModule({ data: { trackId, title, description: desc, order: parseInt(order), isPublic } }, {
       onSuccess: () => {
         toast({ title: "Module created" });
-        setOpen(false); setTitle(""); setDesc(""); setOrder("1");
+        setOpen(false); setTitle(""); setDesc(""); setOrder("1"); setIsPublic(true);
         queryClient.invalidateQueries({ queryKey: getListModulesQueryKey({ trackId }) });
       },
     });
+  };
+
+  const handleToggleVisibility = async (mod: any) => {
+    setTogglingId(mod.id);
+    try {
+      await apiFetch(`/api/admin/modules/${mod.id}/visibility`, {
+        method: "PATCH",
+        body: JSON.stringify({ isPublic: !mod.isPublic }),
+      });
+      toast({ title: `Module set to ${!mod.isPublic ? "Public" : "Private"}` });
+      queryClient.invalidateQueries({ queryKey: getListModulesQueryKey({ trackId }) });
+    } catch {
+      toast({ title: "Failed to update visibility", variant: "destructive" });
+    } finally {
+      setTogglingId(null);
+    }
   };
 
   return (
@@ -236,20 +255,49 @@ function ModuleManager({ trackId }: { trackId: number }) {
               <FormField label="Title"><Input value={title} onChange={e => setTitle(e.target.value)} required /></FormField>
               <FormField label="Description"><Textarea value={desc} onChange={e => setDesc(e.target.value)} rows={2} /></FormField>
               <FormField label="Order"><Input type="number" value={order} onChange={e => setOrder(e.target.value)} min="1" /></FormField>
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => setIsPublic(v => !v)}
+                  className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none ${isPublic ? "bg-primary" : "bg-muted-foreground/30"}`}
+                >
+                  <span className={`pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow transform ring-0 transition-transform ${isPublic ? "translate-x-5" : "translate-x-0"}`} />
+                </button>
+                <span className="text-sm font-medium flex items-center gap-1.5">
+                  {isPublic ? <Globe className="w-4 h-4 text-primary" /> : <Lock className="w-4 h-4 text-muted-foreground" />}
+                  {isPublic ? "Public — visible to all students" : "Private — only visible when assigned"}
+                </span>
+              </div>
               <Button type="submit" className="w-full">Create Module</Button>
             </form>
           </DialogContent>
         </Dialog>
       </div>
 
-      {modules?.sort((a, b) => a.order - b.order).map(mod => (
+      {(modules as any[])?.sort((a, b) => a.order - b.order).map((mod: any) => (
         <div key={mod.id} className="border rounded-lg bg-background">
           <Accordion type="single" collapsible>
             <AccordionItem value={String(mod.id)} className="border-0">
               <AccordionTrigger className="px-4 py-3 hover:no-underline">
-                <div className="flex items-center gap-2 text-left">
-                  <Badge variant="outline" className="text-xs">{mod.order}</Badge>
-                  <span className="font-medium">{mod.title}</span>
+                <div className="flex items-center gap-2 text-left flex-1 min-w-0">
+                  <Badge variant="outline" className="text-xs shrink-0">{mod.order}</Badge>
+                  <span className="font-medium truncate">{mod.title}</span>
+                  <button
+                    type="button"
+                    onClick={e => { e.stopPropagation(); handleToggleVisibility(mod); }}
+                    disabled={togglingId === mod.id}
+                    className={`shrink-0 ml-auto mr-2 flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border transition-colors ${
+                      mod.isPublic
+                        ? "border-primary/30 text-primary bg-primary/5 hover:bg-primary/10"
+                        : "border-muted-foreground/30 text-muted-foreground bg-muted/30 hover:bg-muted/50"
+                    }`}
+                    title={mod.isPublic ? "Click to make private" : "Click to make public"}
+                  >
+                    {mod.isPublic
+                      ? <><Globe className="w-3 h-3" /> Public</>
+                      : <><Lock className="w-3 h-3" /> Private</>
+                    }
+                  </button>
                 </div>
               </AccordionTrigger>
               <AccordionContent className="px-4 pb-3 space-y-3">
@@ -455,63 +503,161 @@ function QuizManager({ moduleId }: { moduleId: number }) {
 
 // ── Assignment manager ────────────────────────────────────────────────────────
 
+type Group = { id: number; name: string; memberCount: number };
+
 function AssignmentManager() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const { data: users } = useAdminListUsers();
   const { data: modules } = useListModules(undefined, { query: { queryKey: getListModulesQueryKey() } });
-  const { mutate: createAssignment } = useCreateAssignment();
   const [open, setOpen] = useState(false);
+  const [assignTo, setAssignTo] = useState<"user" | "group">("user");
   const [selectedUser, setSelectedUser] = useState("");
+  const [selectedGroup, setSelectedGroup] = useState("");
   const [selectedModule, setSelectedModule] = useState("");
   const [dueDate, setDueDate] = useState("");
+  const [notifyEmail, setNotifyEmail] = useState(false);
+  const [groups, setGroups] = useState<Group[]>([]);
+  const [submitting, setSubmitting] = useState(false);
 
-  const handleAssign = (e: React.FormEvent) => {
+  useEffect(() => {
+    if (open) {
+      apiFetch("/api/groups")
+        .then(r => r?.json())
+        .then(data => setGroups(data ?? []))
+        .catch(() => {});
+    }
+  }, [open]);
+
+  const handleAssign = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedUser || !selectedModule) { toast({ title: "Select a user and module", variant: "destructive" }); return; }
-    createAssignment({
-      data: { userIds: [selectedUser], moduleId: parseInt(selectedModule), dueDate: dueDate || null }
-    }, {
-      onSuccess: () => {
-        toast({ title: "Module assigned successfully" });
-        setOpen(false); setSelectedUser(""); setSelectedModule(""); setDueDate("");
-      },
-    });
+    const hasTarget = assignTo === "user" ? !!selectedUser : !!selectedGroup;
+    if (!hasTarget || !selectedModule) {
+      toast({ title: "Please select a target and module", variant: "destructive" });
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const body: Record<string, any> = {
+        moduleId: parseInt(selectedModule),
+        dueDate: dueDate || null,
+        notifyEmail,
+      };
+      if (assignTo === "user") {
+        body.userIds = [selectedUser];
+      } else {
+        body.groupId = parseInt(selectedGroup);
+      }
+      await apiFetch("/api/admin/assignments", {
+        method: "POST",
+        body: JSON.stringify(body),
+      });
+      const targetLabel = assignTo === "group"
+        ? `group "${groups.find(g => String(g.id) === selectedGroup)?.name}"`
+        : "user";
+      toast({ title: `Module assigned to ${targetLabel}${notifyEmail ? " — email notification sent" : ""}` });
+      setOpen(false);
+      setSelectedUser(""); setSelectedGroup(""); setSelectedModule(""); setDueDate(""); setNotifyEmail(false);
+    } catch {
+      toast({ title: "Failed to assign module", variant: "destructive" });
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
     <div>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogTrigger asChild>
-          <Button variant="outline"><Users className="w-4 h-4 mr-2" /> Assign Module to User</Button>
+          <Button variant="outline"><Users className="w-4 h-4 mr-2" /> Assign Module</Button>
         </DialogTrigger>
-        <DialogContent>
+        <DialogContent className="max-w-md">
           <DialogHeader><DialogTitle>Assign Training Module</DialogTitle></DialogHeader>
           <form onSubmit={handleAssign} className="space-y-4">
-            <FormField label="Student">
-              <Select value={selectedUser} onValueChange={setSelectedUser}>
-                <SelectTrigger><SelectValue placeholder="Select a student..." /></SelectTrigger>
-                <SelectContent>
-                  {users?.filter(u => u.role === "student").map(u => (
-                    <SelectItem key={u.id} value={u.id}>{u.firstName} {u.lastName} ({u.email})</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </FormField>
+            {/* Assign to: User or Group */}
+            <div className="flex rounded-lg border border-input overflow-hidden">
+              <button
+                type="button"
+                className={`flex-1 py-2 text-sm font-medium transition-colors ${assignTo === "user" ? "bg-primary text-primary-foreground" : "bg-background text-muted-foreground hover:bg-muted"}`}
+                onClick={() => setAssignTo("user")}
+              >
+                Individual User
+              </button>
+              <button
+                type="button"
+                className={`flex-1 py-2 text-sm font-medium transition-colors ${assignTo === "group" ? "bg-primary text-primary-foreground" : "bg-background text-muted-foreground hover:bg-muted"}`}
+                onClick={() => setAssignTo("group")}
+              >
+                Group
+              </button>
+            </div>
+
+            {assignTo === "user" ? (
+              <FormField label="Student">
+                <Select value={selectedUser} onValueChange={setSelectedUser}>
+                  <SelectTrigger><SelectValue placeholder="Select a student..." /></SelectTrigger>
+                  <SelectContent>
+                    {users?.filter(u => u.role === "student").map(u => (
+                      <SelectItem key={u.id} value={u.id}>{u.firstName} {u.lastName} ({u.email})</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </FormField>
+            ) : (
+              <FormField label="Group">
+                <Select value={selectedGroup} onValueChange={setSelectedGroup}>
+                  <SelectTrigger><SelectValue placeholder="Select a group..." /></SelectTrigger>
+                  <SelectContent>
+                    {groups.length === 0 ? (
+                      <div className="px-3 py-2 text-sm text-muted-foreground">No groups yet. Create one in Users &amp; Progress.</div>
+                    ) : groups.map(g => (
+                      <SelectItem key={g.id} value={String(g.id)}>
+                        {g.name} ({g.memberCount} member{g.memberCount !== 1 ? "s" : ""})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </FormField>
+            )}
+
             <FormField label="Module">
               <Select value={selectedModule} onValueChange={setSelectedModule}>
                 <SelectTrigger><SelectValue placeholder="Select a module..." /></SelectTrigger>
                 <SelectContent>
-                  {modules?.map(m => (
-                    <SelectItem key={m.id} value={String(m.id)}>{m.title}</SelectItem>
+                  {(modules as any[])?.map((m: any) => (
+                    <SelectItem key={m.id} value={String(m.id)}>
+                      <span className="flex items-center gap-1.5">
+                        {m.isPublic ? <Globe className="w-3 h-3 text-primary" /> : <Lock className="w-3 h-3 text-muted-foreground" />}
+                        {m.title}
+                      </span>
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </FormField>
+
             <FormField label="Due Date (optional)">
               <Input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} />
             </FormField>
-            <Button type="submit" className="w-full">Assign Module</Button>
+
+            {/* Email notification toggle */}
+            <div className="flex items-center gap-3 py-2 border-t border-border">
+              <button
+                type="button"
+                onClick={() => setNotifyEmail(v => !v)}
+                className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${notifyEmail ? "bg-primary" : "bg-muted-foreground/30"}`}
+              >
+                <span className={`pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow transform ring-0 transition-transform ${notifyEmail ? "translate-x-4" : "translate-x-0"}`} />
+              </button>
+              <span className="text-sm flex items-center gap-1.5 text-muted-foreground">
+                <Mail className="w-4 h-4" />
+                {notifyEmail ? "Send email notification to assignee(s)" : "No email notification"}
+              </span>
+            </div>
+
+            <Button type="submit" className="w-full" disabled={submitting}>
+              {submitting ? "Assigning..." : "Assign Module"}
+            </Button>
           </form>
         </DialogContent>
       </Dialog>
@@ -603,9 +749,14 @@ export default function AdminContent() {
           </Card>
         ))}
         {tracks?.length === 0 && (
-          <div className="text-center py-16 border border-dashed rounded-xl bg-muted/10">
-            <p className="text-muted-foreground">No training tracks yet. Create your first one above.</p>
-          </div>
+          <Card className="border-dashed bg-muted/10">
+            <CardContent className="p-12 text-center">
+              <BookOpen className="w-12 h-12 text-muted-foreground/40 mx-auto mb-4" />
+              <h3 className="font-semibold text-lg mb-2">No tracks yet</h3>
+              <p className="text-muted-foreground mb-6 text-sm">Create your first training track to get started.</p>
+              <Button onClick={() => setAddTrackOpen(true)}><Plus className="w-4 h-4 mr-2" /> New Track</Button>
+            </CardContent>
+          </Card>
         )}
       </div>
     </div>

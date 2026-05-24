@@ -1,8 +1,8 @@
 import { Link, useLocation } from "wouter";
 import { useGetMe } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
-import { Show, useClerk } from "@clerk/react";
-import { BookOpen, LayoutDashboard, Settings, Video, ShieldCheck, LogOut, Menu } from "lucide-react";
+import { useClerk } from "@clerk/react";
+import { BookOpen, LayoutDashboard, Settings, Video, ShieldCheck, LogOut, Menu, UserCircle } from "lucide-react";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 
 export function Sidebar() {
@@ -13,10 +13,13 @@ export function Sidebar() {
 
   const isAdmin = user?.role === "admin";
 
+  const isProfileIncomplete = user && (!user.phone || !user.firstName || !user.lastName);
+
   const navItems = [
     { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
     { href: "/tracks", label: "Training Tracks", icon: BookOpen },
     { href: "/queue", label: "My Queue", icon: Video },
+    { href: "/profile", label: "My Profile", icon: UserCircle, badge: isProfileIncomplete ? "!" : undefined },
   ];
 
   const adminItems = [
@@ -53,7 +56,12 @@ export function Sidebar() {
                 }`}
               >
                 <Icon className={`w-5 h-5 ${isActive ? "text-primary" : ""}`} />
-                {item.label}
+                <span className="flex-1">{item.label}</span>
+                {item.badge && (
+                  <span className="text-[10px] font-bold bg-amber-400 text-amber-900 rounded-full w-4 h-4 flex items-center justify-center leading-none">
+                    {item.badge}
+                  </span>
+                )}
               </div>
             </Link>
           );

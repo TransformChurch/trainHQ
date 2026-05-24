@@ -10,6 +10,7 @@ import quizzesRouter from "./quizzes";
 import assignmentsRouter from "./assignments";
 import adminRouter from "./admin";
 import dashboardRouter from "./dashboard";
+import groupsRouter from "./groups";
 
 const router: IRouter = Router();
 
@@ -24,5 +25,6 @@ router.use("/quizzes", quizzesRouter);
 router.use("/assignments", assignmentsRouter);
 router.use("/admin", adminRouter);
 router.use("/dashboard", dashboardRouter);
+router.use("/groups", groupsRouter);
 
 export default router;

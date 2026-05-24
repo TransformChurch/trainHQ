@@ -6,3 +6,4 @@ export * from "./assignments";
 export * from "./watchHistory";
 export * from "./queue";
 export * from "./quizzes";
+export * from "./groups";

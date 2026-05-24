@@ -1,7 +1,8 @@
 import { Router } from "express";
-import { db, tracksTable, modulesTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
-import { requireAuth, requireAdmin } from "../middlewares/requireAuth";
+import { getAuth } from "@clerk/express";
+import { db, tracksTable, modulesTable, assignmentsTable } from "@workspace/db";
+import { eq, inArray } from "drizzle-orm";
+import { requireAuth, requireAdmin, getDbUser } from "../middlewares/requireAuth";
 import { CreateTrackBody, UpdateTrackBody } from "@workspace/api-zod";
 
 const router = Router();
@@ -35,18 +36,33 @@ router.post("/", requireAdmin, async (req, res) => {
 // GET /tracks/:trackId
 router.get("/:trackId", requireAuth, async (req, res) => {
   try {
+    const auth = getAuth(req);
     const trackId = parseInt(req.params.trackId as string);
     const tracks = await db.select().from(tracksTable).where(eq(tracksTable.id, trackId)).limit(1);
     if (!tracks[0]) {
       res.status(404).json({ error: "Not found" });
       return;
     }
-    const modules = await db.select().from(modulesTable).where(eq(modulesTable.trackId, trackId)).orderBy(modulesTable.order);
+
+    const allModules = await db.select().from(modulesTable).where(eq(modulesTable.trackId, trackId)).orderBy(modulesTable.order);
+
+    // Filter private modules: only show if user is admin or has an assignment
+    const dbUser = await getDbUser(auth!.userId!);
+    let visibleModules = allModules;
+    if (dbUser && dbUser.role !== "admin") {
+      const assignments = await db
+        .select({ moduleId: assignmentsTable.moduleId })
+        .from(assignmentsTable)
+        .where(eq(assignmentsTable.userId, dbUser.id));
+      const assignedIds = new Set(assignments.map(a => a.moduleId));
+      visibleModules = allModules.filter(m => m.isPublic || assignedIds.has(m.id));
+    }
+
     const t = tracks[0];
     res.json({
       ...t,
       createdAt: t.createdAt.toISOString(),
-      modules: modules.map(m => ({ ...m, createdAt: m.createdAt.toISOString() })),
+      modules: visibleModules.map(m => ({ ...m, createdAt: m.createdAt.toISOString() })),
     });
   } catch {
     res.status(500).json({ error: "Internal server error" });

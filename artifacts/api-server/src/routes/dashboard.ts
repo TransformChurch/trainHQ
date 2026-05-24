@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { getAuth } from "@clerk/express";
 import { db, assignmentsTable, modulesTable, quizResultsTable, watchHistoryTable, queueTable, videosTable } from "@workspace/db";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, isNull } from "drizzle-orm";
 import { requireAuth, getDbUser } from "../middlewares/requireAuth";
 
 const router = Router();
@@ -43,10 +43,25 @@ router.get("/summary", requireAuth, async (req, res) => {
       assignedBy: row.a.assignedBy,
       assignedAt: row.a.assignedAt.toISOString(),
       dueDate: row.a.dueDate ? row.a.dueDate.toISOString() : null,
+      seenAt: row.a.seenAt ? row.a.seenAt.toISOString() : null,
+      isNew: row.a.seenAt === null,
       quizResult: quizMap.get(row.a.moduleId)
         ? { ...quizMap.get(row.a.moduleId)!, takenAt: quizMap.get(row.a.moduleId)!.takenAt.toISOString() }
         : null,
     }));
+
+    // Mark all unseen assignments as seen (fire and forget)
+    const unseenIds = assignmentRows
+      .filter(row => row.a.seenAt === null)
+      .map(row => row.a.id);
+    if (unseenIds.length > 0) {
+      const now = new Date();
+      Promise.all(
+        unseenIds.map(id =>
+          db.update(assignmentsTable).set({ seenAt: now }).where(eq(assignmentsTable.id, id))
+        )
+      ).catch(() => {});
+    }
 
     const allModules = await db.select().from(modulesTable);
     const completedModuleIds = new Set(quizResults.filter(qr => qr.passed).map(qr => qr.moduleId));

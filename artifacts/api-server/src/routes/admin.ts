@@ -1,11 +1,49 @@
 import { Router } from "express";
 import { getAuth } from "@clerk/express";
-import { db, usersTable, assignmentsTable, modulesTable, quizResultsTable } from "@workspace/db";
+import { db, usersTable, assignmentsTable, modulesTable, quizResultsTable, groupMembersTable } from "@workspace/db";
 import { eq, and } from "drizzle-orm";
 import { requireAdmin, getDbUser } from "../middlewares/requireAuth";
-import { UpdateUserRoleBody, CreateAssignmentBody } from "@workspace/api-zod";
+import { UpdateUserRoleBody } from "@workspace/api-zod";
 
 const router = Router();
+
+async function sendAssignmentEmail(
+  toEmail: string,
+  toName: string,
+  moduleName: string,
+  dueDate: string | null,
+) {
+  const apiKey = process.env.RESEND_API_KEY;
+  if (!apiKey) return;
+  try {
+    const fromAddr = process.env.EMAIL_FROM ?? "onboarding@resend.dev";
+    const dueLine = dueDate
+      ? `<p><strong>Due:</strong> ${new Date(dueDate).toLocaleDateString()}</p>`
+      : "";
+    await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        from: `Transform Church <${fromAddr}>`,
+        to: toEmail,
+        subject: `New Training Module Assigned: ${moduleName}`,
+        html: `
+          <h2>You've been assigned a new training module</h2>
+          <p>Hi ${toName},</p>
+          <p>A new training module has been assigned to you:</p>
+          <p><strong>${moduleName}</strong></p>
+          ${dueLine}
+          <p>Log in to your Transform Church training portal to get started.</p>
+        `,
+      }),
+    });
+  } catch (err) {
+    console.error("Failed to send assignment email:", err);
+  }
+}
 
 // GET /admin/users
 router.get("/users", requireAdmin, async (req, res) => {
@@ -69,9 +107,9 @@ router.patch("/users/:userId/role", requireAdmin, async (req, res) => {
 router.post("/assignments", requireAdmin, async (req, res) => {
   try {
     const auth = getAuth(req);
-    const parsed = CreateAssignmentBody.safeParse(req.body);
-    if (!parsed.success) {
-      res.status(400).json({ error: "Invalid input" });
+    const body = req.body as { userIds?: string[]; groupId?: number; moduleId?: number; dueDate?: string | null; notifyEmail?: boolean };
+    if (!body.moduleId || typeof body.moduleId !== "number") {
+      res.status(400).json({ error: "moduleId is required" });
       return;
     }
     const adminUser = await getDbUser(auth!.userId!);
@@ -80,7 +118,27 @@ router.post("/assignments", requireAdmin, async (req, res) => {
       return;
     }
 
-    const { userIds, moduleId, dueDate } = parsed.data;
+    const moduleId = body.moduleId;
+    const dueDate = body.dueDate ?? null;
+    const notifyEmail = body.notifyEmail ?? false;
+    let userIds: string[] = Array.isArray(body.userIds) ? body.userIds : [];
+
+    // If groupId provided, expand to group members
+    if (body.groupId) {
+      const members = await db
+        .select({ userId: groupMembersTable.userId })
+        .from(groupMembersTable)
+        .where(eq(groupMembersTable.groupId, body.groupId));
+      userIds = [...new Set([...userIds, ...members.map(m => m.userId)])];
+    }
+
+    if (userIds.length === 0) {
+      res.status(400).json({ error: "No users to assign" });
+      return;
+    }
+
+    const mod = await db.select().from(modulesTable).where(eq(modulesTable.id, moduleId)).limit(1);
+    const moduleData = mod[0];
 
     const inserted = [];
     for (const userId of userIds) {
@@ -90,12 +148,12 @@ router.post("/assignments", requireAdmin, async (req, res) => {
         .where(and(eq(assignmentsTable.userId, userId), eq(assignmentsTable.moduleId, moduleId)))
         .limit(1);
       if (existing[0]) {
-        const mods = await db.select().from(modulesTable).where(eq(modulesTable.id, moduleId)).limit(1);
         inserted.push({
           ...existing[0],
           assignedAt: existing[0].assignedAt.toISOString(),
           dueDate: existing[0].dueDate ? existing[0].dueDate.toISOString() : null,
-          module: mods[0] ? { ...mods[0], createdAt: mods[0].createdAt.toISOString() } : null,
+          seenAt: existing[0].seenAt ? existing[0].seenAt.toISOString() : null,
+          module: moduleData ? { ...moduleData, createdAt: moduleData.createdAt.toISOString() } : null,
           quizResult: null,
         });
         continue;
@@ -107,17 +165,31 @@ router.post("/assignments", requireAdmin, async (req, res) => {
         dueDate: dueDate ? new Date(dueDate) : null,
       }).returning();
       const a = rows[0];
-      const mods = await db.select().from(modulesTable).where(eq(modulesTable.id, moduleId)).limit(1);
       inserted.push({
         id: a.id,
         userId: a.userId,
         moduleId: a.moduleId,
-        module: mods[0] ? { ...mods[0], createdAt: mods[0].createdAt.toISOString() } : null,
+        module: moduleData ? { ...moduleData, createdAt: moduleData.createdAt.toISOString() } : null,
         assignedBy: a.assignedBy,
         assignedAt: a.assignedAt.toISOString(),
         dueDate: a.dueDate ? a.dueDate.toISOString() : null,
+        seenAt: null,
         quizResult: null,
       });
+
+      // Send email notification for new assignments
+      if (notifyEmail && moduleData) {
+        const userRows = await db.select().from(usersTable).where(eq(usersTable.id, userId)).limit(1);
+        const user = userRows[0];
+        if (user) {
+          sendAssignmentEmail(
+            user.email,
+            `${user.firstName} ${user.lastName}`,
+            moduleData.title,
+            dueDate ?? null,
+          ).catch(() => {});
+        }
+      }
     }
 
     res.status(201).json(inserted);
@@ -177,6 +249,26 @@ router.get("/progress-matrix", requireAdmin, async (req, res) => {
       modules: modules.map(m => ({ ...m, createdAt: m.createdAt.toISOString() })),
       rows,
     });
+  } catch {
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// PATCH /admin/modules/:moduleId/visibility
+router.patch("/modules/:moduleId/visibility", requireAdmin, async (req, res) => {
+  try {
+    const moduleId = parseInt(req.params.moduleId as string);
+    const { isPublic } = req.body;
+    if (typeof isPublic !== "boolean") {
+      res.status(400).json({ error: "isPublic must be a boolean" });
+      return;
+    }
+    const updated = await db.update(modulesTable).set({ isPublic }).where(eq(modulesTable.id, moduleId)).returning();
+    if (!updated[0]) {
+      res.status(404).json({ error: "Not found" });
+      return;
+    }
+    res.json({ ...updated[0], createdAt: updated[0].createdAt.toISOString() });
   } catch {
     res.status(500).json({ error: "Internal server error" });
   }

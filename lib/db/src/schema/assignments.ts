@@ -11,6 +11,7 @@ export const assignmentsTable = pgTable("assignments", {
   assignedBy: text("assigned_by").notNull(),
   assignedAt: timestamp("assigned_at").notNull().defaultNow(),
   dueDate: timestamp("due_date"),
+  seenAt: timestamp("seen_at"),
 });
 
 export const insertAssignmentSchema = createInsertSchema(assignmentsTable).omit({ id: true, assignedAt: true });

@@ -1,12 +1,14 @@
-import { useGetDashboardSummary } from "@workspace/api-client-react";
+import { useGetDashboardSummary, useGetMe } from "@workspace/api-client-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
-import { BookOpen, Calendar, CheckCircle2, Clock, PlayCircle, Trophy, Video } from "lucide-react";
+import { BookOpen, Calendar, CheckCircle2, Clock, PlayCircle, Sparkles, Trophy, Video } from "lucide-react";
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 
 export default function Dashboard() {
   const { data: summary, isLoading, error } = useGetDashboardSummary();
+  const { data: user } = useGetMe();
 
   if (isLoading) {
     return (
@@ -37,9 +39,12 @@ export default function Dashboard() {
     recentActivity
   } = summary;
 
-  const progressPercent = totalModulesAvailable > 0 
-    ? Math.round((totalModulesCompleted / totalModulesAvailable) * 100) 
+  const progressPercent = totalModulesAvailable > 0
+    ? Math.round((totalModulesCompleted / totalModulesAvailable) * 100)
     : 0;
+
+  const isProfileIncomplete = user && (!user.phone || !user.firstName || !user.lastName);
+  const newAssignmentsCount = assignedModules.filter((a: any) => a.isNew).length;
 
   return (
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -47,6 +52,28 @@ export default function Dashboard() {
         <h1 className="text-3xl font-bold font-serif text-foreground">Welcome Back</h1>
         <p className="text-muted-foreground mt-2">Here's where you left off on your leadership journey.</p>
       </div>
+
+      {/* Incomplete profile banner */}
+      {isProfileIncomplete && (
+        <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-start gap-3">
+            <span className="text-amber-500 mt-0.5">⚠️</span>
+            <div>
+              <p className="font-semibold text-amber-800">Your profile is incomplete</p>
+              <p className="text-sm text-amber-700 mt-0.5">
+                {!user?.firstName || !user?.lastName ? "Add your full name " : ""}
+                {!user?.phone ? "and phone number " : ""}
+                to complete your profile.
+              </p>
+            </div>
+          </div>
+          <Link href="/profile">
+            <Button size="sm" variant="outline" className="border-amber-300 text-amber-800 hover:bg-amber-100 shrink-0">
+              Complete Profile
+            </Button>
+          </Link>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <Card className="bg-primary/5 border-primary/20 shadow-sm">
@@ -102,42 +129,62 @@ export default function Dashboard() {
                 <h2 className="text-xl font-bold flex items-center gap-2">
                   <Calendar className="w-5 h-5 text-primary" />
                   Assigned to You
+                  {newAssignmentsCount > 0 && (
+                    <Badge className="bg-primary text-primary-foreground text-xs">
+                      {newAssignmentsCount} New
+                    </Badge>
+                  )}
                 </h2>
               </div>
               <div className="grid grid-cols-1 gap-4">
-                {assignedModules.map(assignment => (
-                  <Card key={assignment.id} className="border-l-4 border-l-primary overflow-hidden shadow-sm hover:shadow-md transition-shadow">
-                    <div className="p-6 flex flex-col md:flex-row gap-4 justify-between md:items-center">
-                      <div>
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className="text-xs font-semibold uppercase tracking-wider text-primary bg-primary/10 px-2 py-0.5 rounded-full">
-                            Required
-                          </span>
-                          {assignment.dueDate && (
-                            <span className="text-xs text-muted-foreground flex items-center gap-1">
-                              <Clock className="w-3 h-3" /> Due {new Date(assignment.dueDate).toLocaleDateString()}
+                {assignedModules.map((assignment: any) => {
+                  const isNew = assignment.isNew;
+                  return (
+                    <Card
+                      key={assignment.id}
+                      className={`border-l-4 overflow-hidden shadow-sm hover:shadow-md transition-shadow ${
+                        isNew ? "border-l-primary bg-primary/5" : "border-l-primary/40"
+                      }`}
+                    >
+                      <div className="p-6 flex flex-col md:flex-row gap-4 justify-between md:items-center">
+                        <div>
+                          <div className="flex items-center gap-2 mb-1 flex-wrap">
+                            <span className="text-xs font-semibold uppercase tracking-wider text-primary bg-primary/10 px-2 py-0.5 rounded-full">
+                              Required
                             </span>
+                            {isNew && (
+                              <span className="text-xs font-semibold text-white bg-primary px-2 py-0.5 rounded-full flex items-center gap-1">
+                                <Sparkles className="w-3 h-3" /> New
+                              </span>
+                            )}
+                            {assignment.dueDate && (
+                              <span className="text-xs text-muted-foreground flex items-center gap-1">
+                                <Clock className="w-3 h-3" /> Due {new Date(assignment.dueDate).toLocaleDateString()}
+                              </span>
+                            )}
+                          </div>
+                          <h3 className="text-lg font-bold">{assignment.module.title}</h3>
+                          <p className="text-sm text-muted-foreground line-clamp-1 mt-1">
+                            {assignment.module.description}
+                          </p>
+                        </div>
+                        <div className="flex-shrink-0">
+                          {assignment.quizResult?.passed ? (
+                            <div className="flex items-center gap-2 text-green-600 font-medium">
+                              <CheckCircle2 className="w-5 h-5" /> Completed
+                            </div>
+                          ) : (
+                            <Link href={`/modules/${assignment.moduleId}`}>
+                              <Button className={isNew ? "" : "variant-outline"}>
+                                {isNew ? "Start Now" : "Start Module"}
+                              </Button>
+                            </Link>
                           )}
                         </div>
-                        <h3 className="text-lg font-bold">{assignment.module.title}</h3>
-                        <p className="text-sm text-muted-foreground line-clamp-1 mt-1">
-                          {assignment.module.description}
-                        </p>
                       </div>
-                      <div className="flex-shrink-0">
-                        {assignment.quizResult?.passed ? (
-                          <div className="flex items-center gap-2 text-green-600 font-medium">
-                            <CheckCircle2 className="w-5 h-5" /> Completed
-                          </div>
-                        ) : (
-                          <Link href={`/modules/${assignment.moduleId}`}>
-                            <Button>Start Module</Button>
-                          </Link>
-                        )}
-                      </div>
-                    </div>
-                  </Card>
-                ))}
+                    </Card>
+                  );
+                })}
               </div>
             </div>
           )}
@@ -152,10 +199,10 @@ export default function Dashboard() {
                 <Button variant="ghost" size="sm">Browse all tracks</Button>
               </Link>
             </div>
-            
+
             {recentActivity.length > 0 ? (
               <div className="space-y-3">
-                {recentActivity.slice(0, 3).map(activity => (
+                {recentActivity.slice(0, 3).map((activity: any) => (
                   <Card key={activity.id} className="hover:bg-muted/30 transition-colors shadow-sm">
                     <div className="p-4 flex items-center gap-4">
                       <div className="relative w-24 h-16 rounded overflow-hidden bg-muted flex-shrink-0">
