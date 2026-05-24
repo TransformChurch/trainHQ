@@ -7,6 +7,7 @@ import { useToast } from "@/hooks/use-toast";
 import { CheckCircle2, XCircle, MinusCircle, Shield } from "lucide-react";
 import { useState } from "react";
 import { Input } from "@/components/ui/input";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 export default function AdminUsers() {
   const { data: users, isLoading: usersLoading } = useAdminListUsers();
@@ -14,16 +15,13 @@ export default function AdminUsers() {
   const { mutate: updateRole } = useUpdateUserRole();
   const queryClient = useQueryClient();
   const { toast } = useToast();
-  
+
   const [search, setSearch] = useState("");
 
   if (usersLoading || matrixLoading) return <div className="p-8 text-center">Loading user data...</div>;
 
   const handleRoleChange = (userId: string, newRole: "student" | "admin") => {
-    updateRole({
-      userId,
-      data: { role: newRole }
-    }, {
+    updateRole({ userId, data: { role: newRole } }, {
       onSuccess: () => {
         toast({ title: "Role updated successfully" });
         queryClient.invalidateQueries({ queryKey: getAdminListUsersQueryKey() });
@@ -31,7 +29,7 @@ export default function AdminUsers() {
     });
   };
 
-  const filteredRows = matrix?.rows.filter(row => 
+  const filteredRows = matrix?.rows.filter(row =>
     `${row.user.firstName} ${row.user.lastName} ${row.user.email}`.toLowerCase().includes(search.toLowerCase())
   );
 
@@ -46,8 +44,8 @@ export default function AdminUsers() {
         <CardHeader className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b pb-4">
           <CardTitle>Progress Matrix</CardTitle>
           <div className="w-full sm:w-72">
-            <Input 
-              placeholder="Search users..." 
+            <Input
+              placeholder="Search users..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
@@ -59,7 +57,7 @@ export default function AdminUsers() {
               <TableRow>
                 <TableHead className="w-[250px]">User / Role</TableHead>
                 {matrix?.modules.map(mod => (
-                  <TableHead key={mod.id} className="text-center min-w-[120px] max-w-[150px]">
+                  <TableHead key={mod.id} className="text-center min-w-[130px] max-w-[160px]">
                     <div className="truncate text-xs" title={mod.title}>{mod.title}</div>
                   </TableHead>
                 ))}
@@ -71,9 +69,9 @@ export default function AdminUsers() {
                   <TableCell>
                     <div className="font-medium">{row.user.firstName} {row.user.lastName}</div>
                     <div className="text-xs text-muted-foreground mb-2">{row.user.email}</div>
-                    <Select 
-                      defaultValue={row.user.role} 
-                      onValueChange={(val) => handleRoleChange(row.user.id, val as any)}
+                    <Select
+                      defaultValue={row.user.role}
+                      onValueChange={(val) => handleRoleChange(row.user.id, val as "student" | "admin")}
                     >
                       <SelectTrigger className="h-7 text-xs w-[120px]">
                         <SelectValue />
@@ -81,37 +79,49 @@ export default function AdminUsers() {
                       <SelectContent>
                         <SelectItem value="student">Student</SelectItem>
                         <SelectItem value="admin">
-                          <div className="flex items-center"><Shield className="w-3 h-3 mr-1 text-primary"/> Admin</div>
+                          <div className="flex items-center"><Shield className="w-3 h-3 mr-1 text-primary" /> Admin</div>
                         </SelectItem>
                       </SelectContent>
                     </Select>
                   </TableCell>
                   {matrix?.modules.map(mod => {
                     const result = row.results.find(r => r.moduleId === mod.id);
+                    const pct = result?.score != null && result?.totalQuestions
+                      ? Math.round((result.score / result.totalQuestions) * 100)
+                      : null;
+                    const attempts = (result as any)?.attempts ?? null;
                     return (
                       <TableCell key={mod.id} className="text-center">
                         {result?.passed === true ? (
-                          <div className="flex flex-col items-center gap-1 text-green-600">
-                            <CheckCircle2 className="w-5 h-5" />
-                            <span className="text-[10px] font-medium">
-                              {result.score != null && result.totalQuestions
-                                ? Math.round((result.score / result.totalQuestions) * 100)
-                                : 0}%
-                            </span>
-                          </div>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <div className="flex flex-col items-center gap-0.5 text-green-600 cursor-default">
+                                <CheckCircle2 className="w-5 h-5" />
+                                <span className="text-[10px] font-medium">{pct ?? 0}%</span>
+                                {attempts != null && (
+                                  <span className="text-[9px] text-muted-foreground">{attempts} attempt{attempts !== 1 ? "s" : ""}</span>
+                                )}
+                              </div>
+                            </TooltipTrigger>
+                            <TooltipContent>Passed — {pct ?? 0}% in {attempts ?? 1} attempt{attempts !== 1 ? "s" : ""}</TooltipContent>
+                          </Tooltip>
                         ) : result?.passed === false ? (
-                          <div className="flex flex-col items-center gap-1 text-destructive">
-                            <XCircle className="w-5 h-5" />
-                            <span className="text-[10px] font-medium">
-                              {result.score != null && result.totalQuestions
-                                ? Math.round((result.score / result.totalQuestions) * 100)
-                                : 0}%
-                            </span>
-                          </div>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <div className="flex flex-col items-center gap-0.5 text-destructive cursor-default">
+                                <XCircle className="w-5 h-5" />
+                                <span className="text-[10px] font-medium">{pct ?? 0}%</span>
+                                {attempts != null && (
+                                  <span className="text-[9px] text-muted-foreground">{attempts} attempt{attempts !== 1 ? "s" : ""}</span>
+                                )}
+                              </div>
+                            </TooltipTrigger>
+                            <TooltipContent>Failed — {pct ?? 0}% after {attempts ?? 1} attempt{attempts !== 1 ? "s" : ""}</TooltipContent>
+                          </Tooltip>
                         ) : (
                           <div className="flex flex-col items-center gap-1 text-muted-foreground/30">
                             <MinusCircle className="w-5 h-5" />
-                            <span className="text-[10px]">-</span>
+                            <span className="text-[10px]">—</span>
                           </div>
                         )}
                       </TableCell>

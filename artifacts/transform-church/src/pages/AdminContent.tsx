@@ -23,8 +23,9 @@ import {
 import {
   Accordion, AccordionContent, AccordionItem, AccordionTrigger,
 } from "@/components/ui/accordion";
-import { Plus, Trash2, Video, BookOpen, HelpCircle, Users, ChevronRight } from "lucide-react";
+import { Plus, Trash2, Video, BookOpen, HelpCircle, Users, Pencil } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import type { Video as VideoType, QuizQuestion } from "@workspace/api-client-react";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -34,6 +35,163 @@ function FormField({ label, children }: { label: string; children: React.ReactNo
       <Label>{label}</Label>
       {children}
     </div>
+  );
+}
+
+const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
+async function apiFetch(path: string, opts?: RequestInit) {
+  const res = await fetch(`${BASE}${path}`, {
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    ...opts,
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res;
+}
+
+// ── Edit Video Dialog ─────────────────────────────────────────────────────────
+
+function EditVideoDialog({ video, moduleId, onSaved }: { video: VideoType; moduleId: number; onSaved: () => void }) {
+  const { toast } = useToast();
+  const { mutate: updateVideo } = useUpdateVideo();
+  const [open, setOpen] = useState(false);
+  const [title, setTitle] = useState(video.title);
+  const [url, setUrl] = useState(video.url);
+  const [desc, setDesc] = useState(video.description ?? "");
+  const [duration, setDuration] = useState(video.durationSeconds ? String(video.durationSeconds) : "");
+  const [order, setOrder] = useState(String(video.order));
+
+  const handleSave = (e: React.FormEvent) => {
+    e.preventDefault();
+    updateVideo({
+      videoId: video.id,
+      data: {
+        title,
+        url,
+        description: desc || null,
+        durationSeconds: duration ? parseInt(duration) : null,
+        order: parseInt(order),
+      },
+    }, {
+      onSuccess: () => {
+        toast({ title: "Video updated" });
+        setOpen(false);
+        onSaved();
+      },
+      onError: () => toast({ title: "Failed to update video", variant: "destructive" }),
+    });
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => {
+      setOpen(v);
+      if (v) { setTitle(video.title); setUrl(video.url); setDesc(video.description ?? ""); setDuration(video.durationSeconds ? String(video.durationSeconds) : ""); setOrder(String(video.order)); }
+    }}>
+      <DialogTrigger asChild>
+        <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" title="Edit video">
+          <Pencil className="w-3 h-3" />
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader><DialogTitle>Edit Video</DialogTitle></DialogHeader>
+        <form onSubmit={handleSave} className="space-y-4">
+          <FormField label="Title"><Input value={title} onChange={e => setTitle(e.target.value)} required /></FormField>
+          <FormField label="Embed URL (YouTube/Vimeo)"><Input value={url} onChange={e => setUrl(e.target.value)} required /></FormField>
+          <FormField label="Description"><Textarea value={desc} onChange={e => setDesc(e.target.value)} rows={2} /></FormField>
+          <div className="grid grid-cols-2 gap-3">
+            <FormField label="Duration (seconds)"><Input type="number" value={duration} onChange={e => setDuration(e.target.value)} placeholder="600" /></FormField>
+            <FormField label="Order"><Input type="number" value={order} onChange={e => setOrder(e.target.value)} min="1" /></FormField>
+          </div>
+          <Button type="submit" className="w-full">Save Changes</Button>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ── Edit Question Dialog ──────────────────────────────────────────────────────
+
+function EditQuestionDialog({ question, moduleId, onSaved }: { question: QuizQuestion; moduleId: number; onSaved: () => void }) {
+  const { toast } = useToast();
+  const [open, setOpen] = useState(false);
+  const [qText, setQText] = useState(question.questionText);
+  const [options, setOptions] = useState<string[]>(question.options.length >= 2 ? [...question.options] : [...question.options, "", "", ""]);
+  const [correctIndex, setCorrectIndex] = useState(String(question.correctIndex ?? 0));
+  const [order, setOrder] = useState(String(question.order));
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const filledOptions = options.filter(o => o.trim());
+    if (filledOptions.length < 2) {
+      toast({ title: "Provide at least 2 options", variant: "destructive" }); return;
+    }
+    setSaving(true);
+    try {
+      await apiFetch(`/api/quizzes/questions/${question.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          questionText: qText,
+          options: filledOptions,
+          correctIndex: parseInt(correctIndex),
+          order: parseInt(order),
+        }),
+      });
+      toast({ title: "Question updated" });
+      setOpen(false);
+      onSaved();
+    } catch {
+      toast({ title: "Failed to update question", variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const syncState = () => {
+    setQText(question.questionText);
+    const padded = [...question.options];
+    while (padded.length < 4) padded.push("");
+    setOptions(padded);
+    setCorrectIndex(String(question.correctIndex ?? 0));
+    setOrder(String(question.order));
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (v) syncState(); }}>
+      <DialogTrigger asChild>
+        <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" title="Edit question">
+          <Pencil className="w-3 h-3" />
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="max-w-lg">
+        <DialogHeader><DialogTitle>Edit Quiz Question</DialogTitle></DialogHeader>
+        <form onSubmit={handleSave} className="space-y-4">
+          <FormField label="Question"><Textarea value={qText} onChange={e => setQText(e.target.value)} rows={2} required /></FormField>
+          <div className="space-y-2">
+            <Label>Answer Options (select correct)</Label>
+            {options.map((opt, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <input
+                  type="radio" name="correct-edit" value={i}
+                  checked={correctIndex === String(i)}
+                  onChange={() => setCorrectIndex(String(i))}
+                  className="accent-primary"
+                  title={`Mark option ${i + 1} as correct`}
+                />
+                <Input
+                  value={opt}
+                  placeholder={`Option ${i + 1}`}
+                  onChange={e => { const n = [...options]; n[i] = e.target.value; setOptions(n); }}
+                />
+              </div>
+            ))}
+            <p className="text-xs text-muted-foreground">Select the radio button next to the correct answer.</p>
+          </div>
+          <FormField label="Order"><Input type="number" value={order} onChange={e => setOrder(e.target.value)} min="1" /></FormField>
+          <Button type="submit" className="w-full" disabled={saving}>{saving ? "Saving..." : "Save Changes"}</Button>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -154,6 +312,8 @@ function VideoManager({ moduleId }: { moduleId: number }) {
     });
   };
 
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: getListVideosQueryKey({ moduleId }) });
+
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
@@ -181,15 +341,18 @@ function VideoManager({ moduleId }: { moduleId: number }) {
       </div>
       {videos?.sort((a, b) => a.order - b.order).map(v => (
         <div key={v.id} className="flex items-center justify-between bg-muted/30 rounded px-3 py-2">
-          <span className="text-sm truncate max-w-[80%]">{v.order}. {v.title}</span>
-          <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive hover:text-destructive shrink-0"
-            onClick={() => deleteVideo({ videoId: v.id }, { onSuccess: () => {
-              toast({ title: "Video removed" });
-              queryClient.invalidateQueries({ queryKey: getListVideosQueryKey({ moduleId }) });
-            }})}
-          >
-            <Trash2 className="w-3 h-3" />
-          </Button>
+          <span className="text-sm truncate max-w-[70%]">{v.order}. {v.title}</span>
+          <div className="flex items-center gap-1 shrink-0">
+            <EditVideoDialog video={v} moduleId={moduleId} onSaved={invalidate} />
+            <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive hover:text-destructive"
+              onClick={() => deleteVideo({ videoId: v.id }, { onSuccess: () => {
+                toast({ title: "Video removed" });
+                invalidate();
+              }})}
+            >
+              <Trash2 className="w-3 h-3" />
+            </Button>
+          </div>
         </div>
       ))}
     </div>
@@ -228,6 +391,8 @@ function QuizManager({ moduleId }: { moduleId: number }) {
       },
     });
   };
+
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: getGetQuizQueryKey(moduleId) });
 
   return (
     <div className="space-y-2">
@@ -270,15 +435,18 @@ function QuizManager({ moduleId }: { moduleId: number }) {
       </div>
       {questions?.map((q, i) => (
         <div key={q.id} className="flex items-start justify-between bg-muted/30 rounded px-3 py-2 gap-2">
-          <span className="text-xs truncate max-w-[80%]">{i + 1}. {q.questionText}</span>
-          <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive hover:text-destructive shrink-0"
-            onClick={() => deleteQuestion({ questionId: q.id }, { onSuccess: () => {
-              toast({ title: "Question removed" });
-              queryClient.invalidateQueries({ queryKey: getGetQuizQueryKey(moduleId) });
-            }})}
-          >
-            <Trash2 className="w-3 h-3" />
-          </Button>
+          <span className="text-xs truncate max-w-[75%]">{i + 1}. {q.questionText}</span>
+          <div className="flex items-center gap-1 shrink-0">
+            <EditQuestionDialog question={q} moduleId={moduleId} onSaved={invalidate} />
+            <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive hover:text-destructive"
+              onClick={() => deleteQuestion({ questionId: q.id }, { onSuccess: () => {
+                toast({ title: "Question removed" });
+                invalidate();
+              }})}
+            >
+              <Trash2 className="w-3 h-3" />
+            </Button>
+          </div>
         </div>
       ))}
     </div>

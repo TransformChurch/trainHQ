@@ -20,6 +20,7 @@ export const quizResultsTable = pgTable("quiz_results", {
   score: integer("score").notNull(),
   totalQuestions: integer("total_questions").notNull(),
   passed: boolean("passed").notNull(),
+  attempts: integer("attempts").notNull().default(1),
   takenAt: timestamp("taken_at").notNull().defaultNow(),
 });
 

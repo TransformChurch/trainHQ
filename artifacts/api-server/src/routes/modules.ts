@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { getAuth } from "@clerk/express";
 import { db, modulesTable, videosTable, watchHistoryTable, quizResultsTable, queueTable, quizQuestionsTable } from "@workspace/db";
-import { eq, and } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 import { requireAuth, requireAdmin, getDbUser } from "../middlewares/requireAuth";
 import { CreateModuleBody, UpdateModuleBody, CreateQuizQuestionBody, SubmitQuizBody } from "@workspace/api-zod";
 
@@ -69,7 +69,15 @@ router.get("/:moduleId", requireAuth, async (req, res) => {
 
     const watchMap = new Map(watchHistory.map(w => [w.videoId, w]));
     const queueMap = new Set(queueItems.map(q => q.videoId));
-    const quizUnlocked = videos.length === 0 || videos.every(v => watchMap.get(v.id)?.completed);
+
+    const anyNeedsReview = videos.some(v => watchMap.get(v.id)?.needsReview === true);
+    const allCompleted = videos.length === 0 || videos.every(v => watchMap.get(v.id)?.completed);
+    const quizUnlocked = allCompleted && !anyNeedsReview;
+    const lockedReason = !allCompleted
+      ? "complete_videos"
+      : anyNeedsReview
+      ? "needs_review"
+      : null;
 
     res.json({
       ...mod,
@@ -81,6 +89,7 @@ router.get("/:moduleId", requireAuth, async (req, res) => {
           createdAt: v.createdAt.toISOString(),
           progressPercent: wh?.progressPercent ?? null,
           completed: wh?.completed ?? false,
+          needsReview: wh?.needsReview ?? false,
           inQueue: queueMap.has(v.id),
         };
       }),
@@ -88,6 +97,7 @@ router.get("/:moduleId", requireAuth, async (req, res) => {
         ? { ...quizResult, takenAt: quizResult.takenAt.toISOString() }
         : null,
       quizUnlocked,
+      lockedReason,
     });
   } catch {
     res.status(500).json({ error: "Internal server error" });
@@ -135,7 +145,6 @@ router.get("/:moduleId/quiz", requireAuth, async (req, res) => {
       .from(quizQuestionsTable)
       .where(eq(quizQuestionsTable.moduleId, moduleId))
       .orderBy(quizQuestionsTable.order);
-    // Strip the correct answer index so students cannot trivially read answers from the network
     res.json(questions.map(({ correctIndex: _answer, ...safe }) => safe));
   } catch {
     res.status(500).json({ error: "Internal server error" });
@@ -175,17 +184,23 @@ router.post("/:moduleId/quiz/submit", requireAuth, async (req, res) => {
       return;
     }
 
-    // Check quiz is unlocked (all videos completed)
+    // Check quiz is unlocked (all videos completed, none needsReview)
     const videos = await db.select().from(videosTable).where(eq(videosTable.moduleId, moduleId));
     const watchHistory = await db
       .select()
       .from(watchHistoryTable)
       .where(eq(watchHistoryTable.userId, dbUser.id));
     const watchMap = new Map(watchHistory.map(w => [w.videoId, w]));
+
     const allCompleted = videos.length === 0 || videos.every(v => watchMap.get(v.id)?.completed);
+    const anyNeedsReview = videos.some(v => watchMap.get(v.id)?.needsReview === true);
 
     if (!allCompleted && videos.length > 0) {
       res.status(400).json({ error: "Complete all videos before taking the quiz" });
+      return;
+    }
+    if (anyNeedsReview) {
+      res.status(400).json({ error: "Re-watch all videos marked 'Needs Review' before retaking the quiz" });
       return;
     }
 
@@ -202,7 +217,7 @@ router.post("/:moduleId/quiz/submit", requireAuth, async (req, res) => {
     const totalQuestions = questions.length;
     const passed = totalQuestions > 0 && (score / totalQuestions) >= 0.8;
 
-    // Save result (upsert)
+    // Save result (upsert, incrementing attempts)
     const existing = await db
       .select()
       .from(quizResultsTable)
@@ -213,16 +228,35 @@ router.post("/:moduleId/quiz/submit", requireAuth, async (req, res) => {
     if (existing[0]) {
       const updated = await db
         .update(quizResultsTable)
-        .set({ score, totalQuestions, passed, takenAt: new Date() })
+        .set({
+          score,
+          totalQuestions,
+          passed,
+          takenAt: new Date(),
+          attempts: sql`${quizResultsTable.attempts} + 1`,
+        })
         .where(and(eq(quizResultsTable.userId, dbUser.id), eq(quizResultsTable.moduleId, moduleId)))
         .returning();
       result = updated[0];
     } else {
       const inserted = await db
         .insert(quizResultsTable)
-        .values({ userId: dbUser.id, moduleId, score, totalQuestions, passed })
+        .values({ userId: dbUser.id, moduleId, score, totalQuestions, passed, attempts: 1 })
         .returning();
       result = inserted[0];
+    }
+
+    // If quiz failed: mark all completed videos in this module as needsReview
+    if (!passed && videos.length > 0) {
+      for (const video of videos) {
+        const wh = watchMap.get(video.id);
+        if (wh?.completed) {
+          await db
+            .update(watchHistoryTable)
+            .set({ needsReview: true })
+            .where(and(eq(watchHistoryTable.userId, dbUser.id), eq(watchHistoryTable.videoId, video.id)));
+        }
+      }
     }
 
     res.json({ ...result, takenAt: result.takenAt.toISOString() });

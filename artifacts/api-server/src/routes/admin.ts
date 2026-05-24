@@ -168,6 +168,7 @@ router.get("/progress-matrix", requireAdmin, async (req, res) => {
           passed: result?.passed ?? null,
           score: result?.score ?? null,
           totalQuestions: result?.totalQuestions ?? null,
+          attempts: result?.attempts ?? null,
         };
       }),
     }));

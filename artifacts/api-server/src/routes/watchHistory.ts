@@ -7,6 +7,19 @@ import { UpsertWatchProgressBody } from "@workspace/api-zod";
 
 const router = Router();
 
+function formatWatchHistoryEntry(wh: typeof watchHistoryTable.$inferSelect, video?: typeof videosTable.$inferSelect | null) {
+  return {
+    id: wh.id,
+    userId: wh.userId,
+    videoId: wh.videoId,
+    video: video ? { ...video, createdAt: video.createdAt.toISOString() } : null,
+    progressPercent: wh.progressPercent,
+    completed: wh.completed,
+    needsReview: wh.needsReview,
+    lastWatchedAt: wh.lastWatchedAt.toISOString(),
+  };
+}
+
 // GET /watch-history
 router.get("/", requireAuth, async (req, res) => {
   try {
@@ -17,30 +30,19 @@ router.get("/", requireAuth, async (req, res) => {
       return;
     }
     const history = await db
-      .select({
-        wh: watchHistoryTable,
-        video: videosTable,
-      })
+      .select({ wh: watchHistoryTable, video: videosTable })
       .from(watchHistoryTable)
       .innerJoin(videosTable, eq(watchHistoryTable.videoId, videosTable.id))
       .where(eq(watchHistoryTable.userId, dbUser.id))
       .orderBy(desc(watchHistoryTable.lastWatchedAt));
 
-    res.json(history.map(row => ({
-      id: row.wh.id,
-      userId: row.wh.userId,
-      videoId: row.wh.videoId,
-      video: { ...row.video, createdAt: row.video.createdAt.toISOString() },
-      progressPercent: row.wh.progressPercent,
-      completed: row.wh.completed,
-      lastWatchedAt: row.wh.lastWatchedAt.toISOString(),
-    })));
+    res.json(history.map(row => formatWatchHistoryEntry(row.wh, row.video)));
   } catch {
     res.status(500).json({ error: "Internal server error" });
   }
 });
 
-// PUT /watch-history/:videoId
+// PUT /watch-history/:videoId — update progress; completing clears needsReview
 router.put("/:videoId", requireAuth, async (req, res) => {
   try {
     const auth = getAuth(req);
@@ -65,34 +67,32 @@ router.put("/:videoId", requireAuth, async (req, res) => {
       .where(and(eq(watchHistoryTable.userId, dbUser.id), eq(watchHistoryTable.videoId, videoId)))
       .limit(1);
 
+    // When a video is (re-)completed, clear the needsReview flag so the quiz can unlock again
+    const clearNeedsReview = isCompleted;
+
     let wh;
     if (existing[0]) {
       const updated = await db
         .update(watchHistoryTable)
-        .set({ progressPercent, completed: isCompleted, lastWatchedAt: new Date() })
+        .set({
+          progressPercent,
+          completed: isCompleted,
+          lastWatchedAt: new Date(),
+          ...(clearNeedsReview ? { needsReview: false } : {}),
+        })
         .where(and(eq(watchHistoryTable.userId, dbUser.id), eq(watchHistoryTable.videoId, videoId)))
         .returning();
       wh = updated[0];
     } else {
       const inserted = await db
         .insert(watchHistoryTable)
-        .values({ userId: dbUser.id, videoId, progressPercent, completed: isCompleted })
+        .values({ userId: dbUser.id, videoId, progressPercent, completed: isCompleted, needsReview: false })
         .returning();
       wh = inserted[0];
     }
 
     const videos = await db.select().from(videosTable).where(eq(videosTable.id, videoId)).limit(1);
-    const video = videos[0];
-
-    res.json({
-      id: wh.id,
-      userId: wh.userId,
-      videoId: wh.videoId,
-      video: video ? { ...video, createdAt: video.createdAt.toISOString() } : null,
-      progressPercent: wh.progressPercent,
-      completed: wh.completed,
-      lastWatchedAt: wh.lastWatchedAt.toISOString(),
-    });
+    res.json(formatWatchHistoryEntry(wh, videos[0] ?? null));
   } catch {
     res.status(500).json({ error: "Internal server error" });
   }

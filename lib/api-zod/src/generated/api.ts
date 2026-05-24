@@ -557,6 +557,21 @@ export const GetQuizResultResponse = zod.object({
 
 
 /**
+ * @summary Update a quiz question (admin only)
+ */
+export const UpdateQuizQuestionParams = zod.object({
+  "questionId": zod.coerce.number()
+})
+
+export const UpdateQuizQuestionBody = zod.object({
+  "questionText": zod.string().min(1).optional(),
+  "options": zod.array(zod.string()).min(2).optional(),
+  "correctIndex": zod.number().int().min(0).optional(),
+  "order": zod.number().int().min(0).optional()
+})
+
+
+/**
  * @summary Delete a quiz question (admin only)
  */
 export const DeleteQuizQuestionParams = zod.object({

@@ -3,9 +3,10 @@ import { useParams, Link } from "wouter";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { ArrowLeft, CheckCircle2, PlayCircle, Lock, Trophy } from "lucide-react";
+import { ArrowLeft, CheckCircle2, PlayCircle, Lock, Trophy, XCircle, AlertTriangle, RefreshCw } from "lucide-react";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
 import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 
@@ -27,6 +28,7 @@ export default function ModuleDetail() {
   const { toast } = useToast();
 
   const [answers, setAnswers] = useState<Record<number, number>>({});
+  const [justSubmitted, setJustSubmitted] = useState(false);
 
   if (isLoading) {
     return <div className="p-8 text-center animate-pulse h-8 bg-muted w-1/3 mx-auto rounded"></div>;
@@ -42,7 +44,7 @@ export default function ModuleDetail() {
       questionId: Number(qId),
       selectedIndex: index
     }));
-    
+
     if (submissionAnswers.length < quiz.length) {
       toast({
         title: "Incomplete Quiz",
@@ -52,14 +54,21 @@ export default function ModuleDetail() {
       return;
     }
 
-    submitQuiz({
-      moduleId,
-      data: { answers: submissionAnswers }
-    }, {
-      onSuccess: () => {
-        toast({ title: "Quiz submitted successfully!" });
+    submitQuiz({ moduleId, data: { answers: submissionAnswers } }, {
+      onSuccess: (result) => {
+        setJustSubmitted(true);
+        setAnswers({});
         queryClient.invalidateQueries({ queryKey: getGetQuizResultQueryKey(moduleId) });
         queryClient.invalidateQueries({ queryKey: getGetModuleQueryKey(moduleId) });
+        if (result.passed) {
+          toast({ title: "Knowledge Check Passed!", description: "Great work — module complete." });
+        } else {
+          toast({
+            title: "Knowledge Check Failed",
+            description: "Re-watch the videos marked 'Needs Review', then try again.",
+            variant: "destructive"
+          });
+        }
       },
       onError: () => {
         toast({ title: "Error submitting quiz", variant: "destructive" });
@@ -67,10 +76,15 @@ export default function ModuleDetail() {
     });
   };
 
-  const isQuizPassed = quizResult?.passed || moduleData.quizResult?.passed;
-  const rawScore = quizResult?.score ?? moduleData.quizResult?.score;
-  const totalQ = quizResult?.totalQuestions ?? moduleData.quizResult?.totalQuestions ?? 0;
-  const bestScore = rawScore != null && totalQ > 0 ? Math.round((rawScore / totalQ) * 100) : null;
+  const latestResult = quizResult ?? moduleData.quizResult ?? null;
+  const isQuizPassed = latestResult?.passed === true;
+  const rawScore = latestResult?.score;
+  const totalQ = latestResult?.totalQuestions ?? 0;
+  const scorePercent = rawScore != null && totalQ > 0 ? Math.round((rawScore / totalQ) * 100) : null;
+  const attempts = (latestResult as any)?.attempts ?? null;
+
+  const lockedReason = (moduleData as any).lockedReason as string | null;
+  const anyNeedsReview = moduleData.videos?.some((v: any) => v.needsReview);
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
@@ -80,24 +94,34 @@ export default function ModuleDetail() {
         </Link>
         <h1 className="text-3xl md:text-4xl font-bold font-serif text-foreground">{moduleData.title}</h1>
         <p className="text-lg text-muted-foreground mt-2">{moduleData.description}</p>
+        {anyNeedsReview && (
+          <div className="mt-4 flex items-center gap-2 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3">
+            <AlertTriangle className="w-4 h-4 shrink-0" />
+            <span>Some videos are marked <strong>Needs Review</strong>. Re-watch them to unlock the knowledge check again.</span>
+          </div>
+        )}
       </div>
 
+      {/* Video list */}
       <div className="grid grid-cols-1 gap-4">
-        {moduleData.videos?.sort((a, b) => a.order - b.order).map((video, idx) => (
-          <Card key={video.id} className="p-4 hover:border-primary/50 transition-colors">
+        {moduleData.videos?.sort((a: any, b: any) => a.order - b.order).map((video: any, idx: number) => (
+          <Card key={video.id} className={`p-4 transition-colors ${video.needsReview ? "border-amber-300 bg-amber-50/30" : "hover:border-primary/50"}`}>
             <div className="flex flex-col md:flex-row gap-4 items-start md:items-center justify-between">
               <div className="flex gap-4 items-center">
                 <div className="w-12 h-12 rounded bg-muted flex items-center justify-center shrink-0">
-                  {video.thumbnailUrl ? (
-                    <img src={video.thumbnailUrl} alt={video.title} className="w-full h-full object-cover rounded" />
-                  ) : (
-                    <PlayCircle className="w-6 h-6 text-muted-foreground" />
-                  )}
+                  <PlayCircle className="w-6 h-6 text-muted-foreground" />
                 </div>
                 <div>
-                  <h3 className="font-bold">Part {idx + 1}: {video.title}</h3>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="font-bold">Part {idx + 1}: {video.title}</h3>
+                    {video.needsReview && (
+                      <Badge variant="outline" className="border-amber-400 text-amber-700 bg-amber-50 gap-1 text-xs">
+                        <RefreshCw className="w-2.5 h-2.5" /> Needs Review
+                      </Badge>
+                    )}
+                  </div>
                   <div className="flex items-center gap-2 mt-1">
-                    {video.completed ? (
+                    {video.completed && !video.needsReview ? (
                       <span className="text-xs text-green-600 font-medium flex items-center gap-1">
                         <CheckCircle2 className="w-3 h-3" /> Completed
                       </span>
@@ -110,8 +134,11 @@ export default function ModuleDetail() {
                 </div>
               </div>
               <Link href={`/watch/${video.id}`} className="w-full md:w-auto mt-4 md:mt-0">
-                <Button variant={video.completed ? "outline" : "default"} className="w-full md:w-auto">
-                  {video.completed ? "Watch Again" : video.progressPercent ? "Resume" : "Start Video"}
+                <Button
+                  variant={video.needsReview ? "default" : video.completed ? "outline" : "default"}
+                  className={`w-full md:w-auto ${video.needsReview ? "bg-amber-500 hover:bg-amber-600 text-white" : ""}`}
+                >
+                  {video.needsReview ? "Re-watch" : video.completed ? "Watch Again" : video.progressPercent ? "Resume" : "Start Video"}
                 </Button>
               </Link>
             </div>
@@ -119,50 +146,63 @@ export default function ModuleDetail() {
         ))}
       </div>
 
+      {/* Knowledge check */}
       <div className="pt-8 border-t border-border">
         <h2 className="text-2xl font-bold mb-6 flex items-center gap-2">
           Knowledge Check
           {!moduleData.quizUnlocked && <Lock className="w-5 h-5 text-muted-foreground" />}
         </h2>
 
+        {/* Last result banner (always shown if a result exists) */}
+        {latestResult && !justSubmitted && (
+          <div className={`mb-6 flex items-center gap-4 rounded-xl border px-6 py-4 ${
+            isQuizPassed
+              ? "bg-green-50 border-green-200 dark:bg-green-900/20 dark:border-green-800"
+              : "bg-red-50 border-red-200 dark:bg-red-900/20 dark:border-red-800"
+          }`}>
+            {isQuizPassed
+              ? <Trophy className="w-8 h-8 text-green-600 dark:text-green-400 shrink-0" />
+              : <XCircle className="w-8 h-8 text-red-500 dark:text-red-400 shrink-0" />
+            }
+            <div>
+              <h3 className={`font-bold ${isQuizPassed ? "text-green-800 dark:text-green-300" : "text-red-700 dark:text-red-300"}`}>
+                {isQuizPassed ? "Passed" : "Failed"}
+              </h3>
+              <p className={`text-sm ${isQuizPassed ? "text-green-700 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
+                Score: {scorePercent ?? 0}%
+                {attempts != null && attempts > 1 && <span className="ml-3 opacity-75">Attempt {attempts}</span>}
+              </p>
+            </div>
+          </div>
+        )}
+
         {!moduleData.quizUnlocked ? (
           <Card className="bg-muted/20 border-dashed">
             <CardContent className="p-8 text-center text-muted-foreground">
               <Lock className="w-8 h-8 mx-auto mb-3 opacity-50" />
-              <p>Complete all videos in this module to unlock the knowledge check.</p>
+              {lockedReason === "needs_review"
+                ? <p>Re-watch all <strong>Needs Review</strong> videos to unlock the knowledge check.</p>
+                : <p>Complete all videos in this module to unlock the knowledge check.</p>
+              }
             </CardContent>
           </Card>
         ) : (
           <div className="space-y-6">
-            {isQuizPassed && (
-              <Card className="bg-green-50 border-green-200 dark:bg-green-900/20 dark:border-green-800">
-                <CardContent className="p-6 flex items-center gap-4">
-                  <Trophy className="w-8 h-8 text-green-600 dark:text-green-400" />
-                  <div>
-                    <h3 className="font-bold text-green-800 dark:text-green-300">Module Passed!</h3>
-                    <p className="text-green-700 dark:text-green-400 text-sm">
-                      Best Score: {bestScore}%
-                    </p>
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-
             {quiz && quiz.length > 0 ? (
               <Card>
                 <CardHeader>
                   <CardTitle>Module Quiz</CardTitle>
-                  <CardDescription>Answer the questions below to test your understanding.</CardDescription>
+                  <CardDescription>Answer the questions below to test your understanding. You need 80% or higher to pass.</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-8">
-                  {quiz.map((q, idx) => (
+                  {quiz.map((q: any, idx: number) => (
                     <div key={q.id} className="space-y-3">
                       <p className="font-medium">{idx + 1}. {q.questionText}</p>
-                      <RadioGroup 
-                        value={answers[q.id]?.toString()} 
+                      <RadioGroup
+                        value={answers[q.id]?.toString()}
                         onValueChange={(val) => setAnswers(prev => ({ ...prev, [q.id]: parseInt(val) }))}
                       >
-                        {q.options.map((opt, optIdx) => (
+                        {q.options.map((opt: string, optIdx: number) => (
                           <div key={optIdx} className="flex items-center space-x-2">
                             <RadioGroupItem value={optIdx.toString()} id={`q${q.id}-opt${optIdx}`} />
                             <Label htmlFor={`q${q.id}-opt${optIdx}`}>{opt}</Label>
@@ -171,8 +211,8 @@ export default function ModuleDetail() {
                       </RadioGroup>
                     </div>
                   ))}
-                  <Button onClick={handleQuizSubmit} disabled={isSubmitting}>
-                    {isSubmitting ? "Submitting..." : isQuizPassed ? "Retake Quiz" : "Submit Quiz"}
+                  <Button onClick={handleQuizSubmit} disabled={isSubmitting} className="w-full sm:w-auto">
+                    {isSubmitting ? "Submitting..." : latestResult ? "Retake Quiz" : "Submit Quiz"}
                   </Button>
                 </CardContent>
               </Card>

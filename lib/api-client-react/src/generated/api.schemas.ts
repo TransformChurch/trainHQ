@@ -127,6 +127,7 @@ export interface VideoWithProgress {
   /** @nullable */
   progressPercent?: number | null;
   completed: boolean;
+  needsReview: boolean;
   inQueue: boolean;
 }
 
@@ -137,6 +138,7 @@ export interface QuizResult {
   score: number;
   totalQuestions: number;
   passed: boolean;
+  attempts: number;
   takenAt: string;
 }
 
@@ -151,6 +153,8 @@ export interface ModuleDetail {
   videos: VideoWithProgress[];
   quizResult?: QuizResult;
   quizUnlocked: boolean;
+  /** @nullable */
+  lockedReason?: 'complete_videos' | 'needs_review' | null;
 }
 
 export interface Video {
@@ -200,6 +204,7 @@ export interface WatchHistoryEntry {
   video: Video;
   progressPercent: number;
   completed: boolean;
+  needsReview: boolean;
   lastWatchedAt: string;
 }
 
@@ -235,6 +240,13 @@ export interface QuizQuestionInput {
   options: string[];
   correctIndex: number;
   order: number;
+}
+
+export interface QuizQuestionUpdate {
+  questionText?: string;
+  options?: string[];
+  correctIndex?: number;
+  order?: number;
 }
 
 export type QuizSubmissionAnswersItem = {
@@ -304,6 +316,8 @@ export type ProgressRowResultsItem = {
   score?: number | null;
   /** @nullable */
   totalQuestions?: number | null;
+  /** @nullable */
+  attempts?: number | null;
 };
 
 export interface ProgressRow {
@@ -323,4 +337,3 @@ trackId?: number;
 export type ListVideosParams = {
 moduleId?: number;
 };
-
