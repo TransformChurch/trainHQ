@@ -107,7 +107,7 @@ router.patch("/users/:userId/role", requireAdmin, async (req, res) => {
 router.post("/assignments", requireAdmin, async (req, res) => {
   try {
     const auth = getAuth(req);
-    const body = req.body as { userIds?: string[]; groupId?: number; moduleId?: number; dueDate?: string | null; notifyEmail?: boolean };
+    const body = req.body as { userIds?: string[]; groupId?: number; moduleId?: number; dueDate?: string | null; notifyEmail?: boolean; resetProgress?: boolean };
     if (!body.moduleId || typeof body.moduleId !== "number") {
       res.status(400).json({ error: "moduleId is required" });
       return;
@@ -121,6 +121,7 @@ router.post("/assignments", requireAdmin, async (req, res) => {
     const moduleId = body.moduleId;
     const dueDate = body.dueDate ?? null;
     const notifyEmail = body.notifyEmail ?? false;
+    const resetProgress = body.resetProgress ?? false;
     let userIds: string[] = Array.isArray(body.userIds) ? body.userIds : [];
 
     // If groupId provided, expand to group members
@@ -142,22 +143,46 @@ router.post("/assignments", requireAdmin, async (req, res) => {
 
     const inserted = [];
     for (const userId of userIds) {
+      // Reset quiz results if requested
+      if (resetProgress) {
+        await db.delete(quizResultsTable)
+          .where(and(eq(quizResultsTable.userId, userId), eq(quizResultsTable.moduleId, moduleId)));
+      }
+
       const existing = await db
         .select()
         .from(assignmentsTable)
         .where(and(eq(assignmentsTable.userId, userId), eq(assignmentsTable.moduleId, moduleId)))
         .limit(1);
+
       if (existing[0]) {
+        // Update existing assignment: refresh assignedBy/dueDate and optionally reset seenAt
+        const updateValues: Partial<typeof assignmentsTable.$inferInsert & { seenAt: Date | null; assignedAt: Date }> = {
+          assignedBy: adminUser.id,
+          assignedAt: new Date(),
+          dueDate: dueDate ? new Date(dueDate) : null,
+        };
+        if (resetProgress) updateValues.seenAt = null;
+        const updated = await db
+          .update(assignmentsTable)
+          .set(updateValues)
+          .where(eq(assignmentsTable.id, existing[0].id))
+          .returning();
+        const a = updated[0];
         inserted.push({
-          ...existing[0],
-          assignedAt: existing[0].assignedAt.toISOString(),
-          dueDate: existing[0].dueDate ? existing[0].dueDate.toISOString() : null,
-          seenAt: existing[0].seenAt ? existing[0].seenAt.toISOString() : null,
+          id: a.id,
+          userId: a.userId,
+          moduleId: a.moduleId,
           module: moduleData ? { ...moduleData, createdAt: moduleData.createdAt.toISOString() } : null,
+          assignedBy: a.assignedBy,
+          assignedAt: a.assignedAt.toISOString(),
+          dueDate: a.dueDate ? a.dueDate.toISOString() : null,
+          seenAt: a.seenAt ? a.seenAt.toISOString() : null,
           quizResult: null,
         });
         continue;
       }
+
       const rows = await db.insert(assignmentsTable).values({
         userId,
         moduleId,

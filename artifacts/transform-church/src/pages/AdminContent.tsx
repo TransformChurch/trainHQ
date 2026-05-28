@@ -517,6 +517,7 @@ function AssignmentManager() {
   const [selectedModule, setSelectedModule] = useState("");
   const [dueDate, setDueDate] = useState("");
   const [notifyEmail, setNotifyEmail] = useState(false);
+  const [resetProgress, setResetProgress] = useState(false);
   const [groups, setGroups] = useState<Group[]>([]);
   const [submitting, setSubmitting] = useState(false);
 
@@ -542,6 +543,7 @@ function AssignmentManager() {
         moduleId: parseInt(selectedModule),
         dueDate: dueDate || null,
         notifyEmail,
+        resetProgress,
       };
       if (assignTo === "user") {
         body.userIds = [selectedUser];
@@ -555,9 +557,10 @@ function AssignmentManager() {
       const targetLabel = assignTo === "group"
         ? `group "${groups.find(g => String(g.id) === selectedGroup)?.name}"`
         : "user";
-      toast({ title: `Module assigned to ${targetLabel}${notifyEmail ? " — email notification sent" : ""}` });
+      const extras = [notifyEmail ? "email sent" : "", resetProgress ? "progress reset" : ""].filter(Boolean).join(", ");
+      toast({ title: `Module assigned to ${targetLabel}${extras ? ` — ${extras}` : ""}` });
       setOpen(false);
-      setSelectedUser(""); setSelectedGroup(""); setSelectedModule(""); setDueDate(""); setNotifyEmail(false);
+      setSelectedUser(""); setSelectedGroup(""); setSelectedModule(""); setDueDate(""); setNotifyEmail(false); setResetProgress(false);
     } catch {
       toast({ title: "Failed to assign module", variant: "destructive" });
     } finally {
@@ -653,6 +656,27 @@ function AssignmentManager() {
                 <Mail className="w-4 h-4" />
                 {notifyEmail ? "Send email notification to assignee(s)" : "No email notification"}
               </span>
+            </div>
+
+            {/* Reset progress toggle */}
+            <div className={`flex items-start gap-3 py-2 border-t border-border rounded-md transition-colors ${resetProgress ? "text-destructive" : ""}`}>
+              <button
+                type="button"
+                onClick={() => setResetProgress(v => !v)}
+                className={`mt-0.5 relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${resetProgress ? "bg-destructive" : "bg-muted-foreground/30"}`}
+              >
+                <span className={`pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow transform ring-0 transition-transform ${resetProgress ? "translate-x-4" : "translate-x-0"}`} />
+              </button>
+              <div>
+                <span className={`text-sm font-medium ${resetProgress ? "text-destructive" : "text-muted-foreground"}`}>
+                  Reset quiz progress
+                </span>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  {resetProgress
+                    ? "Pass/fail record and attempts will be deleted — assignee(s) must retake the quiz."
+                    : "Existing quiz results will be kept."}
+                </p>
+              </div>
             </div>
 
             <Button type="submit" className="w-full" disabled={submitting}>
