@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { getAuth } from "@clerk/express";
-import { db, usersTable, assignmentsTable, modulesTable, quizResultsTable, groupMembersTable } from "@workspace/db";
-import { eq, and } from "drizzle-orm";
+import { db, usersTable, assignmentsTable, modulesTable, quizResultsTable, groupMembersTable, watchHistoryTable, videosTable } from "@workspace/db";
+import { eq, and, inArray } from "drizzle-orm";
 import { requireAdmin, getDbUser } from "../middlewares/requireAuth";
 import { UpdateUserRoleBody } from "@workspace/api-zod";
 
@@ -143,10 +143,22 @@ router.post("/assignments", requireAdmin, async (req, res) => {
 
     const inserted = [];
     for (const userId of userIds) {
-      // Reset quiz results if requested
+      // Reset quiz results + watch history if requested
       if (resetProgress) {
         await db.delete(quizResultsTable)
           .where(and(eq(quizResultsTable.userId, userId), eq(quizResultsTable.moduleId, moduleId)));
+
+        const moduleVideos = await db
+          .select({ id: videosTable.id })
+          .from(videosTable)
+          .where(eq(videosTable.moduleId, moduleId));
+        if (moduleVideos.length > 0) {
+          await db.delete(watchHistoryTable)
+            .where(and(
+              eq(watchHistoryTable.userId, userId),
+              inArray(watchHistoryTable.videoId, moduleVideos.map(v => v.id)),
+            ));
+        }
       }
 
       const existing = await db
