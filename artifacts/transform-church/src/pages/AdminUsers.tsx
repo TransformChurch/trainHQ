@@ -1,4 +1,4 @@
-import { useAdminListUsers, useGetProgressMatrix, useUpdateUserRole, getAdminListUsersQueryKey } from "@workspace/api-client-react";
+import { useAdminListUsers, useGetProgressMatrix, useUpdateUserRole, useListTracks, getAdminListUsersQueryKey } from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -275,11 +275,28 @@ function GroupsTab() {
 export default function AdminUsers() {
   const { data: users, isLoading: usersLoading } = useAdminListUsers();
   const { data: matrix, isLoading: matrixLoading } = useGetProgressMatrix();
+  const { data: tracks } = useListTracks();
   const { mutate: updateRole } = useUpdateUserRole();
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
   const [search, setSearch] = useState("");
+  const [groupFilter, setGroupFilter] = useState("all");
+  const [trackFilter, setTrackFilter] = useState("all");
+  const [moduleFilter, setModuleFilter] = useState("all");
+  const [groups, setGroups] = useState<Group[]>([]);
+  const [groupMemberIds, setGroupMemberIds] = useState<Set<string> | null>(null);
+
+  useEffect(() => {
+    apiFetch("/api/groups").then(setGroups).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (groupFilter === "all") { setGroupMemberIds(null); return; }
+    apiFetch(`/api/groups/${groupFilter}/members`)
+      .then((members: GroupMember[]) => setGroupMemberIds(new Set(members.map(m => m.user.id))))
+      .catch(() => {});
+  }, [groupFilter]);
 
   const handleRoleChange = (userId: string, newRole: "student" | "manager" | "admin") => {
     updateRole({ userId, data: { role: newRole } }, {
@@ -290,9 +307,21 @@ export default function AdminUsers() {
     });
   };
 
-  const filteredRows = matrix?.rows.filter(row =>
-    `${row.user.firstName} ${row.user.lastName} ${row.user.email}`.toLowerCase().includes(search.toLowerCase())
-  );
+  const visibleModules = (matrix?.modules ?? []).filter(mod => {
+    if (moduleFilter !== "all") return mod.id === parseInt(moduleFilter);
+    if (trackFilter !== "all") return mod.trackId === parseInt(trackFilter);
+    return true;
+  });
+
+  const modulesForModuleDropdown = trackFilter === "all"
+    ? (matrix?.modules ?? [])
+    : (matrix?.modules ?? []).filter(m => m.trackId === parseInt(trackFilter));
+
+  const filteredRows = (matrix?.rows ?? []).filter(row => {
+    const matchesSearch = `${row.user.firstName} ${row.user.lastName} ${row.user.email}`.toLowerCase().includes(search.toLowerCase());
+    const matchesGroup = groupMemberIds === null || groupMemberIds.has(row.user.id);
+    return matchesSearch && matchesGroup;
+  });
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
@@ -314,14 +343,53 @@ export default function AdminUsers() {
             <div className="p-8 text-center">Loading user data...</div>
           ) : (
             <Card>
-              <CardHeader className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b pb-4">
+              <CardHeader className="border-b pb-4 space-y-3">
                 <CardTitle>Progress Matrix</CardTitle>
-                <div className="w-full sm:w-72">
+                <div className="flex flex-wrap gap-2">
                   <Input
                     placeholder="Search users..."
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
+                    className="w-44"
                   />
+                  <Select value={groupFilter} onValueChange={(v) => setGroupFilter(v)}>
+                    <SelectTrigger className="w-40">
+                      <SelectValue placeholder="All groups" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All groups</SelectItem>
+                      {groups.map(g => (
+                        <SelectItem key={g.id} value={String(g.id)}>{g.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Select value={trackFilter} onValueChange={(v) => { setTrackFilter(v); setModuleFilter("all"); }}>
+                    <SelectTrigger className="w-40">
+                      <SelectValue placeholder="All tracks" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All tracks</SelectItem>
+                      {tracks?.map(t => (
+                        <SelectItem key={t.id} value={String(t.id)}>{t.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Select value={moduleFilter} onValueChange={(v) => setModuleFilter(v)}>
+                    <SelectTrigger className="w-44">
+                      <SelectValue placeholder="All modules" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All modules</SelectItem>
+                      {modulesForModuleDropdown.map(m => (
+                        <SelectItem key={m.id} value={String(m.id)}>{m.title}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {(groupFilter !== "all" || trackFilter !== "all" || moduleFilter !== "all" || search) && (
+                    <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={() => { setSearch(""); setGroupFilter("all"); setTrackFilter("all"); setModuleFilter("all"); }}>
+                      Clear filters
+                    </Button>
+                  )}
                 </div>
               </CardHeader>
               <CardContent className="p-0 overflow-x-auto">
@@ -329,7 +397,7 @@ export default function AdminUsers() {
                   <TableHeader>
                     <TableRow>
                       <TableHead className="w-[250px]">User / Role</TableHead>
-                      {matrix?.modules.map(mod => (
+                      {visibleModules.map(mod => (
                         <TableHead key={mod.id} className="text-center min-w-[130px] max-w-[160px]">
                           <div className="truncate text-xs" title={mod.title}>{mod.title}</div>
                         </TableHead>
@@ -360,7 +428,7 @@ export default function AdminUsers() {
                             </SelectContent>
                           </Select>
                         </TableCell>
-                        {matrix?.modules.map(mod => {
+                        {visibleModules.map(mod => {
                           const result = row.results.find(r => r.moduleId === mod.id);
                           const pct = result?.score != null && result?.totalQuestions
                             ? Math.round((result.score / result.totalQuestions) * 100)
@@ -407,8 +475,8 @@ export default function AdminUsers() {
                     ))}
                     {filteredRows?.length === 0 && (
                       <TableRow>
-                        <TableCell colSpan={(matrix?.modules.length || 0) + 1} className="h-24 text-center">
-                          No users found matching your search.
+                        <TableCell colSpan={visibleModules.length + 1} className="h-24 text-center">
+                          No users found matching your filters.
                         </TableCell>
                       </TableRow>
                     )}
