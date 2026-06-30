@@ -42,7 +42,7 @@ export function Sidebar() {
   const NavContent = () => (
     <div className="flex flex-col h-full h-full py-4 bg-sidebar border-r border-sidebar-border w-64 text-sidebar-foreground">
       <div className="px-6 mb-8">
-        <img src={wordmark} alt="Transform Church" className="h-8 w-auto" />
+        <img src={wordmark} alt="Transform Church" className="w-full h-auto" />
       </div>
 
       <nav className="flex-1 px-4 space-y-1">
