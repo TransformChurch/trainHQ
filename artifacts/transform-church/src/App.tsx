@@ -252,6 +252,9 @@ function ClerkProviderWithRoutes() {
       publishableKey={clerkPubKey}
       proxyUrl={clerkProxyUrl}
       appearance={clerkAppearance}
+      localization={{
+        signIn: { start: { subtitle: "Sign in to Transform Church Training Platform" } },
+      }}
       signInUrl={`${basePath}/sign-in`}
       signUpUrl={`${basePath}/sign-up`}
       routerPush={(to) => setLocation(stripBase(to))}
