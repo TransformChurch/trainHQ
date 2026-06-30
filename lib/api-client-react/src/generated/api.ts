@@ -39,6 +39,7 @@ import type {
   QueueItem,
   QuizQuestion,
   QuizQuestionInput,
+  QuizQuestionUpdate,
   QuizResult,
   QuizSubmission,
   RoleUpdate,
@@ -2224,6 +2225,78 @@ export function useGetQuizResult<TData = Awaited<ReturnType<typeof getQuizResult
 
 
 
+
+export const getUpdateQuizQuestionUrl = (questionId: number,) => {
+
+
+
+
+  return `/api/quizzes/questions/${questionId}`
+}
+
+/**
+ * @summary Update a quiz question (admin only)
+ */
+export const updateQuizQuestion = async (questionId: number,
+    quizQuestionUpdate: QuizQuestionUpdate, options?: RequestInit): Promise<QuizQuestion> => {
+
+  return customFetch<QuizQuestion>(getUpdateQuizQuestionUrl(questionId),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      quizQuestionUpdate,)
+  }
+);}
+
+
+
+
+export const getUpdateQuizQuestionMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateQuizQuestion>>, TError,{questionId: number;data: BodyType<QuizQuestionUpdate>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateQuizQuestion>>, TError,{questionId: number;data: BodyType<QuizQuestionUpdate>}, TContext> => {
+
+const mutationKey = ['updateQuizQuestion'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateQuizQuestion>>, {questionId: number;data: BodyType<QuizQuestionUpdate>}> = (props) => {
+          const {questionId,data} = props ?? {};
+
+          return  updateQuizQuestion(questionId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateQuizQuestionMutationResult = NonNullable<Awaited<ReturnType<typeof updateQuizQuestion>>>
+    export type UpdateQuizQuestionMutationBody = BodyType<QuizQuestionUpdate>
+    export type UpdateQuizQuestionMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Update a quiz question (admin only)
+ */
+export const useUpdateQuizQuestion = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateQuizQuestion>>, TError,{questionId: number;data: BodyType<QuizQuestionUpdate>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateQuizQuestion>>,
+        TError,
+        {questionId: number;data: BodyType<QuizQuestionUpdate>},
+        TContext
+      > => {
+      return useMutation(getUpdateQuizQuestionMutationOptions(options));
+    }
 
 export const getDeleteQuizQuestionUrl = (questionId: number,) => {
 

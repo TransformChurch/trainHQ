@@ -28,6 +28,7 @@ export * from './progressRowResultsItem';
 export * from './queueItem';
 export * from './quizQuestion';
 export * from './quizQuestionInput';
+export * from './quizQuestionUpdate';
 export * from './quizResult';
 export * from './quizSubmission';
 export * from './quizSubmissionAnswersItem';

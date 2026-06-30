@@ -596,6 +596,30 @@ export const GetQuizResultResponse = zod.object({
 
 
 /**
+ * @summary Update a quiz question (admin only)
+ */
+export const UpdateQuizQuestionParams = zod.object({
+  "questionId": zod.coerce.number()
+})
+
+export const UpdateQuizQuestionBody = zod.object({
+  "questionText": zod.string().optional(),
+  "options": zod.array(zod.string()).optional(),
+  "correctIndex": zod.number().optional(),
+  "order": zod.number().optional()
+})
+
+export const UpdateQuizQuestionResponse = zod.object({
+  "id": zod.number(),
+  "moduleId": zod.number(),
+  "questionText": zod.string(),
+  "options": zod.array(zod.string()),
+  "correctIndex": zod.number(),
+  "order": zod.number()
+})
+
+
+/**
  * @summary Delete a quiz question (admin only)
  */
 export const DeleteQuizQuestionParams = zod.object({
@@ -847,7 +871,8 @@ export const GetProgressMatrixResponse = zod.object({
   "results": zod.array(zod.object({
   "moduleId": zod.number(),
   "passed": zod.boolean().nullish(),
-  "score": zod.number().nullish()
+  "score": zod.number().nullish(),
+  "totalQuestions": zod.number().nullish()
 }))
 }))
 })

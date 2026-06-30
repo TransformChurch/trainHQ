@@ -573,6 +573,29 @@ paths:
           description: Not taken yet
 
   /quizzes/questions/{questionId}:
+    patch:
+      operationId: updateQuizQuestion
+      tags: [quizzes]
+      summary: Update a quiz question (admin only)
+      parameters:
+        - name: questionId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/QuizQuestionUpdate"
+      responses:
+        "200":
+          description: Updated question
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QuizQuestion"
     delete:
       operationId: deleteQuizQuestion
       tags: [quizzes]
@@ -1280,6 +1303,20 @@ components:
           type: integer
       required: [questionText, options, correctIndex, order]
 
+    QuizQuestionUpdate:
+      type: object
+      properties:
+        questionText:
+          type: string
+        options:
+          type: array
+          items:
+            type: string
+        correctIndex:
+          type: integer
+        order:
+          type: integer
+
     QuizSubmission:
       type: object
       properties:
@@ -1429,6 +1466,8 @@ components:
               passed:
                 type: ["boolean", "null"]
               score:
+                type: ["integer", "null"]
+              totalQuestions:
                 type: ["integer", "null"]
             required: [moduleId]
       required: [user, results]

@@ -270,6 +270,13 @@ export interface QuizQuestionInput {
   order: number;
 }
 
+export interface QuizQuestionUpdate {
+  questionText?: string;
+  options?: string[];
+  correctIndex?: number;
+  order?: number;
+}
+
 export type QuizSubmissionAnswersItem = {
   questionId: number;
   selectedIndex: number;
@@ -338,6 +345,8 @@ export type ProgressRowResultsItem = {
   passed?: boolean | null;
   /** @nullable */
   score?: number | null;
+  /** @nullable */
+  totalQuestions?: number | null;
 };
 
 export interface ProgressRow {
