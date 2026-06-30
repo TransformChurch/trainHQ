@@ -31,22 +31,25 @@ router.post("/storage/uploads/request-url", requireManagerOrAdmin, async (req: R
   try {
     const { name, size, contentType } = parsed.data;
 
-    // Check if upload is globally enabled
-    const enabledRows = await db.select().from(settingsTable).where(eq(settingsTable.key, "video_upload_enabled")).limit(1);
-    const uploadEnabled = enabledRows[0]?.value !== "false";
-    if (!uploadEnabled) {
-      res.status(403).json({ error: "Video upload has been disabled by an administrator" });
-      return;
-    }
+    const isVideoUpload = contentType.startsWith("video/");
 
-    // Enforce admin-configured max upload size
-    const settingRows = await db.select().from(settingsTable).where(eq(settingsTable.key, "max_video_upload_size_mb")).limit(1);
-    const parsedMb = settingRows[0] ? parseInt(settingRows[0].value, 10) : NaN;
-    const maxMb = Number.isFinite(parsedMb) && parsedMb > 0 ? parsedMb : 500;
-    const maxBytes = maxMb * 1024 * 1024;
-    if (size > maxBytes) {
-      res.status(413).json({ error: `File size exceeds the maximum allowed size of ${maxMb} MB` });
-      return;
+    // Video-specific checks (images bypass these)
+    if (isVideoUpload) {
+      const enabledRows = await db.select().from(settingsTable).where(eq(settingsTable.key, "video_upload_enabled")).limit(1);
+      const uploadEnabled = enabledRows[0]?.value !== "false";
+      if (!uploadEnabled) {
+        res.status(403).json({ error: "Video upload has been disabled by an administrator" });
+        return;
+      }
+
+      const settingRows = await db.select().from(settingsTable).where(eq(settingsTable.key, "max_video_upload_size_mb")).limit(1);
+      const parsedMb = settingRows[0] ? parseInt(settingRows[0].value, 10) : NaN;
+      const maxMb = Number.isFinite(parsedMb) && parsedMb > 0 ? parsedMb : 500;
+      const maxBytes = maxMb * 1024 * 1024;
+      if (size > maxBytes) {
+        res.status(413).json({ error: `File size exceeds the maximum allowed size of ${maxMb} MB` });
+        return;
+      }
     }
 
     const uploadURL = await objectStorageService.getObjectEntityUploadURL();
