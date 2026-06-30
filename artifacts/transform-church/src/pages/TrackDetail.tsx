@@ -3,6 +3,7 @@ import { useParams, Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { ArrowLeft, BookOpen, ChevronRight } from "lucide-react";
+import { resolveStorageUrl } from "@/lib/storageUrl";
 
 export default function TrackDetail() {
   const { trackId } = useParams();
@@ -30,7 +31,7 @@ export default function TrackDetail() {
         
         <div className="flex flex-col md:flex-row gap-8 items-start">
           {track.imageUrl ? (
-            <img src={track.imageUrl} alt={track.name} className="w-full md:w-1/3 rounded-xl object-cover shadow-sm aspect-video md:aspect-square" />
+            <img src={resolveStorageUrl(track.imageUrl)} alt={track.name} className="w-full md:w-1/3 rounded-xl object-cover shadow-sm aspect-video md:aspect-square" />
           ) : (
             <div className="w-full md:w-1/3 rounded-xl bg-primary/10 text-primary flex items-center justify-center aspect-video md:aspect-square shadow-sm">
               <BookOpen className="w-16 h-16 opacity-50" />
@@ -63,7 +64,7 @@ export default function TrackDetail() {
                 <div className="flex flex-col md:flex-row gap-4 items-start md:items-center justify-between">
                   <div className="flex gap-4 items-start">
                     {module.imageUrl ? (
-                      <img src={module.imageUrl} alt={module.title} className="w-16 h-16 rounded-lg object-cover shrink-0 border border-border" />
+                      <img src={resolveStorageUrl(module.imageUrl)} alt={module.title} className="w-16 h-16 rounded-lg object-cover shrink-0 border border-border" />
                     ) : (
                       <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center text-muted-foreground font-bold shrink-0 group-hover:bg-primary group-hover:text-primary-foreground transition-colors">
                         {index + 1}

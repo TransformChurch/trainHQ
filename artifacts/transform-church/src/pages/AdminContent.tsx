@@ -28,6 +28,7 @@ import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { useUpload } from "@workspace/object-storage-web";
 import type { Video as VideoType, QuizQuestion } from "@workspace/api-client-react";
+import { resolveStorageUrl } from "@/lib/storageUrl";
 
 type VideoSourceType = "embed" | "drive" | "upload";
 
@@ -238,7 +239,7 @@ function ImageUploadPicker({ value, onChange }: { value: string; onChange: (url:
       </Label>
       {value ? (
         <div className="relative group w-full rounded-lg overflow-hidden border border-input bg-muted/20 aspect-video">
-          <img src={value} alt="Preview" className="w-full h-full object-cover" />
+          <img src={resolveStorageUrl(value)} alt="Preview" className="w-full h-full object-cover" />
           <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
             <Button type="button" size="sm" variant="secondary" onClick={() => fileInputRef.current?.click()}>
               Change
@@ -598,7 +599,7 @@ function ModuleManager({ trackId }: { trackId: number }) {
               <AccordionTrigger className="px-4 py-3 hover:no-underline">
                 <div className="flex items-center gap-2 text-left flex-1 min-w-0">
                   {mod.imageUrl ? (
-                    <img src={mod.imageUrl} alt={mod.title} className="w-8 h-8 rounded object-cover shrink-0 border border-border" />
+                    <img src={resolveStorageUrl(mod.imageUrl)} alt={mod.title} className="w-8 h-8 rounded object-cover shrink-0 border border-border" />
                   ) : (
                     <Badge variant="outline" className="text-xs shrink-0">{mod.order}</Badge>
                   )}
@@ -1128,7 +1129,7 @@ export default function AdminContent() {
               <div className="flex items-start justify-between gap-4">
                 <div className="flex items-start gap-4 min-w-0">
                   {track.imageUrl && (
-                    <img src={track.imageUrl} alt={track.name} className="w-14 h-14 rounded-lg object-cover shrink-0 border border-border" />
+                    <img src={resolveStorageUrl(track.imageUrl)} alt={track.name} className="w-14 h-14 rounded-lg object-cover shrink-0 border border-border" />
                   )}
                   <div className="min-w-0">
                     <CardTitle className="text-xl">{track.name}</CardTitle>

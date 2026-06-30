@@ -3,6 +3,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { BookOpen, Layers } from "lucide-react";
 import { Link } from "wouter";
+import { resolveStorageUrl } from "@/lib/storageUrl";
 
 export default function Tracks() {
   const { data: tracks, isLoading } = useListTracks();
@@ -42,7 +43,7 @@ export default function Tracks() {
             <Card key={track.id} className="flex flex-col overflow-hidden hover:shadow-md transition-shadow">
               <div className="h-40 bg-muted relative">
                 {track.imageUrl ? (
-                  <img src={track.imageUrl} alt={track.name} className="w-full h-full object-cover" />
+                  <img src={resolveStorageUrl(track.imageUrl)} alt={track.name} className="w-full h-full object-cover" />
                 ) : (
                   <div className="absolute inset-0 flex items-center justify-center bg-primary/10 text-primary">
                     <BookOpen className="w-12 h-12 opacity-50" />
