@@ -3,6 +3,7 @@ import { useGetMe } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
 import { useClerk } from "@clerk/react";
 import { BookOpen, LayoutDashboard, Settings, Video, ShieldCheck, LogOut, Menu, UserCircle, Users } from "lucide-react";
+import wordmark from "@assets/TC_Black_Wordmark_1782833324395.png";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 
 export function Sidebar() {
@@ -40,11 +41,8 @@ export function Sidebar() {
 
   const NavContent = () => (
     <div className="flex flex-col h-full h-full py-4 bg-sidebar border-r border-sidebar-border w-64 text-sidebar-foreground">
-      <div className="px-6 mb-8 flex items-center gap-3">
-        <div className="bg-primary/20 p-2 rounded-lg text-primary">
-          <BookOpen className="w-6 h-6" />
-        </div>
-        <h2 className="text-xl font-bold tracking-tight text-sidebar-foreground">Transform</h2>
+      <div className="px-6 mb-8">
+        <img src={wordmark} alt="Transform Church" className="h-8 w-auto" />
       </div>
 
       <nav className="flex-1 px-4 space-y-1">
