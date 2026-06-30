@@ -87,6 +87,7 @@ export const GetDashboardSummaryResponse = zod.object({
   "trackId": zod.number(),
   "title": zod.string(),
   "description": zod.string().nullish(),
+  "imageUrl": zod.string().nullish(),
   "order": zod.number(),
   "isPublic": zod.boolean(),
   "createdAt": zod.string()
@@ -174,6 +175,7 @@ export const GetTrackResponse = zod.object({
   "trackId": zod.number(),
   "title": zod.string(),
   "description": zod.string().nullish(),
+  "imageUrl": zod.string().nullish(),
   "order": zod.number(),
   "isPublic": zod.boolean(),
   "createdAt": zod.string()
@@ -223,6 +225,7 @@ export const ListModulesResponseItem = zod.object({
   "trackId": zod.number(),
   "title": zod.string(),
   "description": zod.string().nullish(),
+  "imageUrl": zod.string().nullish(),
   "order": zod.number(),
   "isPublic": zod.boolean(),
   "createdAt": zod.string()
@@ -237,6 +240,7 @@ export const CreateModuleBody = zod.object({
   "trackId": zod.number(),
   "title": zod.string(),
   "description": zod.string().nullish(),
+  "imageUrl": zod.string().nullish(),
   "order": zod.number(),
   "isPublic": zod.boolean().optional()
 })
@@ -254,6 +258,7 @@ export const GetModuleResponse = zod.object({
   "trackId": zod.number(),
   "title": zod.string(),
   "description": zod.string().nullish(),
+  "imageUrl": zod.string().nullish(),
   "order": zod.number(),
   "isPublic": zod.boolean(),
   "createdAt": zod.string(),
@@ -294,6 +299,7 @@ export const UpdateModuleParams = zod.object({
 export const UpdateModuleBody = zod.object({
   "title": zod.string().optional(),
   "description": zod.string().nullish(),
+  "imageUrl": zod.string().nullish(),
   "order": zod.number().optional(),
   "isPublic": zod.boolean().optional()
 })
@@ -303,6 +309,7 @@ export const UpdateModuleResponse = zod.object({
   "trackId": zod.number(),
   "title": zod.string(),
   "description": zod.string().nullish(),
+  "imageUrl": zod.string().nullish(),
   "order": zod.number(),
   "isPublic": zod.boolean(),
   "createdAt": zod.string()
@@ -733,6 +740,7 @@ export const ListMyAssignmentsResponseItem = zod.object({
   "trackId": zod.number(),
   "title": zod.string(),
   "description": zod.string().nullish(),
+  "imageUrl": zod.string().nullish(),
   "order": zod.number(),
   "isPublic": zod.boolean(),
   "createdAt": zod.string()
@@ -838,6 +846,7 @@ export const UpdateModuleVisibilityResponse = zod.object({
   "trackId": zod.number(),
   "title": zod.string(),
   "description": zod.string().nullish(),
+  "imageUrl": zod.string().nullish(),
   "order": zod.number(),
   "isPublic": zod.boolean(),
   "createdAt": zod.string()
@@ -853,6 +862,7 @@ export const GetProgressMatrixResponse = zod.object({
   "trackId": zod.number(),
   "title": zod.string(),
   "description": zod.string().nullish(),
+  "imageUrl": zod.string().nullish(),
   "order": zod.number(),
   "isPublic": zod.boolean(),
   "createdAt": zod.string()

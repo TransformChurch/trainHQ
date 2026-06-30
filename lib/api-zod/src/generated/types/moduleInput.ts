@@ -11,6 +11,8 @@ export interface ModuleInput {
   title: string;
   /** @nullable */
   description?: string | null;
+  /** @nullable */
+  imageUrl?: string | null;
   order: number;
   isPublic?: boolean;
 }

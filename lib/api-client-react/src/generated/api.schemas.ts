@@ -83,6 +83,8 @@ export interface Module {
   title: string;
   /** @nullable */
   description?: string | null;
+  /** @nullable */
+  imageUrl?: string | null;
   order: number;
   isPublic: boolean;
   createdAt: string;
@@ -104,6 +106,8 @@ export interface ModuleInput {
   title: string;
   /** @nullable */
   description?: string | null;
+  /** @nullable */
+  imageUrl?: string | null;
   order: number;
   isPublic?: boolean;
 }
@@ -112,6 +116,8 @@ export interface ModuleUpdate {
   title?: string;
   /** @nullable */
   description?: string | null;
+  /** @nullable */
+  imageUrl?: string | null;
   order?: number;
   isPublic?: boolean;
 }
@@ -151,6 +157,8 @@ export interface ModuleDetail {
   title: string;
   /** @nullable */
   description?: string | null;
+  /** @nullable */
+  imageUrl?: string | null;
   order: number;
   isPublic: boolean;
   createdAt: string;

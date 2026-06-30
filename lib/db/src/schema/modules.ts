@@ -8,6 +8,7 @@ export const modulesTable = pgTable("modules", {
   trackId: integer("track_id").notNull().references(() => tracksTable.id, { onDelete: "cascade" }),
   title: text("title").notNull(),
   description: text("description"),
+  imageUrl: text("image_url"),
   order: integer("order").notNull().default(0),
   isPublic: boolean("is_public").notNull().default(true),
   createdAt: timestamp("created_at").notNull().defaultNow(),

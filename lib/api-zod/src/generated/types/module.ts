@@ -12,6 +12,8 @@ export interface Module {
   title: string;
   /** @nullable */
   description?: string | null;
+  /** @nullable */
+  imageUrl?: string | null;
   order: number;
   isPublic: boolean;
   createdAt: string;

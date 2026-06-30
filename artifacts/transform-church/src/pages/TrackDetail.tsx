@@ -62,9 +62,13 @@ export default function TrackDetail() {
               <Card key={module.id} className="p-6 hover:border-primary/50 transition-colors group">
                 <div className="flex flex-col md:flex-row gap-4 items-start md:items-center justify-between">
                   <div className="flex gap-4 items-start">
-                    <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center text-muted-foreground font-bold shrink-0 group-hover:bg-primary group-hover:text-primary-foreground transition-colors">
-                      {index + 1}
-                    </div>
+                    {module.imageUrl ? (
+                      <img src={module.imageUrl} alt={module.title} className="w-16 h-16 rounded-lg object-cover shrink-0 border border-border" />
+                    ) : (
+                      <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center text-muted-foreground font-bold shrink-0 group-hover:bg-primary group-hover:text-primary-foreground transition-colors">
+                        {index + 1}
+                      </div>
+                    )}
                     <div>
                       <h3 className="text-xl font-bold">{module.title}</h3>
                       <p className="text-muted-foreground mt-1 line-clamp-2 max-w-2xl">{module.description}</p>

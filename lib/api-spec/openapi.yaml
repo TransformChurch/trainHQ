@@ -1088,6 +1088,8 @@ components:
           type: string
         description:
           type: ["string", "null"]
+        imageUrl:
+          type: ["string", "null"]
         order:
           type: integer
         isPublic:
@@ -1105,6 +1107,8 @@ components:
           type: string
         description:
           type: ["string", "null"]
+        imageUrl:
+          type: ["string", "null"]
         order:
           type: integer
         isPublic:
@@ -1117,6 +1121,8 @@ components:
         title:
           type: string
         description:
+          type: ["string", "null"]
+        imageUrl:
           type: ["string", "null"]
         order:
           type: integer
@@ -1133,6 +1139,8 @@ components:
         title:
           type: string
         description:
+          type: ["string", "null"]
+        imageUrl:
           type: ["string", "null"]
         order:
           type: integer

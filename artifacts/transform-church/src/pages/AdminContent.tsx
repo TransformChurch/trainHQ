@@ -23,7 +23,7 @@ import {
 import {
   Accordion, AccordionContent, AccordionItem, AccordionTrigger,
 } from "@/components/ui/accordion";
-import { Plus, Trash2, Video, BookOpen, HelpCircle, Users, Pencil, Globe, Lock, Mail, Upload, Link, HardDrive } from "lucide-react";
+import { Plus, Trash2, Video, BookOpen, HelpCircle, Users, Pencil, Globe, Lock, Mail, Upload, Link, HardDrive, Image as ImageIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { useUpload } from "@workspace/object-storage-web";
@@ -205,6 +205,76 @@ function FormField({ label, children }: { label: string; children: React.ReactNo
     <div className="space-y-1.5">
       <Label>{label}</Label>
       {children}
+    </div>
+  );
+}
+
+function ImageUploadPicker({ value, onChange }: { value: string; onChange: (url: string) => void }) {
+  const { toast } = useToast();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
+
+  const { uploadFile, isUploading, progress } = useUpload({
+    basePath: `${BASE}/api/storage`,
+    onSuccess: (response) => {
+      onChange(response.objectPath);
+      toast({ title: "Image uploaded" });
+    },
+    onError: (err) => {
+      toast({ title: err.message || "Upload failed", variant: "destructive" });
+    },
+  });
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    await uploadFile(file);
+  };
+
+  return (
+    <div className="space-y-2">
+      <Label>
+        Image <span className="text-muted-foreground font-normal text-xs">(optional)</span>
+      </Label>
+      {value ? (
+        <div className="relative group w-full rounded-lg overflow-hidden border border-input bg-muted/20 aspect-video">
+          <img src={value} alt="Preview" className="w-full h-full object-cover" />
+          <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+            <Button type="button" size="sm" variant="secondary" onClick={() => fileInputRef.current?.click()}>
+              Change
+            </Button>
+            <Button type="button" size="sm" variant="destructive" onClick={() => onChange("")}>
+              Remove
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <div
+          className="border-2 border-dashed border-input rounded-lg p-6 text-center cursor-pointer hover:border-primary/50 hover:bg-muted/20 transition-colors"
+          onClick={() => fileInputRef.current?.click()}
+        >
+          {isUploading ? (
+            <div className="space-y-2">
+              <p className="text-sm text-muted-foreground">Uploading...</p>
+              <Progress value={progress} className="h-2" />
+            </div>
+          ) : (
+            <>
+              <ImageIcon className="w-8 h-8 text-muted-foreground/50 mx-auto mb-2" />
+              <p className="text-sm text-muted-foreground">Click to upload an image</p>
+              <p className="text-xs text-muted-foreground/70 mt-1">PNG, JPG, WebP, GIF</p>
+            </>
+          )}
+        </div>
+      )}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={handleFileChange}
+        disabled={isUploading}
+      />
     </div>
   );
 }
@@ -392,6 +462,7 @@ function ModuleManager({ trackId }: { trackId: number }) {
   const { toast } = useToast();
   const { data: modules } = useListModules({ trackId }, { query: { queryKey: getListModulesQueryKey({ trackId }) } });
   const { mutate: createModule } = useCreateModule();
+  const { mutate: updateModule } = useUpdateModule();
   const { mutate: deleteModule } = useDeleteModule();
 
   const [open, setOpen] = useState(false);
@@ -399,14 +470,43 @@ function ModuleManager({ trackId }: { trackId: number }) {
   const [desc, setDesc] = useState("");
   const [order, setOrder] = useState("1");
   const [isPublic, setIsPublic] = useState(true);
+  const [moduleImageUrl, setModuleImageUrl] = useState("");
   const [togglingId, setTogglingId] = useState<number | null>(null);
+
+  const [editingModule, setEditingModule] = useState<any | null>(null);
+  const [editTitle, setEditTitle] = useState("");
+  const [editDesc, setEditDesc] = useState("");
+  const [editOrder, setEditOrder] = useState("1");
+  const [editIsPublic, setEditIsPublic] = useState(true);
+  const [editImageUrl, setEditImageUrl] = useState("");
+
+  const openEditDialog = (mod: any) => {
+    setEditingModule(mod);
+    setEditTitle(mod.title);
+    setEditDesc(mod.description ?? "");
+    setEditOrder(String(mod.order));
+    setEditIsPublic(mod.isPublic);
+    setEditImageUrl(mod.imageUrl ?? "");
+  };
 
   const handleCreate = (e: React.FormEvent) => {
     e.preventDefault();
-    createModule({ data: { trackId, title, description: desc, order: parseInt(order), isPublic } }, {
+    createModule({ data: { trackId, title, description: desc || null, imageUrl: moduleImageUrl || null, order: parseInt(order), isPublic } }, {
       onSuccess: () => {
         toast({ title: "Module created" });
-        setOpen(false); setTitle(""); setDesc(""); setOrder("1"); setIsPublic(true);
+        setOpen(false); setTitle(""); setDesc(""); setOrder("1"); setIsPublic(true); setModuleImageUrl("");
+        queryClient.invalidateQueries({ queryKey: getListModulesQueryKey({ trackId }) });
+      },
+    });
+  };
+
+  const handleEdit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingModule) return;
+    updateModule({ moduleId: editingModule.id, data: { title: editTitle, description: editDesc || null, imageUrl: editImageUrl || null, order: parseInt(editOrder), isPublic: editIsPublic } }, {
+      onSuccess: () => {
+        toast({ title: "Module updated" });
+        setEditingModule(null);
         queryClient.invalidateQueries({ queryKey: getListModulesQueryKey({ trackId }) });
       },
     });
@@ -438,11 +538,12 @@ function ModuleManager({ trackId }: { trackId: number }) {
           <DialogTrigger asChild>
             <Button size="sm" variant="outline"><Plus className="w-3.5 h-3.5 mr-1" /> Add Module</Button>
           </DialogTrigger>
-          <DialogContent>
+          <DialogContent className="max-h-[90vh] overflow-y-auto">
             <DialogHeader><DialogTitle>Add Module</DialogTitle></DialogHeader>
             <form onSubmit={handleCreate} className="space-y-4">
               <FormField label="Title"><Input value={title} onChange={e => setTitle(e.target.value)} required /></FormField>
               <FormField label="Description"><Textarea value={desc} onChange={e => setDesc(e.target.value)} rows={2} /></FormField>
+              <ImageUploadPicker value={moduleImageUrl} onChange={setModuleImageUrl} />
               <FormField label="Order"><Input type="number" value={order} onChange={e => setOrder(e.target.value)} min="1" /></FormField>
               <div className="flex items-center gap-3">
                 <button
@@ -463,13 +564,44 @@ function ModuleManager({ trackId }: { trackId: number }) {
         </Dialog>
       </div>
 
+      {/* Edit Module Dialog */}
+      <Dialog open={!!editingModule} onOpenChange={v => { if (!v) setEditingModule(null); }}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto">
+          <DialogHeader><DialogTitle>Edit Module</DialogTitle></DialogHeader>
+          <form onSubmit={handleEdit} className="space-y-4">
+            <FormField label="Title"><Input value={editTitle} onChange={e => setEditTitle(e.target.value)} required /></FormField>
+            <FormField label="Description"><Textarea value={editDesc} onChange={e => setEditDesc(e.target.value)} rows={2} /></FormField>
+            <ImageUploadPicker value={editImageUrl} onChange={setEditImageUrl} />
+            <FormField label="Order"><Input type="number" value={editOrder} onChange={e => setEditOrder(e.target.value)} min="1" /></FormField>
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => setEditIsPublic(v => !v)}
+                className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none ${editIsPublic ? "bg-primary" : "bg-muted-foreground/30"}`}
+              >
+                <span className={`pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow transform ring-0 transition-transform ${editIsPublic ? "translate-x-5" : "translate-x-0"}`} />
+              </button>
+              <span className="text-sm font-medium flex items-center gap-1.5">
+                {editIsPublic ? <Globe className="w-4 h-4 text-primary" /> : <Lock className="w-4 h-4 text-muted-foreground" />}
+                {editIsPublic ? "Public — visible to all students" : "Private — only visible when assigned"}
+              </span>
+            </div>
+            <Button type="submit" className="w-full">Save Changes</Button>
+          </form>
+        </DialogContent>
+      </Dialog>
+
       {(modules as any[])?.sort((a, b) => a.order - b.order).map((mod: any) => (
         <div key={mod.id} className="border rounded-lg bg-background">
           <Accordion type="single" collapsible>
             <AccordionItem value={String(mod.id)} className="border-0">
               <AccordionTrigger className="px-4 py-3 hover:no-underline">
                 <div className="flex items-center gap-2 text-left flex-1 min-w-0">
-                  <Badge variant="outline" className="text-xs shrink-0">{mod.order}</Badge>
+                  {mod.imageUrl ? (
+                    <img src={mod.imageUrl} alt={mod.title} className="w-8 h-8 rounded object-cover shrink-0 border border-border" />
+                  ) : (
+                    <Badge variant="outline" className="text-xs shrink-0">{mod.order}</Badge>
+                  )}
                   <span className="font-medium truncate">{mod.title}</span>
                   <button
                     type="button"
@@ -492,22 +624,31 @@ function ModuleManager({ trackId }: { trackId: number }) {
               <AccordionContent className="px-4 pb-3 space-y-3">
                 <VideoManager moduleId={mod.id} />
                 <QuizManager moduleId={mod.id} />
-                <Button
-                  variant="ghost" size="sm"
-                  className="text-destructive hover:text-destructive w-full justify-start"
-                  onClick={() => {
-                    if (confirm("Delete this module and all its content?")) {
-                      deleteModule({ moduleId: mod.id }, {
-                        onSuccess: () => {
-                          toast({ title: "Module deleted" });
-                          queryClient.invalidateQueries({ queryKey: getListModulesQueryKey({ trackId }) });
-                        },
-                      });
-                    }
-                  }}
-                >
-                  <Trash2 className="w-3.5 h-3.5 mr-2" /> Delete Module
-                </Button>
+                <div className="flex gap-2 pt-1">
+                  <Button
+                    variant="outline" size="sm"
+                    className="flex-1 justify-start"
+                    onClick={() => openEditDialog(mod)}
+                  >
+                    <Pencil className="w-3.5 h-3.5 mr-2" /> Edit Module
+                  </Button>
+                  <Button
+                    variant="ghost" size="sm"
+                    className="text-destructive hover:text-destructive flex-1 justify-start"
+                    onClick={() => {
+                      if (confirm("Delete this module and all its content?")) {
+                        deleteModule({ moduleId: mod.id }, {
+                          onSuccess: () => {
+                            toast({ title: "Module deleted" });
+                            queryClient.invalidateQueries({ queryKey: getListModulesQueryKey({ trackId }) });
+                          },
+                        });
+                      }
+                    }}
+                  >
+                    <Trash2 className="w-3.5 h-3.5 mr-2" /> Delete Module
+                  </Button>
+                </div>
               </AccordionContent>
             </AccordionItem>
           </Accordion>
@@ -896,20 +1037,46 @@ export default function AdminContent() {
   const { toast } = useToast();
   const { data: tracks, isLoading } = useListTracks();
   const { mutate: createTrack } = useCreateTrack();
+  const { mutate: updateTrack } = useUpdateTrack();
   const { mutate: deleteTrack } = useDeleteTrack();
 
   const [addTrackOpen, setAddTrackOpen] = useState(false);
   const [trackName, setTrackName] = useState("");
   const [trackDesc, setTrackDesc] = useState("");
+  const [trackImageUrl, setTrackImageUrl] = useState("");
+
+  const [editingTrack, setEditingTrack] = useState<any | null>(null);
+  const [editTrackName, setEditTrackName] = useState("");
+  const [editTrackDesc, setEditTrackDesc] = useState("");
+  const [editTrackImageUrl, setEditTrackImageUrl] = useState("");
+
+  const openEditTrack = (track: any) => {
+    setEditingTrack(track);
+    setEditTrackName(track.name);
+    setEditTrackDesc(track.description ?? "");
+    setEditTrackImageUrl(track.imageUrl ?? "");
+  };
 
   if (isLoading) return <div className="p-8 text-center text-muted-foreground">Loading content...</div>;
 
   const handleCreateTrack = (e: React.FormEvent) => {
     e.preventDefault();
-    createTrack({ data: { name: trackName, description: trackDesc } }, {
+    createTrack({ data: { name: trackName, description: trackDesc || null, imageUrl: trackImageUrl || null } }, {
       onSuccess: () => {
         toast({ title: "Track created" });
-        setAddTrackOpen(false); setTrackName(""); setTrackDesc("");
+        setAddTrackOpen(false); setTrackName(""); setTrackDesc(""); setTrackImageUrl("");
+        queryClient.invalidateQueries({ queryKey: getListTracksQueryKey() });
+      },
+    });
+  };
+
+  const handleEditTrack = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingTrack) return;
+    updateTrack({ trackId: editingTrack.id, data: { name: editTrackName, description: editTrackDesc || null, imageUrl: editTrackImageUrl || null } }, {
+      onSuccess: () => {
+        toast({ title: "Track updated" });
+        setEditingTrack(null);
         queryClient.invalidateQueries({ queryKey: getListTracksQueryKey() });
       },
     });
@@ -928,11 +1095,12 @@ export default function AdminContent() {
             <DialogTrigger asChild>
               <Button><Plus className="w-4 h-4 mr-2" /> New Track</Button>
             </DialogTrigger>
-            <DialogContent>
+            <DialogContent className="max-h-[90vh] overflow-y-auto">
               <DialogHeader><DialogTitle>Create Training Track</DialogTitle></DialogHeader>
               <form onSubmit={handleCreateTrack} className="space-y-4">
                 <FormField label="Track Name"><Input value={trackName} onChange={e => setTrackName(e.target.value)} required /></FormField>
                 <FormField label="Description"><Textarea value={trackDesc} onChange={e => setTrackDesc(e.target.value)} rows={3} /></FormField>
+                <ImageUploadPicker value={trackImageUrl} onChange={setTrackImageUrl} />
                 <Button type="submit" className="w-full">Create Track</Button>
               </form>
             </DialogContent>
@@ -940,31 +1108,57 @@ export default function AdminContent() {
         </div>
       </div>
 
+      {/* Edit Track Dialog */}
+      <Dialog open={!!editingTrack} onOpenChange={v => { if (!v) setEditingTrack(null); }}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto">
+          <DialogHeader><DialogTitle>Edit Track</DialogTitle></DialogHeader>
+          <form onSubmit={handleEditTrack} className="space-y-4">
+            <FormField label="Track Name"><Input value={editTrackName} onChange={e => setEditTrackName(e.target.value)} required /></FormField>
+            <FormField label="Description"><Textarea value={editTrackDesc} onChange={e => setEditTrackDesc(e.target.value)} rows={3} /></FormField>
+            <ImageUploadPicker value={editTrackImageUrl} onChange={setEditTrackImageUrl} />
+            <Button type="submit" className="w-full">Save Changes</Button>
+          </form>
+        </DialogContent>
+      </Dialog>
+
       <div className="space-y-4">
         {tracks?.map(track => (
           <Card key={track.id}>
             <CardHeader className="pb-3">
               <div className="flex items-start justify-between gap-4">
-                <div>
-                  <CardTitle className="text-xl">{track.name}</CardTitle>
-                  {track.description && <p className="text-sm text-muted-foreground mt-1">{track.description}</p>}
+                <div className="flex items-start gap-4 min-w-0">
+                  {track.imageUrl && (
+                    <img src={track.imageUrl} alt={track.name} className="w-14 h-14 rounded-lg object-cover shrink-0 border border-border" />
+                  )}
+                  <div className="min-w-0">
+                    <CardTitle className="text-xl">{track.name}</CardTitle>
+                    {track.description && <p className="text-sm text-muted-foreground mt-1">{track.description}</p>}
+                  </div>
                 </div>
-                <Button
-                  variant="ghost" size="sm"
-                  className="text-destructive hover:text-destructive shrink-0"
-                  onClick={() => {
-                    if (confirm(`Delete "${track.name}"? This will remove all modules, videos and quiz questions inside it.`)) {
-                      deleteTrack({ trackId: track.id }, {
-                        onSuccess: () => {
-                          toast({ title: "Track deleted" });
-                          queryClient.invalidateQueries({ queryKey: getListTracksQueryKey() });
-                        },
-                      });
-                    }
-                  }}
-                >
-                  <Trash2 className="w-4 h-4" />
-                </Button>
+                <div className="flex items-center gap-1 shrink-0">
+                  <Button
+                    variant="ghost" size="sm"
+                    onClick={() => openEditTrack(track)}
+                  >
+                    <Pencil className="w-4 h-4" />
+                  </Button>
+                  <Button
+                    variant="ghost" size="sm"
+                    className="text-destructive hover:text-destructive"
+                    onClick={() => {
+                      if (confirm(`Delete "${track.name}"? This will remove all modules, videos and quiz questions inside it.`)) {
+                        deleteTrack({ trackId: track.id }, {
+                          onSuccess: () => {
+                            toast({ title: "Track deleted" });
+                            queryClient.invalidateQueries({ queryKey: getListTracksQueryKey() });
+                          },
+                        });
+                      }
+                    }}
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </Button>
+                </div>
               </div>
             </CardHeader>
             <CardContent>
