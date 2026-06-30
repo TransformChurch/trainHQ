@@ -2,8 +2,9 @@ import { Router } from "express";
 import { getAuth } from "@clerk/express";
 import { db, tracksTable, modulesTable, assignmentsTable } from "@workspace/db";
 import { eq, inArray } from "drizzle-orm";
-import { requireAuth, requireAdmin, getDbUser } from "../middlewares/requireAuth";
+import { requireAuth, requireManagerOrAdmin, getDbUser } from "../middlewares/requireAuth";
 import { CreateTrackBody, UpdateTrackBody } from "@workspace/api-zod";
+import { logContentChange } from "../lib/auditLog";
 
 const router = Router();
 
@@ -18,8 +19,9 @@ router.get("/", requireAuth, async (req, res) => {
 });
 
 // POST /tracks
-router.post("/", requireAdmin, async (req, res) => {
+router.post("/", requireManagerOrAdmin, async (req, res) => {
   try {
+    const actor = res.locals.dbUser;
     const parsed = CreateTrackBody.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ error: "Invalid input" });
@@ -27,6 +29,15 @@ router.post("/", requireAdmin, async (req, res) => {
     }
     const inserted = await db.insert(tracksTable).values(parsed.data).returning();
     const t = inserted[0];
+    logContentChange({
+      actorId: actor.id,
+      actorName: `${actor.firstName} ${actor.lastName}`,
+      action: "create",
+      entityType: "track",
+      entityId: t.id,
+      entityName: t.name,
+      trackId: t.id,
+    }).catch(() => {});
     res.status(201).json({ ...t, createdAt: t.createdAt.toISOString() });
   } catch {
     res.status(500).json({ error: "Internal server error" });
@@ -46,10 +57,10 @@ router.get("/:trackId", requireAuth, async (req, res) => {
 
     const allModules = await db.select().from(modulesTable).where(eq(modulesTable.trackId, trackId)).orderBy(modulesTable.order);
 
-    // Filter private modules: only show if user is admin or has an assignment
+    // Filter private modules: only show if user is admin/manager or has an assignment
     const dbUser = await getDbUser(auth!.userId!);
     let visibleModules = allModules;
-    if (dbUser && dbUser.role !== "admin") {
+    if (dbUser && dbUser.role !== "admin" && dbUser.role !== "manager") {
       const assignments = await db
         .select({ moduleId: assignmentsTable.moduleId })
         .from(assignmentsTable)
@@ -70,8 +81,9 @@ router.get("/:trackId", requireAuth, async (req, res) => {
 });
 
 // PATCH /tracks/:trackId
-router.patch("/:trackId", requireAdmin, async (req, res) => {
+router.patch("/:trackId", requireManagerOrAdmin, async (req, res) => {
   try {
+    const actor = res.locals.dbUser;
     const trackId = parseInt(req.params.trackId as string);
     const parsed = UpdateTrackBody.safeParse(req.body);
     if (!parsed.success) {
@@ -84,6 +96,15 @@ router.patch("/:trackId", requireAdmin, async (req, res) => {
       return;
     }
     const t = updated[0];
+    logContentChange({
+      actorId: actor.id,
+      actorName: `${actor.firstName} ${actor.lastName}`,
+      action: "update",
+      entityType: "track",
+      entityId: t.id,
+      entityName: t.name,
+      trackId: t.id,
+    }).catch(() => {});
     res.json({ ...t, createdAt: t.createdAt.toISOString() });
   } catch {
     res.status(500).json({ error: "Internal server error" });
@@ -91,9 +112,22 @@ router.patch("/:trackId", requireAdmin, async (req, res) => {
 });
 
 // DELETE /tracks/:trackId
-router.delete("/:trackId", requireAdmin, async (req, res) => {
+router.delete("/:trackId", requireManagerOrAdmin, async (req, res) => {
   try {
+    const actor = res.locals.dbUser;
     const trackId = parseInt(req.params.trackId as string);
+    const existing = await db.select().from(tracksTable).where(eq(tracksTable.id, trackId)).limit(1);
+    if (existing[0]) {
+      logContentChange({
+        actorId: actor.id,
+        actorName: `${actor.firstName} ${actor.lastName}`,
+        action: "delete",
+        entityType: "track",
+        entityId: existing[0].id,
+        entityName: existing[0].name,
+        trackId: existing[0].id,
+      }).catch(() => {});
+    }
     await db.delete(tracksTable).where(eq(tracksTable.id, trackId));
     res.status(204).send();
   } catch {

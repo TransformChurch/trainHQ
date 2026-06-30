@@ -8,7 +8,7 @@ import { ObjectStorageService, ObjectNotFoundError } from "../lib/objectStorage"
 import { ObjectPermission } from "../lib/objectAcl";
 import { db, settingsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
-import { requireAdmin, requireAuth } from "../middlewares/requireAuth";
+import { requireManagerOrAdmin, requireAuth } from "../middlewares/requireAuth";
 
 const router: IRouter = Router();
 const objectStorageService = new ObjectStorageService();
@@ -21,7 +21,7 @@ const objectStorageService = new ObjectStorageService();
  * The client sends JSON metadata (name, size, contentType) — NOT the file.
  * Then uploads the file directly to the returned presigned URL.
  */
-router.post("/storage/uploads/request-url", requireAdmin, async (req: Request, res: Response) => {
+router.post("/storage/uploads/request-url", requireManagerOrAdmin, async (req: Request, res: Response) => {
   const parsed = RequestUploadUrlBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "Missing or invalid required fields" });

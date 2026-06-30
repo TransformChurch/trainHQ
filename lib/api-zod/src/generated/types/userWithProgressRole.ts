@@ -11,5 +11,6 @@ export type UserWithProgressRole = typeof UserWithProgressRole[keyof typeof User
 
 export const UserWithProgressRole = {
   student: 'student',
+  manager: 'manager',
   admin: 'admin',
 } as const;

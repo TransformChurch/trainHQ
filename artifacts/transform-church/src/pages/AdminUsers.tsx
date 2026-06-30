@@ -5,7 +5,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
-import { CheckCircle2, XCircle, MinusCircle, Shield, Users, Plus, Trash2, UserPlus, UserMinus } from "lucide-react";
+import { CheckCircle2, XCircle, MinusCircle, Shield, Users, Plus, Trash2, UserPlus, UserMinus, UserCog } from "lucide-react";
 import { useState, useEffect } from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -281,7 +281,7 @@ export default function AdminUsers() {
 
   const [search, setSearch] = useState("");
 
-  const handleRoleChange = (userId: string, newRole: "student" | "admin") => {
+  const handleRoleChange = (userId: string, newRole: "student" | "manager" | "admin") => {
     updateRole({ userId, data: { role: newRole } }, {
       onSuccess: () => {
         toast({ title: "Role updated successfully" });
@@ -344,13 +344,16 @@ export default function AdminUsers() {
                           <div className="text-xs text-muted-foreground mb-2">{row.user.email}</div>
                           <Select
                             defaultValue={row.user.role}
-                            onValueChange={(val) => handleRoleChange(row.user.id, val as "student" | "admin")}
+                            onValueChange={(val) => handleRoleChange(row.user.id, val as "student" | "manager" | "admin")}
                           >
                             <SelectTrigger className="h-7 text-xs w-[120px]">
                               <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
                               <SelectItem value="student">Student</SelectItem>
+                              <SelectItem value="manager">
+                                <div className="flex items-center"><UserCog className="w-3 h-3 mr-1 text-blue-600" /> Manager</div>
+                              </SelectItem>
                               <SelectItem value="admin">
                                 <div className="flex items-center"><Shield className="w-3 h-3 mr-1 text-primary" /> Admin</div>
                               </SelectItem>

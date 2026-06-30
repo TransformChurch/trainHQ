@@ -1,12 +1,12 @@
 import { Router } from "express";
 import { db, groupsTable, groupMembersTable, usersTable } from "@workspace/db";
 import { eq, and } from "drizzle-orm";
-import { requireAdmin } from "../middlewares/requireAuth";
+import { requireManagerOrAdmin } from "../middlewares/requireAuth";
 
 const router = Router();
 
 // GET /groups
-router.get("/", requireAdmin, async (req, res) => {
+router.get("/", requireManagerOrAdmin, async (req, res) => {
   try {
     const groups = await db.select().from(groupsTable).orderBy(groupsTable.name);
     const members = await db
@@ -29,7 +29,7 @@ router.get("/", requireAdmin, async (req, res) => {
 });
 
 // POST /groups
-router.post("/", requireAdmin, async (req, res) => {
+router.post("/", requireManagerOrAdmin, async (req, res) => {
   try {
     const { name, description } = req.body as { name?: string; description?: string | null };
     if (!name || typeof name !== "string" || !name.trim()) {
@@ -48,7 +48,7 @@ router.post("/", requireAdmin, async (req, res) => {
 });
 
 // PATCH /groups/:groupId
-router.patch("/:groupId", requireAdmin, async (req, res) => {
+router.patch("/:groupId", requireManagerOrAdmin, async (req, res) => {
   try {
     const groupId = parseInt(req.params.groupId as string);
     const { name, description } = req.body as { name?: string; description?: string | null };
@@ -71,7 +71,7 @@ router.patch("/:groupId", requireAdmin, async (req, res) => {
 });
 
 // DELETE /groups/:groupId
-router.delete("/:groupId", requireAdmin, async (req, res) => {
+router.delete("/:groupId", requireManagerOrAdmin, async (req, res) => {
   try {
     const groupId = parseInt(req.params.groupId as string);
     await db.delete(groupsTable).where(eq(groupsTable.id, groupId));
@@ -82,7 +82,7 @@ router.delete("/:groupId", requireAdmin, async (req, res) => {
 });
 
 // GET /groups/:groupId/members
-router.get("/:groupId/members", requireAdmin, async (req, res) => {
+router.get("/:groupId/members", requireManagerOrAdmin, async (req, res) => {
   try {
     const groupId = parseInt(req.params.groupId as string);
     const rows = await db
@@ -109,7 +109,7 @@ router.get("/:groupId/members", requireAdmin, async (req, res) => {
 });
 
 // POST /groups/:groupId/members
-router.post("/:groupId/members", requireAdmin, async (req, res) => {
+router.post("/:groupId/members", requireManagerOrAdmin, async (req, res) => {
   try {
     const groupId = parseInt(req.params.groupId as string);
     const { userId } = req.body;
@@ -134,7 +134,7 @@ router.post("/:groupId/members", requireAdmin, async (req, res) => {
 });
 
 // DELETE /groups/:groupId/members/:userId
-router.delete("/:groupId/members/:userId", requireAdmin, async (req, res) => {
+router.delete("/:groupId/members/:userId", requireManagerOrAdmin, async (req, res) => {
   try {
     const groupId = parseInt(req.params.groupId as string);
     const userId = req.params.userId as string;

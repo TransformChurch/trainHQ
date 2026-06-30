@@ -1,8 +1,8 @@
 import { Router } from "express";
 import { getAuth } from "@clerk/express";
-import { db, usersTable, assignmentsTable, modulesTable, quizResultsTable, groupMembersTable, watchHistoryTable, videosTable, settingsTable } from "@workspace/db";
-import { eq, and, inArray } from "drizzle-orm";
-import { requireAdmin, getDbUser } from "../middlewares/requireAuth";
+import { db, usersTable, assignmentsTable, modulesTable, quizResultsTable, groupMembersTable, watchHistoryTable, videosTable, settingsTable, contentAuditLogTable } from "@workspace/db";
+import { eq, and, inArray, desc, isNull } from "drizzle-orm";
+import { requireAdmin, requireManagerOrAdmin, getDbUser } from "../middlewares/requireAuth";
 import { UpdateUserRoleBody } from "@workspace/api-zod";
 
 const router = Router();
@@ -45,8 +45,8 @@ async function sendAssignmentEmail(
   }
 }
 
-// GET /admin/users
-router.get("/users", requireAdmin, async (req, res) => {
+// GET /admin/users — managers and admins can view
+router.get("/users", requireManagerOrAdmin, async (req, res) => {
   try {
     const users = await db.select().from(usersTable).orderBy(usersTable.lastName);
     const allResults = await db.select().from(quizResultsTable);
@@ -82,7 +82,7 @@ router.get("/users", requireAdmin, async (req, res) => {
   }
 });
 
-// PATCH /admin/users/:userId/role
+// PATCH /admin/users/:userId/role — admin only (managers cannot promote/demote)
 router.patch("/users/:userId/role", requireAdmin, async (req, res) => {
   try {
     const userId = req.params.userId as string;
@@ -103,18 +103,13 @@ router.patch("/users/:userId/role", requireAdmin, async (req, res) => {
   }
 });
 
-// POST /admin/assignments
-router.post("/assignments", requireAdmin, async (req, res) => {
+// POST /admin/assignments — managers and admins can assign
+router.post("/assignments", requireManagerOrAdmin, async (req, res) => {
   try {
-    const auth = getAuth(req);
+    const actor = res.locals.dbUser;
     const body = req.body as { userIds?: string[]; groupId?: number; moduleId?: number; dueDate?: string | null; notifyEmail?: boolean; resetProgress?: boolean };
     if (!body.moduleId || typeof body.moduleId !== "number") {
       res.status(400).json({ error: "moduleId is required" });
-      return;
-    }
-    const adminUser = await getDbUser(auth!.userId!);
-    if (!adminUser) {
-      res.status(403).json({ error: "Forbidden" });
       return;
     }
 
@@ -168,9 +163,8 @@ router.post("/assignments", requireAdmin, async (req, res) => {
         .limit(1);
 
       if (existing[0]) {
-        // Update existing assignment: refresh assignedBy/dueDate and optionally reset seenAt
         const updateValues: Partial<typeof assignmentsTable.$inferInsert & { seenAt: Date | null; assignedAt: Date }> = {
-          assignedBy: adminUser.id,
+          assignedBy: actor.id,
           assignedAt: new Date(),
           dueDate: dueDate ? new Date(dueDate) : null,
         };
@@ -198,7 +192,7 @@ router.post("/assignments", requireAdmin, async (req, res) => {
       const rows = await db.insert(assignmentsTable).values({
         userId,
         moduleId,
-        assignedBy: adminUser.id,
+        assignedBy: actor.id,
         dueDate: dueDate ? new Date(dueDate) : null,
       }).returning();
       const a = rows[0];
@@ -235,8 +229,8 @@ router.post("/assignments", requireAdmin, async (req, res) => {
   }
 });
 
-// DELETE /admin/assignments/:assignmentId
-router.delete("/assignments/:assignmentId", requireAdmin, async (req, res) => {
+// DELETE /admin/assignments/:assignmentId — managers and admins
+router.delete("/assignments/:assignmentId", requireManagerOrAdmin, async (req, res) => {
   try {
     const assignmentId = parseInt(req.params.assignmentId as string);
     await db.delete(assignmentsTable).where(eq(assignmentsTable.id, assignmentId));
@@ -246,8 +240,8 @@ router.delete("/assignments/:assignmentId", requireAdmin, async (req, res) => {
   }
 });
 
-// GET /admin/progress-matrix
-router.get("/progress-matrix", requireAdmin, async (req, res) => {
+// GET /admin/progress-matrix — managers and admins
+router.get("/progress-matrix", requireManagerOrAdmin, async (req, res) => {
   try {
     const users = await db.select().from(usersTable).orderBy(usersTable.lastName);
     const modules = await db.select().from(modulesTable).orderBy(modulesTable.order);
@@ -291,8 +285,8 @@ router.get("/progress-matrix", requireAdmin, async (req, res) => {
   }
 });
 
-// PATCH /admin/modules/:moduleId/visibility
-router.patch("/modules/:moduleId/visibility", requireAdmin, async (req, res) => {
+// PATCH /admin/modules/:moduleId/visibility — managers and admins
+router.patch("/modules/:moduleId/visibility", requireManagerOrAdmin, async (req, res) => {
   try {
     const moduleId = parseInt(req.params.moduleId as string);
     const { isPublic } = req.body;
@@ -311,7 +305,7 @@ router.patch("/modules/:moduleId/visibility", requireAdmin, async (req, res) => 
   }
 });
 
-// GET /admin/settings
+// GET /admin/settings — admin only
 router.get("/settings", requireAdmin, async (req, res) => {
   try {
     const rows = await db.select().from(settingsTable);
@@ -321,7 +315,7 @@ router.get("/settings", requireAdmin, async (req, res) => {
   }
 });
 
-// PATCH /admin/settings
+// PATCH /admin/settings — admin only
 router.patch("/settings", requireAdmin, async (req, res) => {
   try {
     const { key, value } = req.body as { key?: string; value?: string };
@@ -339,6 +333,36 @@ router.patch("/settings", requireAdmin, async (req, res) => {
       row = inserted[0];
     }
     res.json(row);
+  } catch {
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// GET /admin/audit-log — admin only, optional ?trackId filter
+router.get("/audit-log", requireAdmin, async (req, res) => {
+  try {
+    const trackId = req.query.trackId ? parseInt(req.query.trackId as string) : undefined;
+
+    let rows;
+    if (trackId) {
+      rows = await db
+        .select()
+        .from(contentAuditLogTable)
+        .where(eq(contentAuditLogTable.trackId, trackId))
+        .orderBy(desc(contentAuditLogTable.createdAt))
+        .limit(200);
+    } else {
+      rows = await db
+        .select()
+        .from(contentAuditLogTable)
+        .orderBy(desc(contentAuditLogTable.createdAt))
+        .limit(200);
+    }
+
+    res.json(rows.map(r => ({
+      ...r,
+      createdAt: r.createdAt.toISOString(),
+    })));
   } catch {
     res.status(500).json({ error: "Internal server error" });
   }

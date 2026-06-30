@@ -26,7 +26,7 @@ export const GetMeResponse = zod.object({
   "lastName": zod.string(),
   "email": zod.string(),
   "phone": zod.string().nullish(),
-  "role": zod.enum(['student', 'admin']),
+  "role": zod.enum(['student', 'manager', 'admin']),
   "createdAt": zod.string()
 })
 
@@ -48,7 +48,7 @@ export const UpsertMeResponse = zod.object({
   "lastName": zod.string(),
   "email": zod.string(),
   "phone": zod.string().nullish(),
-  "role": zod.enum(['student', 'admin']),
+  "role": zod.enum(['student', 'manager', 'admin']),
   "createdAt": zod.string()
 })
 
@@ -69,7 +69,7 @@ export const PatchMeResponse = zod.object({
   "lastName": zod.string(),
   "email": zod.string(),
   "phone": zod.string().nullish(),
-  "role": zod.enum(['student', 'admin']),
+  "role": zod.enum(['student', 'manager', 'admin']),
   "createdAt": zod.string()
 })
 
@@ -765,7 +765,7 @@ export const AdminListUsersResponseItem = zod.object({
   "lastName": zod.string(),
   "email": zod.string(),
   "phone": zod.string().nullish(),
-  "role": zod.enum(['student', 'admin']),
+  "role": zod.enum(['student', 'manager', 'admin']),
   "createdAt": zod.string(),
   "quizResults": zod.array(zod.object({
   "id": zod.number(),
@@ -789,7 +789,7 @@ export const UpdateUserRoleParams = zod.object({
 })
 
 export const UpdateUserRoleBody = zod.object({
-  "role": zod.enum(['student', 'admin'])
+  "role": zod.enum(['student', 'manager', 'admin'])
 })
 
 export const UpdateUserRoleResponse = zod.object({
@@ -799,7 +799,7 @@ export const UpdateUserRoleResponse = zod.object({
   "lastName": zod.string(),
   "email": zod.string(),
   "phone": zod.string().nullish(),
-  "role": zod.enum(['student', 'admin']),
+  "role": zod.enum(['student', 'manager', 'admin']),
   "createdAt": zod.string()
 })
 
@@ -865,7 +865,7 @@ export const GetProgressMatrixResponse = zod.object({
   "lastName": zod.string(),
   "email": zod.string(),
   "phone": zod.string().nullish(),
-  "role": zod.enum(['student', 'admin']),
+  "role": zod.enum(['student', 'manager', 'admin']),
   "createdAt": zod.string()
 }),
   "results": zod.array(zod.object({
@@ -876,6 +876,28 @@ export const GetProgressMatrixResponse = zod.object({
 }))
 }))
 })
+
+
+/**
+ * @summary Get content change log (admin only)
+ */
+export const GetAuditLogQueryParams = zod.object({
+  "trackId": zod.coerce.number().optional().describe('Filter by track ID')
+})
+
+export const GetAuditLogResponseItem = zod.object({
+  "id": zod.number(),
+  "actorId": zod.string(),
+  "actorName": zod.string(),
+  "action": zod.enum(['create', 'update', 'delete']),
+  "entityType": zod.enum(['track', 'module', 'video']),
+  "entityId": zod.number(),
+  "entityName": zod.string(),
+  "trackId": zod.number().nullish(),
+  "trackName": zod.string().nullish(),
+  "createdAt": zod.string()
+})
+export const GetAuditLogResponse = zod.array(GetAuditLogResponseItem)
 
 
 /**

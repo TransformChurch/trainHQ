@@ -8,7 +8,11 @@
 
 export * from './assignment';
 export * from './assignmentInput';
+export * from './auditLogEntry';
+export * from './auditLogEntryAction';
+export * from './auditLogEntryEntityType';
 export * from './dashboardSummary';
+export * from './getAuditLogParams';
 export * from './group';
 export * from './groupInput';
 export * from './groupMember';

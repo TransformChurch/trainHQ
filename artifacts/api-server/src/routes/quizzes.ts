@@ -1,12 +1,12 @@
 import { Router } from "express";
 import { db, quizQuestionsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
-import { requireAdmin } from "../middlewares/requireAuth";
+import { requireManagerOrAdmin } from "../middlewares/requireAuth";
 
 const router = Router();
 
-// PATCH /quizzes/questions/:questionId (admin only)
-router.patch("/questions/:questionId", requireAdmin, async (req, res) => {
+// PATCH /quizzes/questions/:questionId
+router.patch("/questions/:questionId", requireManagerOrAdmin, async (req, res) => {
   try {
     const questionId = parseInt(req.params.questionId as string);
     const { questionText, options, correctIndex, order } = req.body as {
@@ -39,8 +39,8 @@ router.patch("/questions/:questionId", requireAdmin, async (req, res) => {
   }
 });
 
-// DELETE /quizzes/questions/:questionId (admin only)
-router.delete("/questions/:questionId", requireAdmin, async (req, res) => {
+// DELETE /quizzes/questions/:questionId
+router.delete("/questions/:questionId", requireManagerOrAdmin, async (req, res) => {
   try {
     const questionId = parseInt(req.params.questionId as string);
     await db.delete(quizQuestionsTable).where(eq(quizQuestionsTable.id, questionId));

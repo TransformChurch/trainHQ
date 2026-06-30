@@ -2,13 +2,14 @@ import { Router } from "express";
 import { getAuth } from "@clerk/express";
 import { db, modulesTable, videosTable, watchHistoryTable, quizResultsTable, queueTable, quizQuestionsTable, assignmentsTable } from "@workspace/db";
 import { eq, and, sql, inArray } from "drizzle-orm";
-import { requireAuth, requireAdmin, getDbUser } from "../middlewares/requireAuth";
+import { requireAuth, requireManagerOrAdmin, getDbUser } from "../middlewares/requireAuth";
 import { CreateModuleBody, UpdateModuleBody, CreateQuizQuestionBody, SubmitQuizBody } from "@workspace/api-zod";
+import { logContentChange } from "../lib/auditLog";
 
 const router = Router();
 
 // GET /modules
-// Admins: see all; Students: see public modules + any private modules they're assigned to
+// Admins/Managers: see all; Students: see public modules + any private modules they're assigned to
 router.get("/", requireAuth, async (req, res) => {
   try {
     const auth = getAuth(req);
@@ -16,8 +17,8 @@ router.get("/", requireAuth, async (req, res) => {
     const trackId = req.query.trackId ? parseInt(req.query.trackId as string) : undefined;
 
     let modules;
-    if (dbUser?.role === "admin") {
-      // Admins see everything
+    if (dbUser?.role === "admin" || dbUser?.role === "manager") {
+      // Admins/Managers see everything
       const query = trackId
         ? db.select().from(modulesTable).where(eq(modulesTable.trackId, trackId)).orderBy(modulesTable.order)
         : db.select().from(modulesTable).orderBy(modulesTable.order);
@@ -44,8 +45,9 @@ router.get("/", requireAuth, async (req, res) => {
 });
 
 // POST /modules
-router.post("/", requireAdmin, async (req, res) => {
+router.post("/", requireManagerOrAdmin, async (req, res) => {
   try {
+    const actor = res.locals.dbUser;
     const parsed = CreateModuleBody.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ error: "Invalid input" });
@@ -53,6 +55,15 @@ router.post("/", requireAdmin, async (req, res) => {
     }
     const inserted = await db.insert(modulesTable).values(parsed.data).returning();
     const m = inserted[0];
+    logContentChange({
+      actorId: actor.id,
+      actorName: `${actor.firstName} ${actor.lastName}`,
+      action: "create",
+      entityType: "module",
+      entityId: m.id,
+      entityName: m.title,
+      trackId: m.trackId,
+    }).catch(() => {});
     res.status(201).json({ ...m, createdAt: m.createdAt.toISOString() });
   } catch {
     res.status(500).json({ error: "Internal server error" });
@@ -127,8 +138,9 @@ router.get("/:moduleId", requireAuth, async (req, res) => {
 });
 
 // PATCH /modules/:moduleId
-router.patch("/:moduleId", requireAdmin, async (req, res) => {
+router.patch("/:moduleId", requireManagerOrAdmin, async (req, res) => {
   try {
+    const actor = res.locals.dbUser;
     const moduleId = parseInt(req.params.moduleId as string);
     const parsed = UpdateModuleBody.safeParse(req.body);
     if (!parsed.success) {
@@ -141,6 +153,15 @@ router.patch("/:moduleId", requireAdmin, async (req, res) => {
       return;
     }
     const m = updated[0];
+    logContentChange({
+      actorId: actor.id,
+      actorName: `${actor.firstName} ${actor.lastName}`,
+      action: "update",
+      entityType: "module",
+      entityId: m.id,
+      entityName: m.title,
+      trackId: m.trackId,
+    }).catch(() => {});
     res.json({ ...m, createdAt: m.createdAt.toISOString() });
   } catch {
     res.status(500).json({ error: "Internal server error" });
@@ -148,9 +169,22 @@ router.patch("/:moduleId", requireAdmin, async (req, res) => {
 });
 
 // DELETE /modules/:moduleId
-router.delete("/:moduleId", requireAdmin, async (req, res) => {
+router.delete("/:moduleId", requireManagerOrAdmin, async (req, res) => {
   try {
+    const actor = res.locals.dbUser;
     const moduleId = parseInt(req.params.moduleId as string);
+    const existing = await db.select().from(modulesTable).where(eq(modulesTable.id, moduleId)).limit(1);
+    if (existing[0]) {
+      logContentChange({
+        actorId: actor.id,
+        actorName: `${actor.firstName} ${actor.lastName}`,
+        action: "delete",
+        entityType: "module",
+        entityId: existing[0].id,
+        entityName: existing[0].title,
+        trackId: existing[0].trackId,
+      }).catch(() => {});
+    }
     await db.delete(modulesTable).where(eq(modulesTable.id, moduleId));
     res.status(204).send();
   } catch {
@@ -173,8 +207,8 @@ router.get("/:moduleId/quiz", requireAuth, async (req, res) => {
   }
 });
 
-// POST /modules/:moduleId/quiz (add question - admin)
-router.post("/:moduleId/quiz", requireAdmin, async (req, res) => {
+// POST /modules/:moduleId/quiz (add question)
+router.post("/:moduleId/quiz", requireManagerOrAdmin, async (req, res) => {
   try {
     const moduleId = parseInt(req.params.moduleId as string);
     const parsed = CreateQuizQuestionBody.safeParse(req.body);

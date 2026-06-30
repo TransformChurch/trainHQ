@@ -2,7 +2,7 @@ import { Link, useLocation } from "wouter";
 import { useGetMe } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
 import { useClerk } from "@clerk/react";
-import { BookOpen, LayoutDashboard, Settings, Video, ShieldCheck, LogOut, Menu, UserCircle } from "lucide-react";
+import { BookOpen, LayoutDashboard, Settings, Video, ShieldCheck, LogOut, Menu, UserCircle, Users } from "lucide-react";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 
 export function Sidebar() {
@@ -12,6 +12,8 @@ export function Sidebar() {
   const basePath = import.meta.env.BASE_URL.replace(/\/$/, "");
 
   const isAdmin = user?.role === "admin";
+  const isManager = user?.role === "manager";
+  const isManagerOrAdmin = isAdmin || isManager;
 
   const isProfileIncomplete = user && (!user.phone || !user.firstName || !user.lastName);
 
@@ -22,10 +24,13 @@ export function Sidebar() {
     { href: "/profile", label: "My Profile", icon: UserCircle, badge: isProfileIncomplete ? "!" : undefined },
   ];
 
-  const adminItems = [
-    { href: "/admin", label: "Admin Dashboard", icon: ShieldCheck },
-    { href: "/admin/users", label: "Users & Progress", icon: Settings },
+  const managerItems = [
+    { href: "/admin/users", label: "Users & Progress", icon: Users },
     { href: "/admin/content", label: "Content Manager", icon: Settings },
+  ];
+
+  const adminOnlyItems = [
+    { href: "/admin", label: "Admin Dashboard", icon: ShieldCheck },
     { href: "/admin/settings", label: "Admin Settings", icon: Settings },
   ];
 
@@ -68,10 +73,32 @@ export function Sidebar() {
           );
         })}
 
-        {isAdmin && (
+        {isManagerOrAdmin && (
           <>
-            <div className="text-xs font-semibold text-sidebar-foreground/50 uppercase tracking-wider mt-8 mb-2 px-2">Administration</div>
-            {adminItems.map((item) => {
+            <div className="text-xs font-semibold text-sidebar-foreground/50 uppercase tracking-wider mt-8 mb-2 px-2">
+              {isAdmin ? "Administration" : "Management"}
+            </div>
+
+            {isAdmin && adminOnlyItems.map((item) => {
+              const Icon = item.icon;
+              const isActive = location === item.href || location.startsWith(`${item.href}/`);
+              return (
+                <Link key={item.href} href={item.href} data-testid={`nav-admin-${item.label.toLowerCase().replace(/\s+/g, "-")}`}>
+                  <div
+                    className={`flex items-center gap-3 px-3 py-2 rounded-md transition-colors cursor-pointer ${
+                      isActive
+                        ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
+                        : "text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
+                    }`}
+                  >
+                    <Icon className={`w-5 h-5 ${isActive ? "text-primary" : ""}`} />
+                    {item.label}
+                  </div>
+                </Link>
+              );
+            })}
+
+            {managerItems.map((item) => {
               const Icon = item.icon;
               const isActive = location === item.href || location.startsWith(`${item.href}/`);
               return (

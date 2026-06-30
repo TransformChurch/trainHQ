@@ -14,6 +14,7 @@ export type UserRole = typeof UserRole[keyof typeof UserRole];
 
 export const UserRole = {
   student: 'student',
+  manager: 'manager',
   admin: 'admin',
 } as const;
 
@@ -42,6 +43,7 @@ export type RoleUpdateRole = typeof RoleUpdateRole[keyof typeof RoleUpdateRole];
 
 export const RoleUpdateRole = {
   student: 'student',
+  manager: 'manager',
   admin: 'admin',
 } as const;
 
@@ -322,6 +324,7 @@ export type UserWithProgressRole = typeof UserWithProgressRole[keyof typeof User
 
 export const UserWithProgressRole = {
   student: 'student',
+  manager: 'manager',
   admin: 'admin',
 } as const;
 
@@ -415,6 +418,39 @@ export interface SettingInput {
   value: string;
 }
 
+export type AuditLogEntryAction = typeof AuditLogEntryAction[keyof typeof AuditLogEntryAction];
+
+
+export const AuditLogEntryAction = {
+  create: 'create',
+  update: 'update',
+  delete: 'delete',
+} as const;
+
+export type AuditLogEntryEntityType = typeof AuditLogEntryEntityType[keyof typeof AuditLogEntryEntityType];
+
+
+export const AuditLogEntryEntityType = {
+  track: 'track',
+  module: 'module',
+  video: 'video',
+} as const;
+
+export interface AuditLogEntry {
+  id: number;
+  actorId: string;
+  actorName: string;
+  action: AuditLogEntryAction;
+  entityType: AuditLogEntryEntityType;
+  entityId: number;
+  entityName: string;
+  /** @nullable */
+  trackId?: number | null;
+  /** @nullable */
+  trackName?: string | null;
+  createdAt: string;
+}
+
 export interface UploadUrlRequest {
   name: string;
   size: number;
@@ -433,5 +469,12 @@ trackId?: number;
 
 export type ListVideosParams = {
 moduleId?: number;
+};
+
+export type GetAuditLogParams = {
+/**
+ * Filter by track ID
+ */
+trackId?: number;
 };
 

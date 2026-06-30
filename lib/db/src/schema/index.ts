@@ -8,3 +8,4 @@ export * from "./queue";
 export * from "./quizzes";
 export * from "./groups";
 export * from "./settings";
+export * from "./contentAuditLog";

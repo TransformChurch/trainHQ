@@ -872,6 +872,28 @@ paths:
               schema:
                 $ref: "#/components/schemas/ProgressMatrix"
 
+  /admin/audit-log:
+    get:
+      operationId: getAuditLog
+      tags: [admin]
+      summary: Get content change log (admin only)
+      parameters:
+        - in: query
+          name: trackId
+          schema:
+            type: integer
+          required: false
+          description: Filter by track ID
+      responses:
+        "200":
+          description: List of audit log entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AuditLogEntry"
+
   /admin/settings:
     get:
       operationId: getAdminSettings
@@ -974,7 +996,7 @@ components:
           type: ["string", "null"]
         role:
           type: string
-          enum: [student, admin]
+          enum: [student, manager, admin]
         createdAt:
           type: string
       required: [id, clerkId, firstName, lastName, email, role, createdAt]
@@ -997,7 +1019,7 @@ components:
       properties:
         role:
           type: string
-          enum: [student, admin]
+          enum: [student, manager, admin]
       required: [role]
 
     Track:
@@ -1427,7 +1449,7 @@ components:
           type: ["string", "null"]
         role:
           type: string
-          enum: [student, admin]
+          enum: [student, manager, admin]
         createdAt:
           type: string
         quizResults:
@@ -1564,6 +1586,33 @@ components:
         value:
           type: string
       required: [key, value]
+
+    AuditLogEntry:
+      type: object
+      properties:
+        id:
+          type: integer
+        actorId:
+          type: string
+        actorName:
+          type: string
+        action:
+          type: string
+          enum: [create, update, delete]
+        entityType:
+          type: string
+          enum: [track, module, video]
+        entityId:
+          type: integer
+        entityName:
+          type: string
+        trackId:
+          type: ["integer", "null"]
+        trackName:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+      required: [id, actorId, actorName, action, entityType, entityId, entityName, createdAt]
 
     UploadUrlRequest:
       type: object

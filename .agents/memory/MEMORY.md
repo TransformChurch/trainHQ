@@ -1,1 +1,5 @@
 - [Orval inline schema conflict](orval-inline-schema-conflict.md) — inline request body schemas in OpenAPI cause duplicate name conflicts between zod api.ts and types/; always use named $ref schemas.
+- [Role-based access pattern](role-access.md) — requireManagerOrAdmin middleware stores dbUser in res.locals; res.locals.dbUser available in route handlers for audit logging without extra DB call.
+- [Audit log design](audit-log.md) — content_audit_log table tracks track/module/video mutations; logContentChange helper in api-server/src/lib/auditLog.ts; served from GET /admin/audit-log (admin-only, ?trackId filter).
+- [Orval hook names](orval-hooks.md) — tracks list hook is useListTracks (not useGetTracks); UseQueryOptions requires queryKey in strict TS so never pass {query:{enabled:...}} — call hooks unconditionally and check data/role instead.
+- [DB push command](db-push.md) — correct command is `pnpm run push` inside lib/db (not db:push).

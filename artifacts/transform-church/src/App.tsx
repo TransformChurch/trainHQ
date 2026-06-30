@@ -23,7 +23,7 @@ import AdminContent from "@/pages/AdminContent";
 import AdminSettings from "@/pages/AdminSettings";
 import Profile from "@/pages/Profile";
 import NotFound from "@/pages/not-found";
-import { useUpsertMe } from "@workspace/api-client-react";
+import { useUpsertMe, useGetMe } from "@workspace/api-client-react";
 
 const queryClient = new QueryClient();
 
@@ -197,14 +197,26 @@ function Spinner() {
   );
 }
 
-function ProtectedRoute({ component: Component, adminOnly: _adminOnly = false }: { component: any, adminOnly?: boolean }) {
+function ProtectedRoute({ component: Component, adminOnly = false, managerOrAdmin = false }: { component: any, adminOnly?: boolean, managerOrAdmin?: boolean }) {
   const { isLoaded, isSignedIn } = useUser();
   const { synced } = useContext(UserSyncContext);
+  const { data: me, isLoading: meLoading } = useGetMe();
 
   if (!isLoaded) return <Spinner />;
   if (!isSignedIn) return <Redirect to="/" />;
-  // Wait for the DB upsert to complete before rendering any data-fetching page
   if (!synced) return <Spinner />;
+
+  // Wait for role to load if we need to check it
+  if ((adminOnly || managerOrAdmin) && meLoading) return <Spinner />;
+
+  if (adminOnly && me) {
+    if (me.role === "manager") return <Redirect to="/admin/users" />;
+    if (me.role === "student") return <Redirect to="/dashboard" />;
+  }
+
+  if (managerOrAdmin && me) {
+    if (me.role === "student") return <Redirect to="/dashboard" />;
+  }
 
   return (
     <AppLayout>
@@ -259,8 +271,8 @@ function ClerkProviderWithRoutes() {
           
           {/* Admin Routes */}
           <Route path="/admin"><ProtectedRoute component={AdminDashboard} adminOnly /></Route>
-          <Route path="/admin/users"><ProtectedRoute component={AdminUsers} adminOnly /></Route>
-          <Route path="/admin/content"><ProtectedRoute component={AdminContent} adminOnly /></Route>
+          <Route path="/admin/users"><ProtectedRoute component={AdminUsers} managerOrAdmin /></Route>
+          <Route path="/admin/content"><ProtectedRoute component={AdminContent} managerOrAdmin /></Route>
           <Route path="/admin/settings"><ProtectedRoute component={AdminSettings} adminOnly /></Route>
           
           <Route component={NotFound} />

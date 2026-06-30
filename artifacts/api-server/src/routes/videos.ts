@@ -1,8 +1,9 @@
 import { Router } from "express";
-import { db, videosTable } from "@workspace/db";
+import { db, videosTable, modulesTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
-import { requireAuth, requireAdmin } from "../middlewares/requireAuth";
+import { requireAuth, requireManagerOrAdmin } from "../middlewares/requireAuth";
 import { CreateVideoBody, UpdateVideoBody } from "@workspace/api-zod";
+import { logContentChange } from "../lib/auditLog";
 
 const router = Router();
 
@@ -20,8 +21,9 @@ router.get("/", requireAuth, async (req, res) => {
 });
 
 // POST /videos
-router.post("/", requireAdmin, async (req, res) => {
+router.post("/", requireManagerOrAdmin, async (req, res) => {
   try {
+    const actor = res.locals.dbUser;
     const parsed = CreateVideoBody.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ error: "Invalid input" });
@@ -29,6 +31,16 @@ router.post("/", requireAdmin, async (req, res) => {
     }
     const inserted = await db.insert(videosTable).values(parsed.data).returning();
     const v = inserted[0];
+    const mod = await db.select({ trackId: modulesTable.trackId }).from(modulesTable).where(eq(modulesTable.id, v.moduleId)).limit(1);
+    logContentChange({
+      actorId: actor.id,
+      actorName: `${actor.firstName} ${actor.lastName}`,
+      action: "create",
+      entityType: "video",
+      entityId: v.id,
+      entityName: v.title,
+      trackId: mod[0]?.trackId ?? null,
+    }).catch(() => {});
     res.status(201).json({ ...v, createdAt: v.createdAt.toISOString() });
   } catch {
     res.status(500).json({ error: "Internal server error" });
@@ -52,8 +64,9 @@ router.get("/:videoId", requireAuth, async (req, res) => {
 });
 
 // PATCH /videos/:videoId
-router.patch("/:videoId", requireAdmin, async (req, res) => {
+router.patch("/:videoId", requireManagerOrAdmin, async (req, res) => {
   try {
+    const actor = res.locals.dbUser;
     const videoId = parseInt(req.params.videoId as string);
     const parsed = UpdateVideoBody.safeParse(req.body);
     if (!parsed.success) {
@@ -66,6 +79,16 @@ router.patch("/:videoId", requireAdmin, async (req, res) => {
       return;
     }
     const v = updated[0];
+    const mod = await db.select({ trackId: modulesTable.trackId }).from(modulesTable).where(eq(modulesTable.id, v.moduleId)).limit(1);
+    logContentChange({
+      actorId: actor.id,
+      actorName: `${actor.firstName} ${actor.lastName}`,
+      action: "update",
+      entityType: "video",
+      entityId: v.id,
+      entityName: v.title,
+      trackId: mod[0]?.trackId ?? null,
+    }).catch(() => {});
     res.json({ ...v, createdAt: v.createdAt.toISOString() });
   } catch {
     res.status(500).json({ error: "Internal server error" });
@@ -73,9 +96,23 @@ router.patch("/:videoId", requireAdmin, async (req, res) => {
 });
 
 // DELETE /videos/:videoId
-router.delete("/:videoId", requireAdmin, async (req, res) => {
+router.delete("/:videoId", requireManagerOrAdmin, async (req, res) => {
   try {
+    const actor = res.locals.dbUser;
     const videoId = parseInt(req.params.videoId as string);
+    const existing = await db.select().from(videosTable).where(eq(videosTable.id, videoId)).limit(1);
+    if (existing[0]) {
+      const mod = await db.select({ trackId: modulesTable.trackId }).from(modulesTable).where(eq(modulesTable.id, existing[0].moduleId)).limit(1);
+      logContentChange({
+        actorId: actor.id,
+        actorName: `${actor.firstName} ${actor.lastName}`,
+        action: "delete",
+        entityType: "video",
+        entityId: existing[0].id,
+        entityName: existing[0].title,
+        trackId: mod[0]?.trackId ?? null,
+      }).catch(() => {});
+    }
     await db.delete(videosTable).where(eq(videosTable.id, videoId));
     res.status(204).send();
   } catch {
