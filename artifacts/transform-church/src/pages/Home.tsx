@@ -1,6 +1,7 @@
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import { BookOpen, Users, Video, ShieldCheck, ChevronRight } from "lucide-react";
+import wordmark from "@assets/TC_Black_Wordmark_1782833324395.png";
 
 export default function Home() {
   const basePath = import.meta.env.BASE_URL.replace(/\/$/, "");
@@ -8,11 +9,8 @@ export default function Home() {
   return (
     <div className="min-h-[100dvh] flex flex-col bg-background">
       <header className="px-6 h-20 flex items-center justify-between border-b border-border/50 bg-background/80 backdrop-blur-sm sticky top-0 z-50">
-        <div className="flex items-center gap-3">
-          <div className="bg-primary/20 p-2 rounded-lg text-primary">
-            <BookOpen className="w-6 h-6" />
-          </div>
-          <span className="text-xl font-bold text-foreground">Transform Church</span>
+        <div className="flex items-center">
+          <img src={wordmark} alt="Transform Church" className="h-8 w-auto" />
         </div>
         <div className="flex items-center gap-4">
           <Link href={`${basePath}/sign-in`} className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors" data-testid="landing-login-link">
@@ -76,9 +74,8 @@ export default function Home() {
       
       <footer className="w-full py-12 px-6 border-t border-border bg-background">
         <div className="max-w-6xl mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
-          <div className="flex items-center gap-2 text-foreground font-semibold">
-            <BookOpen className="w-5 h-5 text-primary" />
-            Transform Church
+          <div className="flex items-center">
+            <img src={wordmark} alt="Transform Church" className="h-6 w-auto" />
           </div>
           <p className="text-sm text-muted-foreground">
             © {new Date().getFullYear()} Transform Church. All rights reserved.

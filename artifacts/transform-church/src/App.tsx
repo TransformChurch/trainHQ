@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { Switch, Route, Redirect, useLocation, Router as WouterRouter } from "wouter";
 import { QueryClient, QueryClientProvider, useQueryClient } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
@@ -50,7 +50,7 @@ const clerkAppearance = {
   options: {
     logoPlacement: "inside" as const,
     logoLinkUrl: basePath || "/",
-    logoImageUrl: `${window.location.origin}${basePath}/logo.svg`,
+    logoImageUrl: `${window.location.origin}${basePath}/tc-wordmark.png`,
   },
   variables: {
     colorPrimary: "hsl(43 96% 56%)",
@@ -93,25 +93,31 @@ const clerkAppearance = {
   },
 };
 
-function SignInPage() {
+function AuthShell({ children }: { children: ReactNode }) {
   return (
     <div className="flex min-h-[100dvh] items-center justify-center bg-muted/30 px-4 py-12 relative overflow-hidden">
       <div className="absolute inset-0 bg-primary/5 pointer-events-none" />
-      <div className="z-10 w-full max-w-md">
-        <SignIn routing="path" path={`${basePath}/sign-in`} signUpUrl={`${basePath}/sign-up`} />
+      <div className="z-10 w-full max-w-md flex flex-col items-center gap-6">
+        <img src={`${basePath}/tc-wordmark.png`} alt="Transform Church" className="h-10 w-auto" />
+        {children}
       </div>
     </div>
   );
 }
 
+function SignInPage() {
+  return (
+    <AuthShell>
+      <SignIn routing="path" path={`${basePath}/sign-in`} signUpUrl={`${basePath}/sign-up`} />
+    </AuthShell>
+  );
+}
+
 function SignUpPage() {
   return (
-    <div className="flex min-h-[100dvh] items-center justify-center bg-muted/30 px-4 py-12 relative overflow-hidden">
-      <div className="absolute inset-0 bg-primary/5 pointer-events-none" />
-      <div className="z-10 w-full max-w-md">
-        <SignUp routing="path" path={`${basePath}/sign-up`} signInUrl={`${basePath}/sign-in`} />
-      </div>
-    </div>
+    <AuthShell>
+      <SignUp routing="path" path={`${basePath}/sign-up`} signInUrl={`${basePath}/sign-in`} />
+    </AuthShell>
   );
 }
 
