@@ -4,7 +4,7 @@
  */
 import { drizzle } from "drizzle-orm/node-postgres";
 import pg from "pg";
-import { tracksTable, modulesTable, videosTable, quizQuestionsTable } from "./schema";
+import { tracksTable, modulesTable, videosTable, quizQuestionsTable, settingsTable } from "./schema";
 import { eq } from "drizzle-orm";
 
 if (!process.env.DATABASE_URL) {
@@ -128,6 +128,15 @@ async function seed() {
         console.log(`  ✓ Question already exists`);
       }
     }
+  }
+
+  // Seed default settings
+  const existingSetting = await db.select().from(settingsTable).where(eq(settingsTable.key, "max_video_upload_size_mb")).limit(1);
+  if (!existingSetting[0]) {
+    await db.insert(settingsTable).values({ key: "max_video_upload_size_mb", value: "500" });
+    console.log("  + Created default setting: max_video_upload_size_mb = 500");
+  } else {
+    console.log("  ✓ Setting already exists: max_video_upload_size_mb");
   }
 
   console.log("✅ Seed complete.");

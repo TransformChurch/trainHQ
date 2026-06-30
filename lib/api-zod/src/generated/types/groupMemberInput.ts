@@ -6,10 +6,6 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export type ProgressRowResultsItem = {
-  moduleId: number;
-  /** @nullable */
-  passed?: boolean | null;
-  /** @nullable */
-  score?: number | null;
-};
+export interface GroupMemberInput {
+  userId: string;
+}

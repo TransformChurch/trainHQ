@@ -26,6 +26,7 @@ export function Sidebar() {
     { href: "/admin", label: "Admin Dashboard", icon: ShieldCheck },
     { href: "/admin/users", label: "Users & Progress", icon: Settings },
     { href: "/admin/content", label: "Content Manager", icon: Settings },
+    { href: "/admin/settings", label: "Admin Settings", icon: Settings },
   ];
 
   const handleSignOut = () => {

@@ -1,20 +1,42 @@
 import { Router } from "express";
 import { getAuth } from "@clerk/express";
-import { db, modulesTable, videosTable, watchHistoryTable, quizResultsTable, queueTable, quizQuestionsTable } from "@workspace/db";
-import { eq, and, sql } from "drizzle-orm";
+import { db, modulesTable, videosTable, watchHistoryTable, quizResultsTable, queueTable, quizQuestionsTable, assignmentsTable } from "@workspace/db";
+import { eq, and, sql, inArray } from "drizzle-orm";
 import { requireAuth, requireAdmin, getDbUser } from "../middlewares/requireAuth";
 import { CreateModuleBody, UpdateModuleBody, CreateQuizQuestionBody, SubmitQuizBody } from "@workspace/api-zod";
 
 const router = Router();
 
 // GET /modules
+// Admins: see all; Students: see public modules + any private modules they're assigned to
 router.get("/", requireAuth, async (req, res) => {
   try {
+    const auth = getAuth(req);
+    const dbUser = await getDbUser(auth!.userId!);
     const trackId = req.query.trackId ? parseInt(req.query.trackId as string) : undefined;
-    const query = trackId
-      ? db.select().from(modulesTable).where(eq(modulesTable.trackId, trackId)).orderBy(modulesTable.order)
-      : db.select().from(modulesTable).orderBy(modulesTable.order);
-    const modules = await query;
+
+    let modules;
+    if (dbUser?.role === "admin") {
+      // Admins see everything
+      const query = trackId
+        ? db.select().from(modulesTable).where(eq(modulesTable.trackId, trackId)).orderBy(modulesTable.order)
+        : db.select().from(modulesTable).orderBy(modulesTable.order);
+      modules = await query;
+    } else {
+      // Students: get their assigned module IDs first
+      const assignments = dbUser
+        ? await db.select({ moduleId: assignmentsTable.moduleId }).from(assignmentsTable).where(eq(assignmentsTable.userId, dbUser.id))
+        : [];
+      const assignedIds = assignments.map(a => a.moduleId);
+
+      // Then fetch modules that are public OR assigned to this user
+      const allModules = trackId
+        ? await db.select().from(modulesTable).where(eq(modulesTable.trackId, trackId)).orderBy(modulesTable.order)
+        : await db.select().from(modulesTable).orderBy(modulesTable.order);
+
+      modules = allModules.filter(m => m.isPublic || assignedIds.includes(m.id));
+    }
+
     res.json(modules.map(m => ({ ...m, createdAt: m.createdAt.toISOString() })));
   } catch {
     res.status(500).json({ error: "Internal server error" });

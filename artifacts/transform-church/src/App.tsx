@@ -20,6 +20,7 @@ import History from "@/pages/History";
 import AdminDashboard from "@/pages/AdminDashboard";
 import AdminUsers from "@/pages/AdminUsers";
 import AdminContent from "@/pages/AdminContent";
+import AdminSettings from "@/pages/AdminSettings";
 import Profile from "@/pages/Profile";
 import NotFound from "@/pages/not-found";
 import { useUpsertMe } from "@workspace/api-client-react";
@@ -260,6 +261,7 @@ function ClerkProviderWithRoutes() {
           <Route path="/admin"><ProtectedRoute component={AdminDashboard} adminOnly /></Route>
           <Route path="/admin/users"><ProtectedRoute component={AdminUsers} adminOnly /></Route>
           <Route path="/admin/content"><ProtectedRoute component={AdminContent} adminOnly /></Route>
+          <Route path="/admin/settings"><ProtectedRoute component={AdminSettings} adminOnly /></Route>
           
           <Route component={NotFound} />
         </Switch>

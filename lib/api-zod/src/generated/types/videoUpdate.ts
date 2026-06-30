@@ -5,6 +5,7 @@
  * Transform Church Leadership Training Platform API
  * OpenAPI spec version: 0.1.0
  */
+import type { VideoUpdateVideoType } from './videoUpdateVideoType';
 
 export interface VideoUpdate {
   title?: string;
@@ -16,4 +17,5 @@ export interface VideoUpdate {
   /** @nullable */
   durationSeconds?: number | null;
   order?: number;
+  videoType?: VideoUpdateVideoType;
 }

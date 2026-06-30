@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -23,9 +23,170 @@ import {
 import {
   Accordion, AccordionContent, AccordionItem, AccordionTrigger,
 } from "@/components/ui/accordion";
-import { Plus, Trash2, Video, BookOpen, HelpCircle, Users, Pencil, Globe, Lock, Mail } from "lucide-react";
+import { Plus, Trash2, Video, BookOpen, HelpCircle, Users, Pencil, Globe, Lock, Mail, Upload, Link, HardDrive } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Progress } from "@/components/ui/progress";
+import { useUpload } from "@workspace/object-storage-web";
 import type { Video as VideoType, QuizQuestion } from "@workspace/api-client-react";
+
+type VideoSourceType = "embed" | "drive" | "upload";
+
+function convertDriveUrl(input: string): string {
+  const fileIdMatch = input.match(/\/d\/([a-zA-Z0-9_-]+)/);
+  if (fileIdMatch) {
+    return `https://drive.google.com/file/d/${fileIdMatch[1]}/preview`;
+  }
+  return input;
+}
+
+function VideoSourcePicker({
+  sourceType,
+  onSourceChange,
+  url,
+  onUrlChange,
+  onUploadComplete,
+}: {
+  sourceType: VideoSourceType;
+  onSourceChange: (t: VideoSourceType) => void;
+  url: string;
+  onUrlChange: (u: string) => void;
+  onUploadComplete: (objectPath: string) => void;
+}) {
+  const { toast } = useToast();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [maxSizeMb, setMaxSizeMb] = useState(500);
+  const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
+
+  useEffect(() => {
+    fetch(`${BASE}/api/admin/settings`, { credentials: "include" })
+      .then(r => r.json())
+      .then((rows: { key: string; value: string }[]) => {
+        const s = rows?.find(r => r.key === "max_video_upload_size_mb");
+        if (s) setMaxSizeMb(parseInt(s.value));
+      })
+      .catch(() => {});
+  }, []);
+
+  const { uploadFile, isUploading, progress } = useUpload({
+    basePath: `${BASE}/api/storage`,
+    onSuccess: (response) => {
+      onUploadComplete(response.objectPath);
+      onUrlChange(response.objectPath);
+      toast({ title: "Video uploaded successfully" });
+    },
+    onError: (err) => {
+      toast({ title: err.message || "Upload failed", variant: "destructive" });
+    },
+  });
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const maxBytes = maxSizeMb * 1024 * 1024;
+    if (file.size > maxBytes) {
+      toast({ title: `File too large. Maximum allowed size is ${maxSizeMb} MB.`, variant: "destructive" });
+      return;
+    }
+    await uploadFile(file);
+  };
+
+  return (
+    <div className="space-y-3">
+      <Label>Video Source</Label>
+      <div className="flex rounded-lg border border-input overflow-hidden text-sm">
+        {(["embed", "drive", "upload"] as VideoSourceType[]).map((type) => {
+          const labels: Record<VideoSourceType, { label: string; Icon: React.FC<{ className?: string }> }> = {
+            embed: { label: "YouTube / Vimeo", Icon: Link },
+            drive: { label: "Google Drive", Icon: HardDrive },
+            upload: { label: "Upload File", Icon: Upload },
+          };
+          const { label, Icon } = labels[type];
+          return (
+            <button
+              key={type}
+              type="button"
+              onClick={() => onSourceChange(type)}
+              className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-1 font-medium transition-colors ${sourceType === type ? "bg-primary text-primary-foreground" : "bg-background text-muted-foreground hover:bg-muted"}`}
+            >
+              <Icon className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">{label}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      {sourceType === "embed" && (
+        <div className="space-y-1.5">
+          <Label>Embed URL</Label>
+          <Input
+            value={url}
+            onChange={e => onUrlChange(e.target.value)}
+            placeholder="https://www.youtube.com/embed/..."
+            required
+          />
+        </div>
+      )}
+
+      {sourceType === "drive" && (
+        <div className="space-y-1.5">
+          <Label>Google Drive Share Link</Label>
+          <Input
+            value={url}
+            onChange={e => onUrlChange(convertDriveUrl(e.target.value))}
+            placeholder="https://drive.google.com/file/d/.../view"
+            required
+          />
+          {url && <p className="text-xs text-muted-foreground break-all">Embed: {url}</p>}
+        </div>
+      )}
+
+      {sourceType === "upload" && (
+        <div className="space-y-2">
+          <Label>Video File</Label>
+          <p className="text-xs text-muted-foreground">
+            Max size: {maxSizeMb} MB. Accepted: mp4, mov, webm, avi.
+          </p>
+          {url && url.startsWith("/objects/") ? (
+            <div className="flex items-center gap-2 p-2 bg-muted/30 rounded text-xs">
+              <Video className="w-4 h-4 text-primary shrink-0" />
+              <span className="truncate text-muted-foreground">{url}</span>
+              <Button type="button" size="sm" variant="ghost" className="h-6 text-xs" onClick={() => { onUrlChange(""); if (fileInputRef.current) fileInputRef.current.value = ""; }}>
+                Remove
+              </Button>
+            </div>
+          ) : (
+            <div
+              className="border-2 border-dashed border-input rounded-lg p-6 text-center cursor-pointer hover:border-primary/50 hover:bg-muted/20 transition-colors"
+              onClick={() => fileInputRef.current?.click()}
+            >
+              {isUploading ? (
+                <div className="space-y-2">
+                  <p className="text-sm text-muted-foreground">Uploading...</p>
+                  <Progress value={progress} className="h-2" />
+                </div>
+              ) : (
+                <>
+                  <Upload className="w-8 h-8 text-muted-foreground/50 mx-auto mb-2" />
+                  <p className="text-sm text-muted-foreground">Click to select a video file</p>
+                </>
+              )}
+            </div>
+          )}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="video/*"
+            className="hidden"
+            onChange={handleFileChange}
+            disabled={isUploading}
+          />
+          {isUploading && <input type="hidden" required value="" />}
+          {!isUploading && sourceType === "upload" && <input type="hidden" required={!url} value={url} />}
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -58,17 +219,23 @@ function EditVideoDialog({ video, moduleId, onSaved }: { video: VideoType; modul
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState(video.title);
   const [url, setUrl] = useState(video.url);
+  const [sourceType, setSourceType] = useState<VideoSourceType>((video.videoType as VideoSourceType) ?? "embed");
   const [desc, setDesc] = useState(video.description ?? "");
   const [duration, setDuration] = useState(video.durationSeconds ? String(video.durationSeconds) : "");
   const [order, setOrder] = useState(String(video.order));
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
+    if (sourceType === "upload" && !url) {
+      toast({ title: "Please upload a video file first", variant: "destructive" });
+      return;
+    }
     updateVideo({
       videoId: video.id,
       data: {
         title,
         url,
+        videoType: sourceType,
         description: desc || null,
         durationSeconds: duration ? parseInt(duration) : null,
         order: parseInt(order),
@@ -83,21 +250,33 @@ function EditVideoDialog({ video, moduleId, onSaved }: { video: VideoType; modul
     });
   };
 
+  const resetState = () => {
+    setTitle(video.title);
+    setUrl(video.url);
+    setSourceType((video.videoType as VideoSourceType) ?? "embed");
+    setDesc(video.description ?? "");
+    setDuration(video.durationSeconds ? String(video.durationSeconds) : "");
+    setOrder(String(video.order));
+  };
+
   return (
-    <Dialog open={open} onOpenChange={(v) => {
-      setOpen(v);
-      if (v) { setTitle(video.title); setUrl(video.url); setDesc(video.description ?? ""); setDuration(video.durationSeconds ? String(video.durationSeconds) : ""); setOrder(String(video.order)); }
-    }}>
+    <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (v) resetState(); }}>
       <DialogTrigger asChild>
         <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" title="Edit video">
           <Pencil className="w-3 h-3" />
         </Button>
       </DialogTrigger>
-      <DialogContent>
+      <DialogContent className="max-w-lg">
         <DialogHeader><DialogTitle>Edit Video</DialogTitle></DialogHeader>
         <form onSubmit={handleSave} className="space-y-4">
           <FormField label="Title"><Input value={title} onChange={e => setTitle(e.target.value)} required /></FormField>
-          <FormField label="Embed URL (YouTube/Vimeo)"><Input value={url} onChange={e => setUrl(e.target.value)} required /></FormField>
+          <VideoSourcePicker
+            sourceType={sourceType}
+            onSourceChange={(t) => { setSourceType(t); setUrl(""); }}
+            url={url}
+            onUrlChange={setUrl}
+            onUploadComplete={setUrl}
+          />
           <FormField label="Description"><Textarea value={desc} onChange={e => setDesc(e.target.value)} rows={2} /></FormField>
           <div className="grid grid-cols-2 gap-3">
             <FormField label="Duration (seconds)"><Input type="number" value={duration} onChange={e => setDuration(e.target.value)} placeholder="600" /></FormField>
@@ -343,18 +522,23 @@ function VideoManager({ moduleId }: { moduleId: number }) {
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState("");
   const [url, setUrl] = useState("");
+  const [sourceType, setSourceType] = useState<VideoSourceType>("embed");
   const [desc, setDesc] = useState("");
   const [duration, setDuration] = useState("");
   const [order, setOrder] = useState("1");
 
   const handleCreate = (e: React.FormEvent) => {
     e.preventDefault();
+    if (sourceType === "upload" && !url) {
+      toast({ title: "Please upload a video file first", variant: "destructive" });
+      return;
+    }
     createVideo({
-      data: { moduleId, title, url, description: desc, durationSeconds: duration ? parseInt(duration) : undefined, order: parseInt(order) }
+      data: { moduleId, title, url, videoType: sourceType, description: desc, durationSeconds: duration ? parseInt(duration) : undefined, order: parseInt(order) }
     }, {
       onSuccess: () => {
         toast({ title: "Video added" });
-        setOpen(false); setTitle(""); setUrl(""); setDesc(""); setDuration(""); setOrder("1");
+        setOpen(false); setTitle(""); setUrl(""); setSourceType("embed"); setDesc(""); setDuration(""); setOrder("1");
         queryClient.invalidateQueries({ queryKey: getListVideosQueryKey({ moduleId }) });
       },
     });
@@ -368,15 +552,21 @@ function VideoManager({ moduleId }: { moduleId: number }) {
         <span className="text-xs text-muted-foreground flex items-center gap-1">
           <Video className="w-3 h-3" /> Videos ({videos?.length ?? 0})
         </span>
-        <Dialog open={open} onOpenChange={setOpen}>
+        <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) { setTitle(""); setUrl(""); setSourceType("embed"); setDesc(""); setDuration(""); setOrder("1"); } }}>
           <DialogTrigger asChild>
             <Button size="sm" variant="ghost" className="h-7 text-xs"><Plus className="w-3 h-3 mr-1" /> Add Video</Button>
           </DialogTrigger>
-          <DialogContent>
+          <DialogContent className="max-w-lg">
             <DialogHeader><DialogTitle>Add Video</DialogTitle></DialogHeader>
             <form onSubmit={handleCreate} className="space-y-4">
               <FormField label="Title"><Input value={title} onChange={e => setTitle(e.target.value)} required /></FormField>
-              <FormField label="Embed URL (YouTube/Vimeo)"><Input value={url} onChange={e => setUrl(e.target.value)} placeholder="https://www.youtube.com/embed/..." required /></FormField>
+              <VideoSourcePicker
+                sourceType={sourceType}
+                onSourceChange={(t) => { setSourceType(t); setUrl(""); }}
+                url={url}
+                onUrlChange={setUrl}
+                onUploadComplete={setUrl}
+              />
               <FormField label="Description"><Textarea value={desc} onChange={e => setDesc(e.target.value)} rows={2} /></FormField>
               <div className="grid grid-cols-2 gap-3">
                 <FormField label="Duration (seconds)"><Input type="number" value={duration} onChange={e => setDuration(e.target.value)} placeholder="600" /></FormField>

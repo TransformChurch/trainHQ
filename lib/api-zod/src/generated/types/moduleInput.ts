@@ -12,4 +12,5 @@ export interface ModuleInput {
   /** @nullable */
   description?: string | null;
   order: number;
+  isPublic?: boolean;
 }

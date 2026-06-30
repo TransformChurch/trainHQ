@@ -15,6 +15,7 @@ export interface ModuleDetail {
   /** @nullable */
   description?: string | null;
   order: number;
+  isPublic: boolean;
   createdAt: string;
   videos: VideoWithProgress[];
   quizResult?: QuizResult;

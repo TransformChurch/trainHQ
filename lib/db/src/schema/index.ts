@@ -7,3 +7,4 @@ export * from "./watchHistory";
 export * from "./queue";
 export * from "./quizzes";
 export * from "./groups";
+export * from "./settings";

@@ -54,6 +54,27 @@ export const UpsertMeResponse = zod.object({
 
 
 /**
+ * @summary Update current user profile fields (firstName, lastName, phone)
+ */
+export const PatchMeBody = zod.object({
+  "firstName": zod.string().optional(),
+  "lastName": zod.string().optional(),
+  "phone": zod.string().nullish()
+})
+
+export const PatchMeResponse = zod.object({
+  "id": zod.string(),
+  "clerkId": zod.string(),
+  "firstName": zod.string(),
+  "lastName": zod.string(),
+  "email": zod.string(),
+  "phone": zod.string().nullish(),
+  "role": zod.enum(['student', 'admin']),
+  "createdAt": zod.string()
+})
+
+
+/**
  * @summary Get student dashboard summary (assigned modules, progress, queue count)
  */
 export const GetDashboardSummaryResponse = zod.object({
@@ -67,11 +88,14 @@ export const GetDashboardSummaryResponse = zod.object({
   "title": zod.string(),
   "description": zod.string().nullish(),
   "order": zod.number(),
+  "isPublic": zod.boolean(),
   "createdAt": zod.string()
 }),
   "assignedBy": zod.string(),
   "assignedAt": zod.string(),
   "dueDate": zod.string().nullish(),
+  "seenAt": zod.string().nullish(),
+  "isNew": zod.boolean().optional(),
   "quizResult": zod.object({
   "id": zod.number(),
   "userId": zod.string(),
@@ -99,6 +123,7 @@ export const GetDashboardSummaryResponse = zod.object({
   "thumbnailUrl": zod.string().nullish(),
   "durationSeconds": zod.number().nullish(),
   "order": zod.number(),
+  "videoType": zod.enum(['embed', 'upload', 'drive']),
   "createdAt": zod.string()
 }),
   "progressPercent": zod.number(),
@@ -150,6 +175,7 @@ export const GetTrackResponse = zod.object({
   "title": zod.string(),
   "description": zod.string().nullish(),
   "order": zod.number(),
+  "isPublic": zod.boolean(),
   "createdAt": zod.string()
 }))
 })
@@ -198,6 +224,7 @@ export const ListModulesResponseItem = zod.object({
   "title": zod.string(),
   "description": zod.string().nullish(),
   "order": zod.number(),
+  "isPublic": zod.boolean(),
   "createdAt": zod.string()
 })
 export const ListModulesResponse = zod.array(ListModulesResponseItem)
@@ -210,7 +237,8 @@ export const CreateModuleBody = zod.object({
   "trackId": zod.number(),
   "title": zod.string(),
   "description": zod.string().nullish(),
-  "order": zod.number()
+  "order": zod.number(),
+  "isPublic": zod.boolean().optional()
 })
 
 
@@ -227,6 +255,7 @@ export const GetModuleResponse = zod.object({
   "title": zod.string(),
   "description": zod.string().nullish(),
   "order": zod.number(),
+  "isPublic": zod.boolean(),
   "createdAt": zod.string(),
   "videos": zod.array(zod.object({
   "id": zod.number(),
@@ -265,7 +294,8 @@ export const UpdateModuleParams = zod.object({
 export const UpdateModuleBody = zod.object({
   "title": zod.string().optional(),
   "description": zod.string().nullish(),
-  "order": zod.number().optional()
+  "order": zod.number().optional(),
+  "isPublic": zod.boolean().optional()
 })
 
 export const UpdateModuleResponse = zod.object({
@@ -274,6 +304,7 @@ export const UpdateModuleResponse = zod.object({
   "title": zod.string(),
   "description": zod.string().nullish(),
   "order": zod.number(),
+  "isPublic": zod.boolean(),
   "createdAt": zod.string()
 })
 
@@ -302,6 +333,7 @@ export const ListVideosResponseItem = zod.object({
   "thumbnailUrl": zod.string().nullish(),
   "durationSeconds": zod.number().nullish(),
   "order": zod.number(),
+  "videoType": zod.enum(['embed', 'upload', 'drive']),
   "createdAt": zod.string()
 })
 export const ListVideosResponse = zod.array(ListVideosResponseItem)
@@ -317,7 +349,8 @@ export const CreateVideoBody = zod.object({
   "url": zod.string(),
   "thumbnailUrl": zod.string().nullish(),
   "durationSeconds": zod.number().nullish(),
-  "order": zod.number()
+  "order": zod.number(),
+  "videoType": zod.enum(['embed', 'upload', 'drive']).optional()
 })
 
 
@@ -337,6 +370,7 @@ export const GetVideoResponse = zod.object({
   "thumbnailUrl": zod.string().nullish(),
   "durationSeconds": zod.number().nullish(),
   "order": zod.number(),
+  "videoType": zod.enum(['embed', 'upload', 'drive']),
   "createdAt": zod.string()
 })
 
@@ -354,7 +388,8 @@ export const UpdateVideoBody = zod.object({
   "url": zod.string().optional(),
   "thumbnailUrl": zod.string().nullish(),
   "durationSeconds": zod.number().nullish(),
-  "order": zod.number().optional()
+  "order": zod.number().optional(),
+  "videoType": zod.enum(['embed', 'upload', 'drive']).optional()
 })
 
 export const UpdateVideoResponse = zod.object({
@@ -366,6 +401,7 @@ export const UpdateVideoResponse = zod.object({
   "thumbnailUrl": zod.string().nullish(),
   "durationSeconds": zod.number().nullish(),
   "order": zod.number(),
+  "videoType": zod.enum(['embed', 'upload', 'drive']),
   "createdAt": zod.string()
 })
 
@@ -394,6 +430,7 @@ export const ListWatchHistoryResponseItem = zod.object({
   "thumbnailUrl": zod.string().nullish(),
   "durationSeconds": zod.number().nullish(),
   "order": zod.number(),
+  "videoType": zod.enum(['embed', 'upload', 'drive']),
   "createdAt": zod.string()
 }),
   "progressPercent": zod.number(),
@@ -433,6 +470,7 @@ export const UpsertWatchProgressResponse = zod.object({
   "thumbnailUrl": zod.string().nullish(),
   "durationSeconds": zod.number().nullish(),
   "order": zod.number(),
+  "videoType": zod.enum(['embed', 'upload', 'drive']),
   "createdAt": zod.string()
 }),
   "progressPercent": zod.number(),
@@ -457,6 +495,7 @@ export const ListQueueResponseItem = zod.object({
   "thumbnailUrl": zod.string().nullish(),
   "durationSeconds": zod.number().nullish(),
   "order": zod.number(),
+  "videoType": zod.enum(['embed', 'upload', 'drive']),
   "createdAt": zod.string()
 }),
   "addedAt": zod.string()
@@ -557,25 +596,104 @@ export const GetQuizResultResponse = zod.object({
 
 
 /**
- * @summary Update a quiz question (admin only)
- */
-export const UpdateQuizQuestionParams = zod.object({
-  "questionId": zod.coerce.number()
-})
-
-export const UpdateQuizQuestionBody = zod.object({
-  "questionText": zod.string().min(1).optional(),
-  "options": zod.array(zod.string()).min(2).optional(),
-  "correctIndex": zod.number().int().min(0).optional(),
-  "order": zod.number().int().min(0).optional()
-})
-
-
-/**
  * @summary Delete a quiz question (admin only)
  */
 export const DeleteQuizQuestionParams = zod.object({
   "questionId": zod.coerce.number()
+})
+
+
+/**
+ * @summary List all groups with member counts (admin only)
+ */
+export const ListGroupsResponseItem = zod.object({
+  "id": zod.number(),
+  "name": zod.string(),
+  "description": zod.string().nullish(),
+  "createdAt": zod.string(),
+  "memberCount": zod.number()
+})
+export const ListGroupsResponse = zod.array(ListGroupsResponseItem)
+
+
+/**
+ * @summary Create a new group (admin only)
+ */
+export const CreateGroupBody = zod.object({
+  "name": zod.string(),
+  "description": zod.string().nullish()
+})
+
+
+/**
+ * @summary Update a group (admin only)
+ */
+export const UpdateGroupParams = zod.object({
+  "groupId": zod.coerce.number()
+})
+
+export const UpdateGroupBody = zod.object({
+  "name": zod.string(),
+  "description": zod.string().nullish()
+})
+
+export const UpdateGroupResponse = zod.object({
+  "id": zod.number(),
+  "name": zod.string(),
+  "description": zod.string().nullish(),
+  "createdAt": zod.string(),
+  "memberCount": zod.number()
+})
+
+
+/**
+ * @summary Delete a group (admin only)
+ */
+export const DeleteGroupParams = zod.object({
+  "groupId": zod.coerce.number()
+})
+
+
+/**
+ * @summary List members of a group (admin only)
+ */
+export const ListGroupMembersParams = zod.object({
+  "groupId": zod.coerce.number()
+})
+
+export const ListGroupMembersResponseItem = zod.object({
+  "id": zod.number(),
+  "groupId": zod.number(),
+  "addedAt": zod.string(),
+  "user": zod.object({
+  "id": zod.string(),
+  "firstName": zod.string(),
+  "lastName": zod.string(),
+  "email": zod.string(),
+  "role": zod.string()
+})
+})
+export const ListGroupMembersResponse = zod.array(ListGroupMembersResponseItem)
+
+
+/**
+ * @summary Add a user to a group (admin only)
+ */
+export const AddGroupMemberParams = zod.object({
+  "groupId": zod.coerce.number()
+})
+
+export const AddGroupMemberBody = zod.object({
+  "userId": zod.string()
+})
+
+
+/**
+ * @summary Remove a user from a group (admin only)
+ */
+export const RemoveGroupMemberParams = zod.object({
+  "groupId": zod.coerce.number(),
+  "userId": zod.coerce.string()
 })
 
 
@@ -592,11 +710,14 @@ export const ListMyAssignmentsResponseItem = zod.object({
   "title": zod.string(),
   "description": zod.string().nullish(),
   "order": zod.number(),
+  "isPublic": zod.boolean(),
   "createdAt": zod.string()
 }),
   "assignedBy": zod.string(),
   "assignedAt": zod.string(),
   "dueDate": zod.string().nullish(),
+  "seenAt": zod.string().nullish(),
+  "isNew": zod.boolean().optional(),
   "quizResult": zod.object({
   "id": zod.number(),
   "userId": zod.string(),
@@ -678,6 +799,28 @@ export const DeleteAssignmentParams = zod.object({
 
 
 /**
+ * @summary Toggle module public/private visibility (admin only)
+ */
+export const UpdateModuleVisibilityParams = zod.object({
+  "moduleId": zod.coerce.number()
+})
+
+export const UpdateModuleVisibilityBody = zod.object({
+  "isPublic": zod.boolean()
+})
+
+export const UpdateModuleVisibilityResponse = zod.object({
+  "id": zod.number(),
+  "trackId": zod.number(),
+  "title": zod.string(),
+  "description": zod.string().nullish(),
+  "order": zod.number(),
+  "isPublic": zod.boolean(),
+  "createdAt": zod.string()
+})
+
+
+/**
  * @summary Get pass/fail matrix for all users across all modules (admin only)
  */
 export const GetProgressMatrixResponse = zod.object({
@@ -687,6 +830,7 @@ export const GetProgressMatrixResponse = zod.object({
   "title": zod.string(),
   "description": zod.string().nullish(),
   "order": zod.number(),
+  "isPublic": zod.boolean(),
   "createdAt": zod.string()
 })),
   "rows": zod.array(zod.object({
@@ -706,6 +850,60 @@ export const GetProgressMatrixResponse = zod.object({
   "score": zod.number().nullish()
 }))
 }))
+})
+
+
+/**
+ * @summary Get all admin settings (admin only)
+ */
+export const GetAdminSettingsResponseItem = zod.object({
+  "id": zod.number(),
+  "key": zod.string(),
+  "value": zod.string()
+})
+export const GetAdminSettingsResponse = zod.array(GetAdminSettingsResponseItem)
+
+
+/**
+ * @summary Upsert an admin setting (admin only)
+ */
+export const UpdateAdminSettingBody = zod.object({
+  "key": zod.string(),
+  "value": zod.string()
+})
+
+export const UpdateAdminSettingResponse = zod.object({
+  "id": zod.number(),
+  "key": zod.string(),
+  "value": zod.string()
+})
+
+
+/**
+ * @summary Request a presigned URL for file upload
+ */
+export const RequestUploadUrlBody = zod.object({
+  "name": zod.string(),
+  "size": zod.number(),
+  "contentType": zod.string()
+})
+
+export const RequestUploadUrlResponse = zod.object({
+  "uploadURL": zod.string(),
+  "objectPath": zod.string(),
+  "metadata": zod.object({
+  "name": zod.string(),
+  "size": zod.number(),
+  "contentType": zod.string()
+}).optional()
+})
+
+
+/**
+ * @summary Serve an uploaded object
+ */
+export const GetStorageObjectParams = zod.object({
+  "objectPath": zod.coerce.string()
 })
 
 

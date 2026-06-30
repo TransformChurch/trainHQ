@@ -82,6 +82,7 @@ export interface Module {
   /** @nullable */
   description?: string | null;
   order: number;
+  isPublic: boolean;
   createdAt: string;
 }
 
@@ -102,6 +103,7 @@ export interface ModuleInput {
   /** @nullable */
   description?: string | null;
   order: number;
+  isPublic?: boolean;
 }
 
 export interface ModuleUpdate {
@@ -109,6 +111,7 @@ export interface ModuleUpdate {
   /** @nullable */
   description?: string | null;
   order?: number;
+  isPublic?: boolean;
 }
 
 export interface VideoWithProgress {
@@ -127,7 +130,6 @@ export interface VideoWithProgress {
   /** @nullable */
   progressPercent?: number | null;
   completed: boolean;
-  needsReview: boolean;
   inQueue: boolean;
 }
 
@@ -138,7 +140,6 @@ export interface QuizResult {
   score: number;
   totalQuestions: number;
   passed: boolean;
-  attempts: number;
   takenAt: string;
 }
 
@@ -149,13 +150,21 @@ export interface ModuleDetail {
   /** @nullable */
   description?: string | null;
   order: number;
+  isPublic: boolean;
   createdAt: string;
   videos: VideoWithProgress[];
   quizResult?: QuizResult;
   quizUnlocked: boolean;
-  /** @nullable */
-  lockedReason?: 'complete_videos' | 'needs_review' | null;
 }
+
+export type VideoVideoType = typeof VideoVideoType[keyof typeof VideoVideoType];
+
+
+export const VideoVideoType = {
+  embed: 'embed',
+  upload: 'upload',
+  drive: 'drive',
+} as const;
 
 export interface Video {
   id: number;
@@ -169,8 +178,18 @@ export interface Video {
   /** @nullable */
   durationSeconds?: number | null;
   order: number;
+  videoType: VideoVideoType;
   createdAt: string;
 }
+
+export type VideoInputVideoType = typeof VideoInputVideoType[keyof typeof VideoInputVideoType];
+
+
+export const VideoInputVideoType = {
+  embed: 'embed',
+  upload: 'upload',
+  drive: 'drive',
+} as const;
 
 export interface VideoInput {
   moduleId: number;
@@ -183,7 +202,17 @@ export interface VideoInput {
   /** @nullable */
   durationSeconds?: number | null;
   order: number;
+  videoType?: VideoInputVideoType;
 }
+
+export type VideoUpdateVideoType = typeof VideoUpdateVideoType[keyof typeof VideoUpdateVideoType];
+
+
+export const VideoUpdateVideoType = {
+  embed: 'embed',
+  upload: 'upload',
+  drive: 'drive',
+} as const;
 
 export interface VideoUpdate {
   title?: string;
@@ -195,6 +224,7 @@ export interface VideoUpdate {
   /** @nullable */
   durationSeconds?: number | null;
   order?: number;
+  videoType?: VideoUpdateVideoType;
 }
 
 export interface WatchHistoryEntry {
@@ -204,7 +234,6 @@ export interface WatchHistoryEntry {
   video: Video;
   progressPercent: number;
   completed: boolean;
-  needsReview: boolean;
   lastWatchedAt: string;
 }
 
@@ -230,8 +259,7 @@ export interface QuizQuestion {
   moduleId: number;
   questionText: string;
   options: string[];
-  /** Not returned by the student-facing quiz endpoint — only present in admin/server-side contexts */
-  correctIndex?: number;
+  correctIndex: number;
   order: number;
 }
 
@@ -240,13 +268,6 @@ export interface QuizQuestionInput {
   options: string[];
   correctIndex: number;
   order: number;
-}
-
-export interface QuizQuestionUpdate {
-  questionText?: string;
-  options?: string[];
-  correctIndex?: number;
-  order?: number;
 }
 
 export type QuizSubmissionAnswersItem = {
@@ -267,6 +288,9 @@ export interface Assignment {
   assignedAt: string;
   /** @nullable */
   dueDate?: string | null;
+  /** @nullable */
+  seenAt?: string | null;
+  isNew?: boolean;
   quizResult?: QuizResult;
 }
 
@@ -314,10 +338,6 @@ export type ProgressRowResultsItem = {
   passed?: boolean | null;
   /** @nullable */
   score?: number | null;
-  /** @nullable */
-  totalQuestions?: number | null;
-  /** @nullable */
-  attempts?: number | null;
 };
 
 export interface ProgressRow {
@@ -330,6 +350,74 @@ export interface ProgressMatrix {
   rows: ProgressRow[];
 }
 
+export interface Setting {
+  id: number;
+  key: string;
+  value: string;
+}
+
+export interface PatchMeInput {
+  firstName?: string;
+  lastName?: string;
+  /** @nullable */
+  phone?: string | null;
+}
+
+export interface Group {
+  id: number;
+  name: string;
+  /** @nullable */
+  description?: string | null;
+  createdAt: string;
+  memberCount: number;
+}
+
+export interface GroupInput {
+  name: string;
+  /** @nullable */
+  description?: string | null;
+}
+
+export interface VisibilityUpdate {
+  isPublic: boolean;
+}
+
+export interface GroupMemberInput {
+  userId: string;
+}
+
+export type GroupMemberUser = {
+  id: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  role: string;
+};
+
+export interface GroupMember {
+  id: number;
+  groupId: number;
+  addedAt: string;
+  user: GroupMemberUser;
+}
+
+export interface SettingInput {
+  key: string;
+  value: string;
+}
+
+export interface UploadUrlRequest {
+  name: string;
+  size: number;
+  contentType: string;
+}
+
+export interface UploadUrlResponse {
+  uploadURL: string;
+  objectPath: string;
+  metadata?: UploadUrlRequest;
+}
+
 export type ListModulesParams = {
 trackId?: number;
 };
@@ -337,3 +425,4 @@ trackId?: number;
 export type ListVideosParams = {
 moduleId?: number;
 };
+

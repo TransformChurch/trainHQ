@@ -2,7 +2,6 @@ import { Router } from "express";
 import { db, quizQuestionsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { requireAdmin } from "../middlewares/requireAuth";
-import { UpdateQuizQuestionBody } from "@workspace/api-zod";
 
 const router = Router();
 
@@ -10,14 +9,24 @@ const router = Router();
 router.patch("/questions/:questionId", requireAdmin, async (req, res) => {
   try {
     const questionId = parseInt(req.params.questionId as string);
-    const parsed = UpdateQuizQuestionBody.safeParse(req.body);
-    if (!parsed.success) {
-      res.status(400).json({ error: "Invalid input" });
+    const { questionText, options, correctIndex, order } = req.body as {
+      questionText?: string;
+      options?: string[];
+      correctIndex?: number;
+      order?: number;
+    };
+    const updates: Partial<{ questionText: string; options: string[]; correctIndex: number; order: number }> = {};
+    if (questionText !== undefined && typeof questionText === "string" && questionText.trim()) updates.questionText = questionText.trim();
+    if (Array.isArray(options) && options.length >= 2) updates.options = options;
+    if (correctIndex !== undefined && typeof correctIndex === "number") updates.correctIndex = correctIndex;
+    if (order !== undefined && typeof order === "number") updates.order = order;
+    if (Object.keys(updates).length === 0) {
+      res.status(400).json({ error: "No fields to update" });
       return;
     }
     const updated = await db
       .update(quizQuestionsTable)
-      .set(parsed.data)
+      .set(updates)
       .where(eq(quizQuestionsTable.id, questionId))
       .returning();
     if (!updated[0]) {

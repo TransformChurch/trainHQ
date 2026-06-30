@@ -6,10 +6,9 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export type ProgressRowResultsItem = {
-  moduleId: number;
+export interface PatchMeInput {
+  firstName?: string;
+  lastName?: string;
   /** @nullable */
-  passed?: boolean | null;
-  /** @nullable */
-  score?: number | null;
-};
+  phone?: string | null;
+}

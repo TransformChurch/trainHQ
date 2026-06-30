@@ -11,4 +11,5 @@ export interface ModuleUpdate {
   /** @nullable */
   description?: string | null;
   order?: number;
+  isPublic?: boolean;
 }

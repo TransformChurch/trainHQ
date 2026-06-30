@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { getAuth } from "@clerk/express";
-import { db, usersTable, assignmentsTable, modulesTable, quizResultsTable, groupMembersTable, watchHistoryTable, videosTable } from "@workspace/db";
+import { db, usersTable, assignmentsTable, modulesTable, quizResultsTable, groupMembersTable, watchHistoryTable, videosTable, settingsTable } from "@workspace/db";
 import { eq, and, inArray } from "drizzle-orm";
 import { requireAdmin, getDbUser } from "../middlewares/requireAuth";
 import { UpdateUserRoleBody } from "@workspace/api-zod";
@@ -306,6 +306,39 @@ router.patch("/modules/:moduleId/visibility", requireAdmin, async (req, res) => 
       return;
     }
     res.json({ ...updated[0], createdAt: updated[0].createdAt.toISOString() });
+  } catch {
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// GET /admin/settings
+router.get("/settings", requireAdmin, async (req, res) => {
+  try {
+    const rows = await db.select().from(settingsTable);
+    res.json(rows);
+  } catch {
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// PATCH /admin/settings
+router.patch("/settings", requireAdmin, async (req, res) => {
+  try {
+    const { key, value } = req.body as { key?: string; value?: string };
+    if (!key || typeof key !== "string" || typeof value !== "string") {
+      res.status(400).json({ error: "key and value are required" });
+      return;
+    }
+    const existing = await db.select().from(settingsTable).where(eq(settingsTable.key, key)).limit(1);
+    let row;
+    if (existing[0]) {
+      const updated = await db.update(settingsTable).set({ value }).where(eq(settingsTable.key, key)).returning();
+      row = updated[0];
+    } else {
+      const inserted = await db.insert(settingsTable).values({ key, value }).returning();
+      row = inserted[0];
+    }
+    res.json(row);
   } catch {
     res.status(500).json({ error: "Internal server error" });
   }

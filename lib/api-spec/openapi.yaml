@@ -29,6 +29,8 @@ tags:
     description: Admin-only operations
   - name: dashboard
     description: Dashboard summary data
+  - name: storage
+    description: Object storage upload and serving endpoints
 
 paths:
   /healthz:
@@ -72,6 +74,23 @@ paths:
       responses:
         "200":
           description: Upserted user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+    patch:
+      operationId: patchMe
+      tags: [users]
+      summary: Update current user profile fields (firstName, lastName, phone)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PatchMeInput"
+      responses:
+        "200":
+          description: Updated user
           content:
             application/json:
               schema:
@@ -568,6 +587,137 @@ paths:
         "204":
           description: Deleted
 
+  # ── Groups ──────────────────────────────────────────────────────────────
+  /groups:
+    get:
+      operationId: listGroups
+      tags: [groups]
+      summary: List all groups with member counts (admin only)
+      responses:
+        "200":
+          description: Groups list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Group"
+    post:
+      operationId: createGroup
+      tags: [groups]
+      summary: Create a new group (admin only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GroupInput"
+      responses:
+        "201":
+          description: Created group
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Group"
+
+  /groups/{groupId}:
+    patch:
+      operationId: updateGroup
+      tags: [groups]
+      summary: Update a group (admin only)
+      parameters:
+        - name: groupId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GroupInput"
+      responses:
+        "200":
+          description: Updated group
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Group"
+    delete:
+      operationId: deleteGroup
+      tags: [groups]
+      summary: Delete a group (admin only)
+      parameters:
+        - name: groupId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /groups/{groupId}/members:
+    get:
+      operationId: listGroupMembers
+      tags: [groups]
+      summary: List members of a group (admin only)
+      parameters:
+        - name: groupId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Group members
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/GroupMember"
+    post:
+      operationId: addGroupMember
+      tags: [groups]
+      summary: Add a user to a group (admin only)
+      parameters:
+        - name: groupId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GroupMemberInput"
+      responses:
+        "201":
+          description: Added member
+
+  /groups/{groupId}/members/{userId}:
+    delete:
+      operationId: removeGroupMember
+      tags: [groups]
+      summary: Remove a user from a group (admin only)
+      parameters:
+        - name: groupId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Removed
+
   # ── Assignments ─────────────────────────────────────────────────────────
   /assignments:
     get:
@@ -661,6 +811,31 @@ paths:
         "204":
           description: Deleted
 
+  /admin/modules/{moduleId}/visibility:
+    patch:
+      operationId: updateModuleVisibility
+      tags: [admin]
+      summary: Toggle module public/private visibility (admin only)
+      parameters:
+        - name: moduleId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VisibilityUpdate"
+      responses:
+        "200":
+          description: Updated module
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Module"
+
   /admin/progress-matrix:
     get:
       operationId: getProgressMatrix
@@ -673,6 +848,81 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ProgressMatrix"
+
+  /admin/settings:
+    get:
+      operationId: getAdminSettings
+      tags: [admin]
+      summary: Get all admin settings (admin only)
+      responses:
+        "200":
+          description: Settings list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Setting"
+    patch:
+      operationId: updateAdminSetting
+      tags: [admin]
+      summary: Upsert an admin setting (admin only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SettingInput"
+      responses:
+        "200":
+          description: Updated setting
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Setting"
+
+  /storage/uploads/request-url:
+    post:
+      tags: [storage]
+      operationId: requestUploadUrl
+      summary: Request a presigned URL for file upload
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UploadUrlRequest"
+      responses:
+        "200":
+          description: Presigned upload URL generated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UploadUrlResponse"
+        "400":
+          description: Missing or invalid required fields
+
+  /storage/objects/{objectPath}:
+    get:
+      tags: [storage]
+      operationId: getStorageObject
+      summary: Serve an uploaded object
+      parameters:
+        - name: objectPath
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Object content
+          content:
+            "*/*":
+              schema:
+                type: string
+                format: binary
+        "404":
+          description: Not found
 
 # ── Schemas ────────────────────────────────────────────────────────────────
 components:
@@ -795,9 +1045,11 @@ components:
           type: ["string", "null"]
         order:
           type: integer
+        isPublic:
+          type: boolean
         createdAt:
           type: string
-      required: [id, trackId, title, order, createdAt]
+      required: [id, trackId, title, order, isPublic, createdAt]
 
     ModuleInput:
       type: object
@@ -810,6 +1062,8 @@ components:
           type: ["string", "null"]
         order:
           type: integer
+        isPublic:
+          type: boolean
       required: [trackId, title, order]
 
     ModuleUpdate:
@@ -821,6 +1075,8 @@ components:
           type: ["string", "null"]
         order:
           type: integer
+        isPublic:
+          type: boolean
 
     ModuleDetail:
       type: object
@@ -835,6 +1091,8 @@ components:
           type: ["string", "null"]
         order:
           type: integer
+        isPublic:
+          type: boolean
         createdAt:
           type: string
         videos:
@@ -845,7 +1103,7 @@ components:
           $ref: "#/components/schemas/QuizResult"
         quizUnlocked:
           type: boolean
-      required: [id, trackId, title, order, createdAt, videos, quizUnlocked]
+      required: [id, trackId, title, order, isPublic, createdAt, videos, quizUnlocked]
 
     Video:
       type: object
@@ -866,9 +1124,12 @@ components:
           type: ["integer", "null"]
         order:
           type: integer
+        videoType:
+          type: string
+          enum: [embed, upload, drive]
         createdAt:
           type: string
-      required: [id, moduleId, title, url, order, createdAt]
+      required: [id, moduleId, title, url, order, videoType, createdAt]
 
     VideoInput:
       type: object
@@ -887,6 +1148,9 @@ components:
           type: ["integer", "null"]
         order:
           type: integer
+        videoType:
+          type: string
+          enum: [embed, upload, drive]
       required: [moduleId, title, url, order]
 
     VideoUpdate:
@@ -904,6 +1168,9 @@ components:
           type: ["integer", "null"]
         order:
           type: integer
+        videoType:
+          type: string
+          enum: [embed, upload, drive]
 
     VideoWithProgress:
       type: object
@@ -1064,6 +1331,10 @@ components:
           type: string
         dueDate:
           type: ["string", "null"]
+        seenAt:
+          type: ["string", "null"]
+        isNew:
+          type: boolean
         quizResult:
           $ref: "#/components/schemas/QuizResult"
       required: [id, userId, moduleId, module, assignedBy, assignedAt]
@@ -1161,3 +1432,118 @@ components:
                 type: ["integer", "null"]
             required: [moduleId]
       required: [user, results]
+
+    Setting:
+      type: object
+      properties:
+        id:
+          type: integer
+        key:
+          type: string
+        value:
+          type: string
+      required: [id, key, value]
+
+    PatchMeInput:
+      type: object
+      properties:
+        firstName:
+          type: string
+        lastName:
+          type: string
+        phone:
+          type: ["string", "null"]
+
+    Group:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        description:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+        memberCount:
+          type: integer
+      required: [id, name, createdAt, memberCount]
+
+    GroupInput:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: ["string", "null"]
+      required: [name]
+
+    VisibilityUpdate:
+      type: object
+      properties:
+        isPublic:
+          type: boolean
+      required: [isPublic]
+
+    GroupMemberInput:
+      type: object
+      properties:
+        userId:
+          type: string
+      required: [userId]
+
+    GroupMember:
+      type: object
+      properties:
+        id:
+          type: integer
+        groupId:
+          type: integer
+        addedAt:
+          type: string
+        user:
+          type: object
+          properties:
+            id:
+              type: string
+            firstName:
+              type: string
+            lastName:
+              type: string
+            email:
+              type: string
+            role:
+              type: string
+          required: [id, firstName, lastName, email, role]
+      required: [id, groupId, addedAt, user]
+
+    SettingInput:
+      type: object
+      properties:
+        key:
+          type: string
+        value:
+          type: string
+      required: [key, value]
+
+    UploadUrlRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        size:
+          type: integer
+        contentType:
+          type: string
+      required: [name, size, contentType]
+
+    UploadUrlResponse:
+      type: object
+      properties:
+        uploadURL:
+          type: string
+        objectPath:
+          type: string
+        metadata:
+          $ref: "#/components/schemas/UploadUrlRequest"
+      required: [uploadURL, objectPath]

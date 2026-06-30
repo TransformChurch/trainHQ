@@ -17,5 +17,8 @@ export interface Assignment {
   assignedAt: string;
   /** @nullable */
   dueDate?: string | null;
+  /** @nullable */
+  seenAt?: string | null;
+  isNew?: boolean;
   quizResult?: QuizResult;
 }

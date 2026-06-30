@@ -12,6 +12,7 @@ export const videosTable = pgTable("videos", {
   thumbnailUrl: text("thumbnail_url"),
   durationSeconds: integer("duration_seconds"),
   order: integer("order").notNull().default(0),
+  videoType: text("video_type").notNull().default("embed"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 

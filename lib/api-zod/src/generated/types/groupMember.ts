@@ -5,14 +5,11 @@
  * Transform Church Leadership Training Platform API
  * OpenAPI spec version: 0.1.0
  */
+import type { GroupMemberUser } from './groupMemberUser';
 
-export interface Module {
+export interface GroupMember {
   id: number;
-  trackId: number;
-  title: string;
-  /** @nullable */
-  description?: string | null;
-  order: number;
-  isPublic: boolean;
-  createdAt: string;
+  groupId: number;
+  addedAt: string;
+  user: GroupMemberUser;
 }

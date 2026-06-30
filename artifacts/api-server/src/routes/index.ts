@@ -11,10 +11,12 @@ import assignmentsRouter from "./assignments";
 import adminRouter from "./admin";
 import dashboardRouter from "./dashboard";
 import groupsRouter from "./groups";
+import storageRouter from "./storage";
 
 const router: IRouter = Router();
 
 router.use(healthRouter);
+router.use(storageRouter);
 router.use("/users", usersRouter);
 router.use("/tracks", tracksRouter);
 router.use("/modules", modulesRouter);

@@ -1,0 +1,1 @@
+- [Orval inline schema conflict](orval-inline-schema-conflict.md) — inline request body schemas in OpenAPI cause duplicate name conflicts between zod api.ts and types/; always use named $ref schemas.
