@@ -55,6 +55,7 @@ function VideoSourcePicker({
   const { toast } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [maxSizeMb, setMaxSizeMb] = useState(500);
+  const [uploadEnabled, setUploadEnabled] = useState(true);
   const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
   useEffect(() => {
@@ -63,6 +64,8 @@ function VideoSourcePicker({
       .then((rows: { key: string; value: string }[]) => {
         const s = rows?.find(r => r.key === "max_video_upload_size_mb");
         if (s) setMaxSizeMb(parseInt(s.value));
+        const enabled = rows?.find(r => r.key === "video_upload_enabled");
+        if (enabled) setUploadEnabled(enabled.value !== "false");
       })
       .catch(() => {});
   }, []);
@@ -94,26 +97,33 @@ function VideoSourcePicker({
     <div className="space-y-3">
       <Label>Video Source</Label>
       <div className="flex rounded-lg border border-input overflow-hidden text-sm">
-        {(["embed", "drive", "upload"] as VideoSourceType[]).map((type) => {
-          const labels: Record<VideoSourceType, { label: string; Icon: React.FC<{ className?: string }> }> = {
-            embed: { label: "YouTube / Vimeo", Icon: Link },
-            drive: { label: "Google Drive", Icon: HardDrive },
-            upload: { label: "Upload File", Icon: Upload },
-          };
-          const { label, Icon } = labels[type];
-          return (
-            <button
-              key={type}
-              type="button"
-              onClick={() => onSourceChange(type)}
-              className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-1 font-medium transition-colors ${sourceType === type ? "bg-primary text-primary-foreground" : "bg-background text-muted-foreground hover:bg-muted"}`}
-            >
-              <Icon className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">{label}</span>
-            </button>
-          );
-        })}
+        {(["embed", "drive", "upload"] as VideoSourceType[])
+          .filter(type => type !== "upload" || uploadEnabled)
+          .map((type) => {
+            const labels: Record<VideoSourceType, { label: string; Icon: React.FC<{ className?: string }> }> = {
+              embed: { label: "YouTube / Vimeo", Icon: Link },
+              drive: { label: "Google Drive", Icon: HardDrive },
+              upload: { label: "Upload File", Icon: Upload },
+            };
+            const { label, Icon } = labels[type];
+            return (
+              <button
+                key={type}
+                type="button"
+                onClick={() => onSourceChange(type)}
+                className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-1 font-medium transition-colors ${sourceType === type ? "bg-primary text-primary-foreground" : "bg-background text-muted-foreground hover:bg-muted"}`}
+              >
+                <Icon className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">{label}</span>
+              </button>
+            );
+          })}
       </div>
+      {!uploadEnabled && (
+        <p className="text-xs text-muted-foreground flex items-center gap-1">
+          <Lock className="w-3 h-3" /> Direct upload is disabled. Enable it in Admin Settings.
+        </p>
+      )}
 
       {sourceType === "embed" && (
         <div className="space-y-1.5">

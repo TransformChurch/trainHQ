@@ -31,6 +31,14 @@ router.post("/storage/uploads/request-url", requireAdmin, async (req: Request, r
   try {
     const { name, size, contentType } = parsed.data;
 
+    // Check if upload is globally enabled
+    const enabledRows = await db.select().from(settingsTable).where(eq(settingsTable.key, "video_upload_enabled")).limit(1);
+    const uploadEnabled = enabledRows[0]?.value !== "false";
+    if (!uploadEnabled) {
+      res.status(403).json({ error: "Video upload has been disabled by an administrator" });
+      return;
+    }
+
     // Enforce admin-configured max upload size
     const settingRows = await db.select().from(settingsTable).where(eq(settingsTable.key, "max_video_upload_size_mb")).limit(1);
     const parsedMb = settingRows[0] ? parseInt(settingRows[0].value, 10) : NaN;
