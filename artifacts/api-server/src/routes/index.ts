@@ -12,6 +12,7 @@ import adminRouter from "./admin";
 import dashboardRouter from "./dashboard";
 import groupsRouter from "./groups";
 import storageRouter from "./storage";
+import growthTracksRouter from "./growthTracks";
 
 const router: IRouter = Router();
 
@@ -28,5 +29,6 @@ router.use("/assignments", assignmentsRouter);
 router.use("/admin", adminRouter);
 router.use("/dashboard", dashboardRouter);
 router.use("/groups", groupsRouter);
+router.use("/growth-tracks", growthTracksRouter);
 
 export default router;

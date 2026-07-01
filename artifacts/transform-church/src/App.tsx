@@ -20,6 +20,7 @@ import History from "@/pages/History";
 import AdminDashboard from "@/pages/AdminDashboard";
 import AdminUsers from "@/pages/AdminUsers";
 import AdminContent from "@/pages/AdminContent";
+import AdminGrowthTracks from "@/pages/AdminGrowthTracks";
 import AdminSettings from "@/pages/AdminSettings";
 import Profile from "@/pages/Profile";
 import NotFound from "@/pages/not-found";
@@ -282,6 +283,7 @@ function ClerkProviderWithRoutes() {
           <Route path="/admin"><ProtectedRoute component={AdminDashboard} adminOnly /></Route>
           <Route path="/admin/users"><ProtectedRoute component={AdminUsers} managerOrAdmin /></Route>
           <Route path="/admin/content"><ProtectedRoute component={AdminContent} managerOrAdmin /></Route>
+          <Route path="/admin/growth-tracks"><ProtectedRoute component={AdminGrowthTracks} managerOrAdmin /></Route>
           <Route path="/admin/settings"><ProtectedRoute component={AdminSettings} adminOnly /></Route>
           
           <Route component={NotFound} />

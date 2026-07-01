@@ -3,3 +3,5 @@
 - [Audit log design](audit-log.md) — content_audit_log table tracks track/module/video mutations; logContentChange helper in api-server/src/lib/auditLog.ts; served from GET /admin/audit-log (admin-only, ?trackId filter).
 - [Orval hook names](orval-hooks.md) — tracks list hook is useListTracks (not useGetTracks); UseQueryOptions requires queryKey in strict TS so never pass {query:{enabled:...}} — call hooks unconditionally and check data/role instead.
 - [DB push command](db-push.md) — correct command is `pnpm run push` inside lib/db (not db:push).
+- [API server zod imports](api-server-zod.md) — api-server has no direct zod dep; never import from "zod" or "zod/v4" in route files; use @workspace/api-zod for validated bodies or do manual JS type checks inline.
+- [Growth Tracks design](growth-tracks-design.md) — new tables growth_tracks/growth_track_steps/growth_track_enrollments; progression helper at api-server/src/lib/growthTrackProgression.ts; hooks in quiz submit + watch history routes.

@@ -4,6 +4,7 @@ import { db, watchHistoryTable, videosTable } from "@workspace/db";
 import { eq, and, desc } from "drizzle-orm";
 import { requireAuth, getDbUser } from "../middlewares/requireAuth";
 import { UpsertWatchProgressBody } from "@workspace/api-zod";
+import { checkGrowthTrackProgression } from "../lib/growthTrackProgression";
 
 const router = Router();
 
@@ -92,6 +93,12 @@ router.put("/:videoId", requireAuth, async (req, res) => {
     }
 
     const videos = await db.select().from(videosTable).where(eq(videosTable.id, videoId)).limit(1);
+
+    // Trigger growth track auto-progression when a video completes and may unlock the module
+    if (isCompleted && videos[0]) {
+      void checkGrowthTrackProgression(dbUser.id, videos[0].moduleId);
+    }
+
     res.json(formatWatchHistoryEntry(wh, videos[0] ?? null));
   } catch {
     res.status(500).json({ error: "Internal server error" });

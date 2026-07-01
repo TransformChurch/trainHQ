@@ -2,7 +2,7 @@ import { Link, useLocation } from "wouter";
 import { useGetMe } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
 import { useClerk } from "@clerk/react";
-import { BookOpen, LayoutDashboard, Settings, Video, ShieldCheck, LogOut, Menu, UserCircle, Users } from "lucide-react";
+import { BookOpen, LayoutDashboard, Settings, Video, ShieldCheck, LogOut, Menu, UserCircle, Users, TrendingUp } from "lucide-react";
 import wordmark from "@assets/TC_Black_Wordmark_1782833324395.png";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 
@@ -28,6 +28,7 @@ export function Sidebar() {
   const managerItems = [
     { href: "/admin/users", label: "Users & Progress", icon: Users },
     { href: "/admin/content", label: "Content Manager", icon: Settings },
+    { href: "/admin/growth-tracks", label: "Growth Tracks", icon: TrendingUp },
   ];
 
   const adminOnlyItems = [

@@ -5,6 +5,7 @@ import { eq, and, sql, inArray } from "drizzle-orm";
 import { requireAuth, requireManagerOrAdmin, getDbUser } from "../middlewares/requireAuth";
 import { CreateModuleBody, UpdateModuleBody, CreateQuizQuestionBody, SubmitQuizBody } from "@workspace/api-zod";
 import { logContentChange } from "../lib/auditLog";
+import { checkGrowthTrackProgression } from "../lib/growthTrackProgression";
 
 const router = Router();
 
@@ -313,6 +314,11 @@ router.post("/:moduleId/quiz/submit", requireAuth, async (req, res) => {
             .where(and(eq(watchHistoryTable.userId, dbUser.id), eq(watchHistoryTable.videoId, video.id)));
         }
       }
+    }
+
+    // Trigger growth track auto-progression if quiz passed
+    if (passed) {
+      void checkGrowthTrackProgression(dbUser.id, moduleId);
     }
 
     res.json({ ...result, takenAt: result.takenAt.toISOString() });
