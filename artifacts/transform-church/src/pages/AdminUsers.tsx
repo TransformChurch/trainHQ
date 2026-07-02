@@ -8,6 +8,7 @@ import { useToast } from "@/hooks/use-toast";
 import {
   CheckCircle2, XCircle, MinusCircle, Shield, Users, Plus, Trash2,
   UserPlus, UserMinus, UserCog, Copy, Download, ClipboardCheck, Clock, UserCheck,
+  FileText, FolderOpen,
 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { Input } from "@/components/ui/input";
@@ -58,6 +59,14 @@ type JoinRequest = {
   requestedAt: string;
   user: { id: string; firstName: string; lastName: string; email: string };
 };
+type DriveResource = {
+  id: number;
+  groupId: number;
+  label: string;
+  driveUrl: string;
+  resourceType: "file" | "folder";
+  sortOrder: number;
+};
 
 function GroupsTab() {
   const { data: users } = useAdminListUsers();
@@ -78,7 +87,11 @@ function GroupsTab() {
   const [addMemberUserId, setAddMemberUserId] = useState("");
   const [addManagerUserId, setAddManagerUserId] = useState("");
   const [manageMembersOpen, setManageMembersOpen] = useState(false);
-  const [manageDialogTab, setManageDialogTab] = useState<"members" | "managers" | "requests">("members");
+  const [manageDialogTab, setManageDialogTab] = useState<"members" | "managers" | "requests" | "documents">("members");
+  const [driveResources, setDriveResources] = useState<DriveResource[]>([]);
+  const [newResourceLabel, setNewResourceLabel] = useState("");
+  const [newResourceUrl, setNewResourceUrl] = useState("");
+  const [addingResource, setAddingResource] = useState(false);
 
   const loadGroups = async () => {
     try {
@@ -116,6 +129,49 @@ function GroupsTab() {
     }
   };
 
+  const loadDriveResources = async (groupId: number) => {
+    try {
+      const data = await apiFetch(`/api/groups/${groupId}/drive-resources`);
+      setDriveResources(data);
+    } catch {
+      toast({ title: "Failed to load documents", variant: "destructive" });
+    }
+  };
+
+  const handleAddDriveResource = async () => {
+    if (!selectedGroup || !newResourceLabel.trim() || !newResourceUrl.trim()) return;
+    if (!newResourceUrl.includes("drive.google.com")) {
+      toast({ title: "Please enter a valid Google Drive URL", variant: "destructive" });
+      return;
+    }
+    setAddingResource(true);
+    try {
+      await apiFetch(`/api/groups/${selectedGroup.id}/drive-resources`, {
+        method: "POST",
+        body: JSON.stringify({ label: newResourceLabel, driveUrl: newResourceUrl }),
+      });
+      toast({ title: "Document added" });
+      setNewResourceLabel("");
+      setNewResourceUrl("");
+      loadDriveResources(selectedGroup.id);
+    } catch {
+      toast({ title: "Failed to add document", variant: "destructive" });
+    } finally {
+      setAddingResource(false);
+    }
+  };
+
+  const handleDeleteDriveResource = async (resourceId: number) => {
+    if (!selectedGroup) return;
+    try {
+      await apiFetch(`/api/groups/${selectedGroup.id}/drive-resources/${resourceId}`, { method: "DELETE" });
+      toast({ title: "Document removed" });
+      loadDriveResources(selectedGroup.id);
+    } catch {
+      toast({ title: "Failed to remove document", variant: "destructive" });
+    }
+  };
+
   useEffect(() => { loadGroups(); }, []);
 
   const handleCreate = async (e: React.FormEvent) => {
@@ -146,13 +202,16 @@ function GroupsTab() {
     }
   };
 
-  const openManageDialog = (group: Group, tab: "members" | "managers" | "requests" = "members") => {
+  const openManageDialog = (group: Group, tab: "members" | "managers" | "requests" | "documents" = "members") => {
     setSelectedGroup(group);
     setAddMemberUserId("");
     setAddManagerUserId("");
+    setNewResourceLabel("");
+    setNewResourceUrl("");
     setManageDialogTab(tab);
     loadGroupData(group.id);
     if (isAdmin) loadManagers(group.id);
+    loadDriveResources(group.id);
     setManageMembersOpen(true);
   };
 
@@ -388,6 +447,12 @@ function GroupsTab() {
                   </span>
                 )}
               </TabsTrigger>
+              <TabsTrigger value="documents" className="flex-1">
+                Docs
+                {driveResources.length > 0 && (
+                  <Badge variant="secondary" className="ml-1.5 text-xs h-4 px-1">{driveResources.length}</Badge>
+                )}
+              </TabsTrigger>
             </TabsList>
 
             {/* Members Tab */}
@@ -546,6 +611,73 @@ function GroupsTab() {
                 </div>
               )}
             </TabsContent>
+            {/* Documents Tab */}
+            <TabsContent value="documents" className="space-y-4 mt-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Add Document or Folder</label>
+                <p className="text-xs text-muted-foreground">
+                  Paste a Google Drive share link. Files get an inline preview; folders open in a new tab.
+                </p>
+                <Input
+                  placeholder="Label (e.g. Onboarding Guide)"
+                  value={newResourceLabel}
+                  onChange={e => setNewResourceLabel(e.target.value)}
+                />
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="https://drive.google.com/..."
+                    value={newResourceUrl}
+                    onChange={e => setNewResourceUrl(e.target.value)}
+                  />
+                  <Button
+                    size="sm"
+                    onClick={handleAddDriveResource}
+                    disabled={addingResource || !newResourceLabel.trim() || !newResourceUrl.trim()}
+                  >
+                    <Plus className="w-4 h-4" />
+                  </Button>
+                </div>
+                {newResourceUrl.includes("drive.google.com") && (
+                  <p className="text-xs text-muted-foreground flex items-center gap-1">
+                    {newResourceUrl.includes("/file/d/")
+                      ? <><FileText className="w-3 h-3 text-blue-500" /> Detected: File — will show inline preview</>
+                      : <><FolderOpen className="w-3 h-3 text-amber-500" /> Detected: Folder — will open in new tab</>
+                    }
+                  </p>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Current Documents ({driveResources.length})</label>
+                {driveResources.length === 0 ? (
+                  <p className="text-sm text-muted-foreground py-2">No documents yet.</p>
+                ) : (
+                  <div className="space-y-2 max-h-56 overflow-y-auto">
+                    {driveResources.map(r => (
+                      <div key={r.id} className="flex items-center justify-between bg-muted/30 rounded px-3 py-2">
+                        <div className="flex items-center gap-2 min-w-0">
+                          {r.resourceType === "file"
+                            ? <FileText className="w-4 h-4 text-blue-500 shrink-0" />
+                            : <FolderOpen className="w-4 h-4 text-amber-500 shrink-0" />
+                          }
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium truncate">{r.label}</p>
+                            <Badge variant="outline" className="text-[10px] capitalize mt-0.5">{r.resourceType}</Badge>
+                          </div>
+                        </div>
+                        <Button
+                          variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive shrink-0"
+                          onClick={() => handleDeleteDriveResource(r.id)}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </TabsContent>
+
           </Tabs>
         </DialogContent>
       </Dialog>

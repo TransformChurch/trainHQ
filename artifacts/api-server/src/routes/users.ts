@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { getAuth } from "@clerk/express";
-import { db, usersTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { db, usersTable, groupMembersTable, groupDriveResourcesTable, groupsTable } from "@workspace/db";
+import { eq, inArray } from "drizzle-orm";
 import { requireAuth, getDbUser } from "../middlewares/requireAuth";
 import { UpsertMeBody } from "@workspace/api-zod";
 
@@ -120,6 +120,51 @@ router.patch("/me", requireAuth, async (req, res) => {
     }
     const u = updated[0];
     res.json({ id: u.id, clerkId: u.clerkId, firstName: u.firstName, lastName: u.lastName, email: u.email, phone: u.phone, role: u.role, createdAt: u.createdAt.toISOString() });
+  } catch {
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// GET /users/me/drive-resources — all Drive resources for groups the user belongs to
+router.get("/me/drive-resources", requireAuth, async (req, res) => {
+  try {
+    const auth = getAuth(req);
+    const user = await getDbUser(auth!.userId!);
+    if (!user) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
+
+    const memberships = await db
+      .select({ groupId: groupMembersTable.groupId })
+      .from(groupMembersTable)
+      .where(eq(groupMembersTable.userId, user.id));
+
+    if (memberships.length === 0) {
+      res.json([]);
+      return;
+    }
+
+    const groupIds = memberships.map(m => m.groupId);
+
+    const groups = await db
+      .select({ id: groupsTable.id, name: groupsTable.name })
+      .from(groupsTable)
+      .where(inArray(groupsTable.id, groupIds));
+
+    const groupNameMap = new Map(groups.map(g => [g.id, g.name]));
+
+    const resources = await db
+      .select()
+      .from(groupDriveResourcesTable)
+      .where(inArray(groupDriveResourcesTable.groupId, groupIds))
+      .orderBy(groupDriveResourcesTable.groupId, groupDriveResourcesTable.sortOrder, groupDriveResourcesTable.createdAt);
+
+    res.json(resources.map(r => ({
+      ...r,
+      groupName: groupNameMap.get(r.groupId) ?? "",
+      createdAt: r.createdAt.toISOString(),
+    })));
   } catch {
     res.status(500).json({ error: "Internal server error" });
   }

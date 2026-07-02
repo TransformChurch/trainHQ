@@ -24,6 +24,7 @@ import AdminGrowthTracks from "@/pages/AdminGrowthTracks";
 import AdminSettings from "@/pages/AdminSettings";
 import Profile from "@/pages/Profile";
 import Groups from "@/pages/Groups";
+import Documents from "@/pages/Documents";
 import NotFound from "@/pages/not-found";
 import { useUpsertMe, useGetMe } from "@workspace/api-client-react";
 
@@ -280,6 +281,7 @@ function ClerkProviderWithRoutes() {
           <Route path="/history"><ProtectedRoute component={History} /></Route>
           <Route path="/profile"><ProtectedRoute component={Profile} /></Route>
           <Route path="/groups"><ProtectedRoute component={Groups} /></Route>
+          <Route path="/documents"><ProtectedRoute component={Documents} /></Route>
           
           {/* Admin Routes */}
           <Route path="/admin"><ProtectedRoute component={AdminDashboard} adminOnly /></Route>

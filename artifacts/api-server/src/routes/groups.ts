@@ -5,6 +5,7 @@ import {
   groupMembersTable,
   groupManagersTable,
   groupJoinRequestsTable,
+  groupDriveResourcesTable,
   usersTable,
   assignmentsTable,
   modulesTable,
@@ -714,6 +715,76 @@ router.patch("/:groupId/join-requests/:requestId", requireManagerOrAdmin, async 
     }
 
     res.json({ ok: true, status: newStatus });
+  } catch {
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ─── GET /groups/:groupId/drive-resources ─────────────────────────────────────
+
+router.get("/:groupId/drive-resources", requireManagerOrAdmin, async (req, res) => {
+  try {
+    const dbUser = res.locals.dbUser;
+    const groupId = parseInt(req.params.groupId as string);
+    if (!(await requireGroupAccess(groupId, dbUser, res))) return;
+
+    const rows = await db
+      .select()
+      .from(groupDriveResourcesTable)
+      .where(eq(groupDriveResourcesTable.groupId, groupId))
+      .orderBy(groupDriveResourcesTable.sortOrder, groupDriveResourcesTable.createdAt);
+
+    res.json(rows.map(r => ({ ...r, createdAt: r.createdAt.toISOString() })));
+  } catch {
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ─── POST /groups/:groupId/drive-resources ────────────────────────────────────
+
+router.post("/:groupId/drive-resources", requireManagerOrAdmin, async (req, res) => {
+  try {
+    const dbUser = res.locals.dbUser;
+    const groupId = parseInt(req.params.groupId as string);
+    if (!(await requireGroupAccess(groupId, dbUser, res))) return;
+
+    const { label, driveUrl } = req.body as { label?: string; driveUrl?: string };
+    if (!label || typeof label !== "string" || !label.trim()) {
+      res.status(400).json({ error: "label is required" });
+      return;
+    }
+    if (!driveUrl || typeof driveUrl !== "string" || !driveUrl.includes("drive.google.com")) {
+      res.status(400).json({ error: "driveUrl must be a valid Google Drive URL" });
+      return;
+    }
+
+    const resourceType = driveUrl.includes("/file/d/") ? "file" : "folder";
+
+    const inserted = await db
+      .insert(groupDriveResourcesTable)
+      .values({ groupId, label: label.trim(), driveUrl: driveUrl.trim(), resourceType })
+      .returning();
+
+    res.status(201).json({ ...inserted[0], createdAt: inserted[0].createdAt.toISOString() });
+  } catch {
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ─── DELETE /groups/:groupId/drive-resources/:resourceId ──────────────────────
+
+router.delete("/:groupId/drive-resources/:resourceId", requireManagerOrAdmin, async (req, res) => {
+  try {
+    const dbUser = res.locals.dbUser;
+    const groupId = parseInt(req.params.groupId as string);
+    if (!(await requireGroupAccess(groupId, dbUser, res))) return;
+
+    const resourceId = parseInt(req.params.resourceId as string);
+    await db
+      .delete(groupDriveResourcesTable)
+      .where(and(eq(groupDriveResourcesTable.id, resourceId), eq(groupDriveResourcesTable.groupId, groupId)));
+
+    res.status(204).send();
   } catch {
     res.status(500).json({ error: "Internal server error" });
   }
