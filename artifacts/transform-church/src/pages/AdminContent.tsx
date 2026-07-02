@@ -24,7 +24,7 @@ import {
   Accordion, AccordionContent, AccordionItem, AccordionTrigger,
 } from "@/components/ui/accordion";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Plus, Trash2, Video, BookOpen, HelpCircle, Users, Pencil, Globe, Lock, Mail, Upload, Link, HardDrive, Image as ImageIcon, FileText, FolderOpen } from "lucide-react";
+import { Plus, Trash2, Video, BookOpen, HelpCircle, Users, Pencil, Globe, Lock, Mail, Upload, Link, HardDrive, Image as ImageIcon, FileText, FolderOpen, Shield, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { useUpload } from "@workspace/object-storage-web";
@@ -1032,235 +1032,495 @@ function AssignmentManager() {
   );
 }
 
-// ── Documents Tab ─────────────────────────────────────────────────────────────
+// ── Document Repository Tab ───────────────────────────────────────────────────
 
-type DriveResource = {
-  id: number;
-  groupId: number;
-  label: string;
-  driveUrl: string;
-  resourceType: "file" | "folder";
+const repoFetch = async (path: string, opts?: RequestInit): Promise<any> => {
+  const r = await fetch(`${BASE}${path}`, {
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    ...opts,
+  });
+  if (!r.ok) throw new Error(await r.text());
+  if (r.status === 204) return null;
+  return r.json();
 };
 
-type GroupWithResources = {
+type RepoDoc = {
   id: number;
-  name: string;
+  title: string;
   description: string | null;
-  resources: DriveResource[];
+  driveUrl: string | null;
+  resourceType: "file" | "folder";
+  parentId: number | null;
+  sortOrder: number;
+  createdAt: string;
+  accessCount: number;
 };
+
+type AccessGrant = {
+  id: number;
+  documentId: number;
+  principalType: "group" | "user";
+  principalId: string;
+  displayName: string;
+  email: string | null;
+  grantedAt: string;
+};
+
+type RepoGroup = { id: number; name: string };
+type RepoUser = { id: string; firstName: string; lastName: string; email: string; role: string };
 
 function DocumentsTab() {
   const { toast } = useToast();
-  const [groups, setGroups] = useState<GroupWithResources[]>([]);
+  const [docs, setDocs] = useState<RepoDoc[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selectedGroupId, setSelectedGroupId] = useState<number | null>(null);
-  const [newLabel, setNewLabel] = useState("");
-  const [newUrl, setNewUrl] = useState("");
-  const [adding, setAdding] = useState(false);
+  const [selectedFolder, setSelectedFolder] = useState<number | "all" | "unfiled">("all");
 
-  const loadAll = async () => {
+  const [createFileOpen, setCreateFileOpen] = useState(false);
+  const [createFolderOpen, setCreateFolderOpen] = useState(false);
+  const [newTitle, setNewTitle] = useState("");
+  const [newDesc, setNewDesc] = useState("");
+  const [newUrl, setNewUrl] = useState("");
+  const [newParentId, setNewParentId] = useState<number | null>(null);
+  const [creating, setCreating] = useState(false);
+
+  const [editDoc, setEditDoc] = useState<RepoDoc | null>(null);
+  const [editTitle, setEditTitle] = useState("");
+  const [editDesc, setEditDesc] = useState("");
+  const [editUrl, setEditUrl] = useState("");
+  const [editParentId, setEditParentId] = useState<number | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const [accessDoc, setAccessDoc] = useState<RepoDoc | null>(null);
+  const [grants, setGrants] = useState<AccessGrant[]>([]);
+  const [grantsLoading, setGrantsLoading] = useState(false);
+  const [addType, setAddType] = useState<"group" | "user">("group");
+  const [addId, setAddId] = useState("");
+  const [repoGroups, setRepoGroups] = useState<RepoGroup[]>([]);
+  const [repoUsers, setRepoUsers] = useState<RepoUser[]>([]);
+  const [addingGrant, setAddingGrant] = useState(false);
+
+  const loadDocs = async () => {
     setLoading(true);
     try {
-      const groupList = await apiFetch("/api/groups");
-      const withResources = await Promise.all(
-        groupList.map(async (g: any) => {
-          try {
-            const resources = await apiFetch(`/api/groups/${g.id}/drive-resources`);
-            return { ...g, resources };
-          } catch {
-            return { ...g, resources: [] };
-          }
-        })
-      );
-      setGroups(withResources);
-      if (withResources.length > 0 && selectedGroupId === null) {
-        setSelectedGroupId(withResources[0].id);
-      }
+      const data = await repoFetch("/api/documents/admin");
+      setDocs(data);
     } catch {
-      toast({ title: "Failed to load groups", variant: "destructive" });
+      toast({ title: "Failed to load repository", variant: "destructive" });
     } finally {
       setLoading(false);
     }
   };
 
-  useEffect(() => { loadAll(); }, []);
+  useEffect(() => { loadDocs(); }, []);
 
-  const selectedGroup = groups.find(g => g.id === selectedGroupId) ?? null;
+  useEffect(() => {
+    repoFetch("/api/groups").then(setRepoGroups).catch(() => {});
+    repoFetch("/api/admin/users").then(setRepoUsers).catch(() => {});
+  }, []);
 
-  const handleAdd = async () => {
-    if (!selectedGroup || !newLabel.trim() || !newUrl.trim()) return;
-    if (!newUrl.includes("drive.google.com")) {
-      toast({ title: "Please enter a valid Google Drive URL", variant: "destructive" });
-      return;
-    }
-    setAdding(true);
+  const folders = docs.filter(d => d.resourceType === "folder");
+  const fileDocs = docs.filter(d => d.resourceType === "file");
+  const visibleDocs = selectedFolder === "all"
+    ? fileDocs
+    : selectedFolder === "unfiled"
+    ? fileDocs.filter(d => d.parentId === null)
+    : fileDocs.filter(d => d.parentId === selectedFolder);
+  const unfiledCount = fileDocs.filter(d => d.parentId === null).length;
+  const folderCount = (id: number) => fileDocs.filter(d => d.parentId === id).length;
+
+  const openAccess = async (doc: RepoDoc) => {
+    setAccessDoc(doc);
+    setGrantsLoading(true);
     try {
-      await apiFetch(`/api/groups/${selectedGroup.id}/drive-resources`, {
+      setGrants(await repoFetch(`/api/documents/admin/${doc.id}/access`));
+    } catch {
+      toast({ title: "Failed to load access", variant: "destructive" });
+    } finally {
+      setGrantsLoading(false);
+    }
+  };
+
+  const refreshGrants = async (docId: number) => {
+    const data = await repoFetch(`/api/documents/admin/${docId}/access`);
+    setGrants(data);
+    setDocs(prev => prev.map(d => d.id === docId ? { ...d, accessCount: data.length } : d));
+  };
+
+  const handleAddGrant = async () => {
+    if (!accessDoc || !addId) return;
+    setAddingGrant(true);
+    try {
+      await repoFetch(`/api/documents/admin/${accessDoc.id}/access`, {
         method: "POST",
-        body: JSON.stringify({ label: newLabel.trim(), driveUrl: newUrl.trim() }),
+        body: JSON.stringify({ principalType: addType, principalId: addId }),
+      });
+      setAddId("");
+      await refreshGrants(accessDoc.id);
+    } catch (err: any) {
+      toast({ title: (err.message ?? "").includes("already") ? "Already granted" : "Failed to add access", variant: "destructive" });
+    } finally {
+      setAddingGrant(false);
+    }
+  };
+
+  const handleRemoveGrant = async (grantId: number) => {
+    if (!accessDoc) return;
+    try {
+      await repoFetch(`/api/documents/admin/${accessDoc.id}/access/${grantId}`, { method: "DELETE" });
+      await refreshGrants(accessDoc.id);
+    } catch {
+      toast({ title: "Failed to remove access", variant: "destructive" });
+    }
+  };
+
+  const handleCreateFile = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newTitle.trim() || !newUrl.trim()) return;
+    setCreating(true);
+    try {
+      const resourceType = newUrl.includes("/file/d/") ? "file" : "folder";
+      await repoFetch("/api/documents/admin", {
+        method: "POST",
+        body: JSON.stringify({ title: newTitle.trim(), description: newDesc.trim() || null, driveUrl: newUrl.trim(), resourceType, parentId: newParentId }),
       });
       toast({ title: "Document added" });
-      setNewLabel("");
-      setNewUrl("");
-      loadAll();
+      setCreateFileOpen(false);
+      setNewTitle(""); setNewDesc(""); setNewUrl(""); setNewParentId(null);
+      loadDocs();
     } catch {
-      toast({ title: "Failed to add document", variant: "destructive" });
+      toast({ title: "Failed to create document", variant: "destructive" });
     } finally {
-      setAdding(false);
+      setCreating(false);
     }
   };
 
-  const handleDelete = async (groupId: number, resourceId: number) => {
+  const handleCreateFolder = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newTitle.trim()) return;
+    setCreating(true);
     try {
-      await apiFetch(`/api/groups/${groupId}/drive-resources/${resourceId}`, { method: "DELETE" });
-      toast({ title: "Document removed" });
-      loadAll();
+      await repoFetch("/api/documents/admin", {
+        method: "POST",
+        body: JSON.stringify({ title: newTitle.trim(), description: newDesc.trim() || null, resourceType: "folder" }),
+      });
+      toast({ title: "Folder created" });
+      setCreateFolderOpen(false);
+      setNewTitle(""); setNewDesc("");
+      loadDocs();
     } catch {
-      toast({ title: "Failed to remove document", variant: "destructive" });
+      toast({ title: "Failed to create folder", variant: "destructive" });
+    } finally {
+      setCreating(false);
     }
   };
 
-  const detectedType = newUrl.includes("drive.google.com")
-    ? newUrl.includes("/file/d/") ? "file" : "folder"
+  const openEdit = (doc: RepoDoc) => {
+    setEditDoc(doc);
+    setEditTitle(doc.title);
+    setEditDesc(doc.description ?? "");
+    setEditUrl(doc.driveUrl ?? "");
+    setEditParentId(doc.parentId);
+  };
+
+  const handleEdit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editDoc) return;
+    setSaving(true);
+    try {
+      await repoFetch(`/api/documents/admin/${editDoc.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          title: editTitle.trim(),
+          description: editDesc.trim() || null,
+          ...(editDoc.resourceType === "file" ? { driveUrl: editUrl.trim() || null, parentId: editParentId } : {}),
+        }),
+      });
+      toast({ title: "Saved" });
+      setEditDoc(null);
+      loadDocs();
+    } catch {
+      toast({ title: "Failed to save", variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async (doc: RepoDoc) => {
+    const msg = doc.resourceType === "folder"
+      ? `Delete folder "${doc.title}"? Its documents will be moved to Unfiled.`
+      : `Delete "${doc.title}"?`;
+    if (!confirm(msg)) return;
+    try {
+      await repoFetch(`/api/documents/admin/${doc.id}`, { method: "DELETE" });
+      toast({ title: doc.resourceType === "folder" ? "Folder deleted" : "Document deleted" });
+      if (selectedFolder === doc.id) setSelectedFolder("all");
+      loadDocs();
+    } catch {
+      toast({ title: "Failed to delete", variant: "destructive" });
+    }
+  };
+
+  const detectedUrlType = newUrl.includes("drive.google.com")
+    ? (newUrl.includes("/file/d/") ? "file" : "folder-link")
     : null;
 
-  if (loading) {
-    return <div className="py-16 text-center text-muted-foreground">Loading groups...</div>;
-  }
+  const navBtn = (active: boolean, label: string, count: number, onClick: () => void, onDelete?: () => void) => (
+    <div className={`group flex items-center gap-1 rounded-md ${active ? "bg-sidebar-accent" : ""}`}>
+      <button
+        onClick={onClick}
+        className={`flex-1 text-left px-3 py-2 rounded-md text-sm transition-colors flex items-center justify-between gap-2 ${active ? "text-sidebar-accent-foreground font-medium" : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"}`}
+      >
+        <span className="truncate">{label}</span>
+        {count > 0 && <Badge variant="secondary" className="text-xs h-4 px-1 shrink-0">{count}</Badge>}
+      </button>
+      {onDelete && (
+        <Button variant="ghost" size="icon" className="h-6 w-6 opacity-0 group-hover:opacity-100 mr-1 shrink-0 text-muted-foreground hover:text-destructive" onClick={onDelete} title="Delete folder">
+          <Trash2 className="w-3 h-3" />
+        </Button>
+      )}
+    </div>
+  );
 
-  if (groups.length === 0) {
-    return (
-      <Card className="border-dashed">
-        <CardContent className="p-12 text-center">
-          <FileText className="w-10 h-10 text-muted-foreground/40 mx-auto mb-3" />
-          <h3 className="font-medium mb-1">No groups yet</h3>
-          <p className="text-sm text-muted-foreground">Create groups first, then assign documents to them.</p>
-        </CardContent>
-      </Card>
-    );
-  }
+  if (loading) return <div className="py-16 text-center text-muted-foreground">Loading repository...</div>;
 
   return (
     <div className="flex gap-6 min-h-[500px]">
-      {/* Group sidebar */}
-      <div className="w-56 shrink-0 space-y-1">
-        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3 px-1">Groups</p>
-        {groups.map(g => (
-          <button
-            key={g.id}
-            onClick={() => { setSelectedGroupId(g.id); setNewLabel(""); setNewUrl(""); }}
-            className={`w-full text-left px-3 py-2.5 rounded-md text-sm transition-colors flex items-center justify-between gap-2 ${
-              selectedGroupId === g.id
-                ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
-                : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
-            }`}
-          >
-            <span className="truncate">{g.name}</span>
-            {g.resources.length > 0 && (
-              <Badge variant="secondary" className="text-xs h-4 px-1 shrink-0">{g.resources.length}</Badge>
-            )}
-          </button>
-        ))}
+      {/* Sidebar */}
+      <div className="w-56 shrink-0">
+        <div className="flex items-center justify-between mb-3 px-1">
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Library</p>
+          <Button size="sm" variant="ghost" className="h-6 text-xs px-2" onClick={() => { setNewTitle(""); setNewDesc(""); setCreateFolderOpen(true); }}>
+            <Plus className="w-3 h-3 mr-1" /> Folder
+          </Button>
+        </div>
+        <div className="space-y-0.5">
+          {navBtn(selectedFolder === "all", "All Documents", fileDocs.length, () => setSelectedFolder("all"))}
+          {navBtn(selectedFolder === "unfiled", "Unfiled", unfiledCount, () => setSelectedFolder("unfiled"))}
+          {folders.length > 0 && (
+            <>
+              <p className="text-xs text-muted-foreground px-1 pt-3 pb-1">Folders</p>
+              {folders.map(f => navBtn(
+                selectedFolder === f.id,
+                f.title,
+                folderCount(f.id),
+                () => setSelectedFolder(f.id),
+                () => handleDelete(f),
+              ))}
+            </>
+          )}
+        </div>
       </div>
 
-      {/* Resource panel */}
-      <div className="flex-1 min-w-0 space-y-6">
-        {selectedGroup ? (
-          <>
-            <div>
-              <h3 className="font-semibold text-lg">{selectedGroup.name}</h3>
-              {selectedGroup.description && (
-                <p className="text-sm text-muted-foreground mt-0.5">{selectedGroup.description}</p>
-              )}
-            </div>
+      {/* Main panel */}
+      <div className="flex-1 min-w-0 space-y-4">
+        <div className="flex items-center justify-between gap-4">
+          <h3 className="font-semibold text-base">
+            {selectedFolder === "all" ? "All Documents" : selectedFolder === "unfiled" ? "Unfiled" : (folders.find(f => f.id === selectedFolder)?.title ?? "Folder")}
+          </h3>
+          <Button size="sm" variant="outline" onClick={() => { setNewTitle(""); setNewDesc(""); setNewUrl(""); setNewParentId(typeof selectedFolder === "number" ? selectedFolder : null); setCreateFileOpen(true); }}>
+            <Plus className="w-3.5 h-3.5 mr-1.5" /> Add Document
+          </Button>
+        </div>
 
-            {/* Add resource form */}
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-sm font-semibold">Add Document or Folder</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <div className="grid sm:grid-cols-2 gap-3">
-                  <div className="space-y-1.5">
-                    <Label className="text-xs">Label</Label>
-                    <Input
-                      placeholder="e.g. Onboarding Guide"
-                      value={newLabel}
-                      onChange={e => setNewLabel(e.target.value)}
-                    />
+        {visibleDocs.length === 0 ? (
+          <div className="border border-dashed rounded-lg p-12 text-center text-muted-foreground">
+            <FileText className="w-8 h-8 mx-auto mb-3 opacity-40" />
+            <p className="text-sm font-medium mb-1">No documents here yet</p>
+            <p className="text-xs">Click "Add Document" to link a Google Drive file or folder link.</p>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {visibleDocs.map(doc => {
+              const folderName = doc.parentId ? folders.find(f => f.id === doc.parentId)?.title : null;
+              return (
+                <div key={doc.id} className="flex items-center gap-3 bg-muted/30 rounded-lg px-4 py-3">
+                  <div className="rounded-md p-1.5 bg-blue-50 text-blue-600 shrink-0">
+                    <FileText className="w-4 h-4" />
                   </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-xs">Google Drive URL</Label>
-                    <div className="flex gap-2">
-                      <Input
-                        placeholder="https://drive.google.com/..."
-                        value={newUrl}
-                        onChange={e => setNewUrl(e.target.value)}
-                        className="flex-1"
-                      />
-                      <Button
-                        onClick={handleAdd}
-                        disabled={adding || !newLabel.trim() || !newUrl.trim()}
-                        size="sm"
-                      >
-                        <Plus className="w-4 h-4 mr-1" /> Add
-                      </Button>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate">{doc.title}</p>
+                    <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                      {folderName && <span className="text-xs text-muted-foreground"><FolderOpen className="w-3 h-3 inline mr-0.5" />{folderName}</span>}
+                      {doc.description && <span className="text-xs text-muted-foreground truncate max-w-xs">{doc.description}</span>}
                     </div>
                   </div>
+                  {doc.accessCount === 0 ? (
+                    <div className="flex items-center gap-1 text-xs text-muted-foreground shrink-0 whitespace-nowrap">
+                      <Lock className="w-3 h-3" /> Private
+                    </div>
+                  ) : (
+                    <Badge variant="secondary" className="text-xs shrink-0 gap-1">
+                      <Shield className="w-3 h-3" />{doc.accessCount} {doc.accessCount === 1 ? "grant" : "grants"}
+                    </Badge>
+                  )}
+                  {doc.driveUrl && (
+                    <a href={doc.driveUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-primary hover:underline shrink-0">Open</a>
+                  )}
+                  <div className="flex items-center gap-1 shrink-0">
+                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEdit(doc)} title="Edit">
+                      <Pencil className="w-3.5 h-3.5" />
+                    </Button>
+                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openAccess(doc)} title="Manage access">
+                      <Shield className="w-3.5 h-3.5" />
+                    </Button>
+                    <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive" onClick={() => handleDelete(doc)} title="Delete">
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </Button>
+                  </div>
                 </div>
-                {detectedType && (
-                  <p className="text-xs text-muted-foreground flex items-center gap-1.5">
-                    {detectedType === "file"
-                      ? <><FileText className="w-3.5 h-3.5 text-blue-500" /> <strong>File</strong> — students will see an inline preview panel</>
-                      : <><FolderOpen className="w-3.5 h-3.5 text-amber-500" /> <strong>Folder</strong> — students will open it in a new tab</>
-                    }
-                  </p>
-                )}
-              </CardContent>
-            </Card>
+              );
+            })}
+          </div>
+        )}
+      </div>
 
-            {/* Resource list */}
-            {selectedGroup.resources.length === 0 ? (
-              <div className="border border-dashed rounded-lg p-10 text-center text-muted-foreground">
-                <FileText className="w-8 h-8 mx-auto mb-2 opacity-40" />
-                <p className="text-sm">No documents yet for this group.</p>
+      {/* Add Document Dialog */}
+      <Dialog open={createFileOpen} onOpenChange={v => { if (!v) setCreateFileOpen(false); }}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Add Document</DialogTitle></DialogHeader>
+          <form onSubmit={handleCreateFile} className="space-y-4">
+            <FormField label="Title"><Input value={newTitle} onChange={e => setNewTitle(e.target.value)} required placeholder="e.g. Onboarding Guide" /></FormField>
+            <FormField label="Description (optional)"><Textarea value={newDesc} onChange={e => setNewDesc(e.target.value)} rows={2} /></FormField>
+            <div className="space-y-1.5">
+              <Label>Google Drive URL</Label>
+              <Input value={newUrl} onChange={e => setNewUrl(e.target.value)} required placeholder="https://drive.google.com/..." />
+              {detectedUrlType && (
+                <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+                  {detectedUrlType === "file"
+                    ? <><FileText className="w-3.5 h-3.5 text-blue-500" /> File — students will see an inline preview</>
+                    : <><FolderOpen className="w-3.5 h-3.5 text-amber-500" /> Drive folder — students will open it in Google Drive</>
+                  }
+                </p>
+              )}
+            </div>
+            {folders.length > 0 && (
+              <div className="space-y-1.5">
+                <Label>Folder</Label>
+                <Select value={String(newParentId ?? "")} onValueChange={v => setNewParentId(v ? parseInt(v) : null)}>
+                  <SelectTrigger><SelectValue placeholder="None (Unfiled)" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">None (Unfiled)</SelectItem>
+                    {folders.map(f => <SelectItem key={f.id} value={String(f.id)}>{f.title}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            <Button type="submit" className="w-full" disabled={creating}>{creating ? "Adding..." : "Add Document"}</Button>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* New Folder Dialog */}
+      <Dialog open={createFolderOpen} onOpenChange={v => { if (!v) setCreateFolderOpen(false); }}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>New Folder</DialogTitle></DialogHeader>
+          <form onSubmit={handleCreateFolder} className="space-y-4">
+            <FormField label="Folder Name"><Input value={newTitle} onChange={e => setNewTitle(e.target.value)} required placeholder="e.g. Leadership Resources" /></FormField>
+            <FormField label="Description (optional)"><Textarea value={newDesc} onChange={e => setNewDesc(e.target.value)} rows={2} /></FormField>
+            <Button type="submit" className="w-full" disabled={creating}>{creating ? "Creating..." : "Create Folder"}</Button>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Dialog */}
+      <Dialog open={!!editDoc} onOpenChange={v => { if (!v) setEditDoc(null); }}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Edit {editDoc?.resourceType === "folder" ? "Folder" : "Document"}</DialogTitle></DialogHeader>
+          {editDoc && (
+            <form onSubmit={handleEdit} className="space-y-4">
+              <FormField label="Title"><Input value={editTitle} onChange={e => setEditTitle(e.target.value)} required /></FormField>
+              <FormField label="Description (optional)"><Textarea value={editDesc} onChange={e => setEditDesc(e.target.value)} rows={2} /></FormField>
+              {editDoc.resourceType === "file" && (
+                <>
+                  <FormField label="Google Drive URL"><Input value={editUrl} onChange={e => setEditUrl(e.target.value)} /></FormField>
+                  {folders.filter(f => f.id !== editDoc.id).length > 0 && (
+                    <div className="space-y-1.5">
+                      <Label>Folder</Label>
+                      <Select value={String(editParentId ?? "")} onValueChange={v => setEditParentId(v ? parseInt(v) : null)}>
+                        <SelectTrigger><SelectValue placeholder="None (Unfiled)" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="">None (Unfiled)</SelectItem>
+                          {folders.map(f => <SelectItem key={f.id} value={String(f.id)}>{f.title}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+                </>
+              )}
+              <Button type="submit" className="w-full" disabled={saving}>{saving ? "Saving..." : "Save Changes"}</Button>
+            </form>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Access Management Dialog */}
+      <Dialog open={!!accessDoc} onOpenChange={v => { if (!v) { setAccessDoc(null); setGrants([]); setAddId(""); } }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Shield className="w-4 h-4" /> Access — {accessDoc?.title}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-5">
+            {grantsLoading ? (
+              <p className="text-sm text-muted-foreground py-4 text-center">Loading...</p>
+            ) : grants.length === 0 ? (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground rounded-md border border-dashed px-4 py-3">
+                <Lock className="w-4 h-4 shrink-0" /> Private — no one has been granted access yet
               </div>
             ) : (
               <div className="space-y-2">
-                <p className="text-sm font-medium text-muted-foreground">{selectedGroup.resources.length} document{selectedGroup.resources.length !== 1 ? "s" : ""}</p>
-                {selectedGroup.resources.map(r => (
-                  <div key={r.id} className="flex items-center gap-3 bg-muted/30 rounded-lg px-4 py-3">
-                    <div className={`rounded-md p-1.5 shrink-0 ${r.resourceType === "file" ? "bg-blue-50 text-blue-600" : "bg-amber-50 text-amber-600"}`}>
-                      {r.resourceType === "file" ? <FileText className="w-4 h-4" /> : <FolderOpen className="w-4 h-4" />}
-                    </div>
+                {grants.map(g => (
+                  <div key={g.id} className="flex items-center gap-3 bg-muted/30 rounded-md px-3 py-2.5">
+                    <Badge variant={g.principalType === "group" ? "secondary" : "outline"} className="text-xs shrink-0 capitalize gap-1">
+                      {g.principalType === "group" ? <Users className="w-3 h-3" /> : null}
+                      {g.principalType}
+                    </Badge>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate">{r.label}</p>
-                      <p className="text-xs text-muted-foreground truncate mt-0.5">{r.driveUrl}</p>
+                      <p className="text-sm font-medium truncate">{g.displayName}</p>
+                      {g.email && <p className="text-xs text-muted-foreground truncate">{g.email}</p>}
                     </div>
-                    <Badge variant="outline" className="text-xs capitalize shrink-0">{r.resourceType}</Badge>
-                    <a
-                      href={r.driveUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-xs text-primary hover:underline shrink-0"
-                    >
-                      Open
-                    </a>
-                    <Button
-                      variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive shrink-0"
-                      onClick={() => handleDelete(r.groupId, r.id)}
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
+                    <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive hover:text-destructive shrink-0" onClick={() => handleRemoveGrant(g.id)}>
+                      <X className="w-3.5 h-3.5" />
                     </Button>
                   </div>
                 ))}
               </div>
             )}
-          </>
-        ) : (
-          <div className="text-center text-muted-foreground py-16">Select a group to manage its documents.</div>
-        )}
-      </div>
+
+            <div className="border-t pt-4 space-y-3">
+              <p className="text-sm font-medium">Grant access</p>
+              <div className="flex items-center gap-2">
+                <button type="button" onClick={() => { setAddType("group"); setAddId(""); }}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm border transition-colors ${addType === "group" ? "bg-primary text-primary-foreground border-primary" : "border-input text-muted-foreground hover:bg-muted"}`}>
+                  <Users className="w-3.5 h-3.5" /> Group
+                </button>
+                <button type="button" onClick={() => { setAddType("user"); setAddId(""); }}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm border transition-colors ${addType === "user" ? "bg-primary text-primary-foreground border-primary" : "border-input text-muted-foreground hover:bg-muted"}`}>
+                  <Globe className="w-3.5 h-3.5" /> Individual
+                </button>
+              </div>
+              <div className="flex gap-2">
+                <Select value={addId} onValueChange={setAddId}>
+                  <SelectTrigger className="flex-1">
+                    <SelectValue placeholder={addType === "group" ? "Select a group..." : "Select a user..."} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {addType === "group"
+                      ? repoGroups.map(g => <SelectItem key={g.id} value={String(g.id)}>{g.name}</SelectItem>)
+                      : repoUsers.map(u => <SelectItem key={u.id} value={u.id}>{u.firstName} {u.lastName} — {u.email}</SelectItem>)
+                    }
+                  </SelectContent>
+                </Select>
+                <Button onClick={handleAddGrant} disabled={!addId || addingGrant} size="sm">
+                  {addingGrant ? "..." : "Grant"}
+                </Button>
+              </div>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

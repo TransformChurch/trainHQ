@@ -10,3 +10,4 @@ export * from "./groups";
 export * from "./settings";
 export * from "./contentAuditLog";
 export * from "./growthTracks";
+export * from "./documents";

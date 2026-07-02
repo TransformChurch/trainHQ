@@ -13,6 +13,7 @@ import dashboardRouter from "./dashboard";
 import groupsRouter from "./groups";
 import storageRouter from "./storage";
 import growthTracksRouter from "./growthTracks";
+import documentsRouter from "./documents";
 
 const router: IRouter = Router();
 
@@ -30,5 +31,6 @@ router.use("/admin", adminRouter);
 router.use("/dashboard", dashboardRouter);
 router.use("/groups", groupsRouter);
 router.use("/growth-tracks", growthTracksRouter);
+router.use("/documents", documentsRouter);
 
 export default router;
