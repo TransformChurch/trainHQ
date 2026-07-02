@@ -56,6 +56,79 @@ router.get("/", requireManagerOrAdmin, async (req, res) => {
   }
 });
 
+// ── POST /api/admin/documents/import-folder ──────────────────────────────────
+// Bulk-imports all files from a publicly-shared Google Drive folder.
+// Requires GOOGLE_API_KEY secret (Drive API v3 read-only key).
+// Each imported file is created as a private document (no access grants).
+
+router.post("/import-folder", requireManagerOrAdmin, async (req, res) => {
+  const apiKey = process.env.GOOGLE_API_KEY;
+  if (!apiKey) {
+    res.status(503).json({ error: "GOOGLE_API_KEY is not configured. Add it in Replit Secrets to enable Drive folder import." });
+    return;
+  }
+
+  try {
+    const auth = getAuth(req);
+    const { folderUrl, parentId } = req.body as { folderUrl?: string; parentId?: number | null };
+
+    if (!folderUrl || !folderUrl.trim()) {
+      res.status(400).json({ error: "folderUrl is required" });
+      return;
+    }
+
+    // Extract folder ID from various Drive folder URL formats:
+    // https://drive.google.com/drive/folders/FOLDER_ID
+    // https://drive.google.com/drive/u/0/folders/FOLDER_ID?usp=sharing
+    const folderIdMatch = folderUrl.match(/\/folders\/([a-zA-Z0-9_-]+)/);
+    if (!folderIdMatch) {
+      res.status(400).json({ error: "Could not extract a folder ID from the URL. Make sure it is a Google Drive folder link." });
+      return;
+    }
+    const folderId = folderIdMatch[1];
+
+    // Drive API v3: list all files whose parent is this folder
+    const driveRes = await fetch(
+      `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(`'${folderId}' in parents and trashed = false`)}&fields=files(id,name,mimeType,webViewLink)&pageSize=200&key=${apiKey}`,
+    );
+
+    if (!driveRes.ok) {
+      const errBody = await driveRes.text();
+      if (driveRes.status === 403 || driveRes.status === 404) {
+        res.status(400).json({ error: "Could not access that folder. Make sure it is shared publicly (\"Anyone with the link can view\")." });
+        return;
+      }
+      console.error("Drive API error:", errBody);
+      res.status(502).json({ error: "Google Drive API returned an error. Check that the folder is publicly shared." });
+      return;
+    }
+
+    const driveData = (await driveRes.json()) as { files?: { id: string; name: string; mimeType: string; webViewLink: string }[] };
+    const files = (driveData.files ?? []).filter(f => f.mimeType !== "application/vnd.google-apps.folder");
+
+    if (files.length === 0) {
+      res.json({ imported: 0, message: "No files found in that folder (subfolders are not imported)." });
+      return;
+    }
+
+    const toInsert = files.map(f => ({
+      title: f.name,
+      description: null as string | null,
+      driveUrl: f.webViewLink,
+      resourceType: "file" as const,
+      parentId: parentId ?? null,
+      createdByClerkId: auth!.userId!,
+    }));
+
+    const inserted = await db.insert(documentsTable).values(toInsert).returning();
+
+    res.status(201).json({ imported: inserted.length, documents: inserted.map(d => ({ ...d, createdAt: d.createdAt.toISOString(), accessCount: 0 })) });
+  } catch (err) {
+    console.error("import-folder error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 // ── POST /api/admin/documents ─────────────────────────────────────────────────
 
 router.post("/", requireManagerOrAdmin, async (req, res) => {

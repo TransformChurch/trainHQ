@@ -1084,6 +1084,11 @@ function DocumentsTab() {
   const [newParentId, setNewParentId] = useState<number | null>(null);
   const [creating, setCreating] = useState(false);
 
+  const [importOpen, setImportOpen] = useState(false);
+  const [importFolderUrl, setImportFolderUrl] = useState("");
+  const [importParentId, setImportParentId] = useState<number | null>(null);
+  const [importing, setImporting] = useState(false);
+
   const [editDoc, setEditDoc] = useState<RepoDoc | null>(null);
   const [editTitle, setEditTitle] = useState("");
   const [editDesc, setEditDesc] = useState("");
@@ -1266,6 +1271,36 @@ function DocumentsTab() {
     }
   };
 
+  const handleImportFolder = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!importFolderUrl.trim()) return;
+    setImporting(true);
+    try {
+      const result = await repoFetch("/api/admin/documents/import-folder", {
+        method: "POST",
+        body: JSON.stringify({ folderUrl: importFolderUrl.trim(), parentId: importParentId }),
+      });
+      if (result.imported === 0) {
+        toast({ title: result.message ?? "No files found in that folder" });
+      } else {
+        toast({ title: `Imported ${result.imported} document${result.imported !== 1 ? "s" : ""}` });
+      }
+      setImportOpen(false);
+      setImportFolderUrl("");
+      setImportParentId(null);
+      loadDocs();
+    } catch (err: any) {
+      const msg: string = err?.message ?? "";
+      if (msg.includes("GOOGLE_API_KEY")) {
+        toast({ title: "Google API key not configured", description: "Add GOOGLE_API_KEY to Replit Secrets to enable Drive folder import.", variant: "destructive" });
+      } else {
+        toast({ title: msg || "Failed to import from Drive", variant: "destructive" });
+      }
+    } finally {
+      setImporting(false);
+    }
+  };
+
   const isDriveUrl = newUrl.includes("drive.google.com");
 
   const navBtn = (active: boolean, label: string, count: number, onClick: () => void, onDelete?: () => void) => (
@@ -1321,9 +1356,14 @@ function DocumentsTab() {
           <h3 className="font-semibold text-base">
             {selectedFolder === "all" ? "All Documents" : selectedFolder === "unfiled" ? "Unfiled" : (folders.find(f => f.id === selectedFolder)?.title ?? "Folder")}
           </h3>
-          <Button size="sm" variant="outline" onClick={() => { setNewTitle(""); setNewDesc(""); setNewUrl(""); setNewParentId(typeof selectedFolder === "number" ? selectedFolder : null); setCreateFileOpen(true); }}>
-            <Plus className="w-3.5 h-3.5 mr-1.5" /> Add Document
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button size="sm" variant="outline" onClick={() => { setImportFolderUrl(""); setImportParentId(typeof selectedFolder === "number" ? selectedFolder : null); setImportOpen(true); }}>
+              <HardDrive className="w-3.5 h-3.5 mr-1.5" /> Import from Drive
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => { setNewTitle(""); setNewDesc(""); setNewUrl(""); setNewParentId(typeof selectedFolder === "number" ? selectedFolder : null); setCreateFileOpen(true); }}>
+              <Plus className="w-3.5 h-3.5 mr-1.5" /> Add Document
+            </Button>
+          </div>
         </div>
 
         {visibleItems.length === 0 ? (
@@ -1387,6 +1427,45 @@ function DocumentsTab() {
           </div>
         )}
       </div>
+
+      {/* Import from Drive Dialog */}
+      <Dialog open={importOpen} onOpenChange={v => { if (!v) { setImportOpen(false); setImportFolderUrl(""); } }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <HardDrive className="w-4 h-4 text-blue-500" /> Import from Google Drive Folder
+            </DialogTitle>
+          </DialogHeader>
+          <form onSubmit={handleImportFolder} className="space-y-4">
+            <div className="rounded-md bg-muted/40 border px-4 py-3 text-sm text-muted-foreground space-y-1">
+              <p>Paste the URL of a <strong>publicly shared</strong> Google Drive folder. All files inside (excluding sub-folders) will be created as private documents.</p>
+            </div>
+            <FormField label="Google Drive Folder URL">
+              <Input
+                value={importFolderUrl}
+                onChange={e => setImportFolderUrl(e.target.value)}
+                required
+                placeholder="https://drive.google.com/drive/folders/..."
+              />
+            </FormField>
+            {folders.length > 0 && (
+              <div className="space-y-1.5">
+                <Label>Place in folder <span className="text-muted-foreground font-normal text-xs">(optional)</span></Label>
+                <Select value={importParentId !== null ? String(importParentId) : "__none__"} onValueChange={v => setImportParentId(v === "__none__" ? null : parseInt(v))}>
+                  <SelectTrigger><SelectValue placeholder="None (Unfiled)" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">None (Unfiled)</SelectItem>
+                    {folders.map(f => <SelectItem key={f.id} value={String(f.id)}>{f.title}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            <Button type="submit" className="w-full" disabled={importing}>
+              {importing ? "Importing..." : "Import Files"}
+            </Button>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       {/* Add Document Dialog */}
       <Dialog open={createFileOpen} onOpenChange={v => { if (!v) setCreateFileOpen(false); }}>
