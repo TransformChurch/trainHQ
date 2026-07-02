@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { getAuth } from "@clerk/express";
-import { db, tracksTable, modulesTable, assignmentsTable } from "@workspace/db";
-import { eq, inArray } from "drizzle-orm";
+import { db, tracksTable, modulesTable, assignmentsTable, contentEditorGrantsTable } from "@workspace/db";
+import { eq, inArray, and, or } from "drizzle-orm";
 import { requireAuth, requireManagerOrAdmin, getDbUser } from "../middlewares/requireAuth";
 import { CreateTrackBody, UpdateTrackBody } from "@workspace/api-zod";
 import { logContentChange } from "../lib/auditLog";
@@ -12,7 +12,35 @@ const router = Router();
 // GET /tracks
 router.get("/", requireAuth, async (req, res) => {
   try {
-    const tracks = await db.select().from(tracksTable).orderBy(tracksTable.name);
+    const auth = getAuth(req);
+    const dbUser = await getDbUser(auth!.userId!);
+
+    let tracks;
+    if (dbUser?.role === "manager") {
+      // Managers only see tracks they created or have been explicitly granted access to
+      const grants = await db
+        .select({ contentId: contentEditorGrantsTable.contentId })
+        .from(contentEditorGrantsTable)
+        .where(and(
+          eq(contentEditorGrantsTable.contentType, "track"),
+          eq(contentEditorGrantsTable.granteeClerkId, dbUser.clerkId),
+        ));
+      const grantedIds = grants.map(g => g.contentId);
+
+      tracks = await db.select().from(tracksTable)
+        .where(
+          grantedIds.length > 0
+            ? or(
+                eq(tracksTable.createdByClerkId, dbUser.clerkId),
+                inArray(tracksTable.id, grantedIds),
+              )
+            : eq(tracksTable.createdByClerkId, dbUser.clerkId),
+        )
+        .orderBy(tracksTable.name);
+    } else {
+      tracks = await db.select().from(tracksTable).orderBy(tracksTable.name);
+    }
+
     res.json(tracks.map(t => ({ ...t, createdAt: t.createdAt.toISOString() })));
   } catch {
     res.status(500).json({ error: "Internal server error" });
