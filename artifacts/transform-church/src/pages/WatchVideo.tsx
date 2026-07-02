@@ -77,12 +77,20 @@ export default function WatchVideo() {
     }
     if (videoType === "drive" || video.url.includes("drive.google.com")) {
       return (
-        <iframe
-          src={video.url}
-          className="w-full h-full border-0"
-          allowFullScreen
-          allow="autoplay"
-        />
+        <div className="relative w-full h-full">
+          <iframe
+            src={video.url}
+            className="w-full h-full border-0"
+            allowFullScreen
+            allow="autoplay"
+          />
+          {/* Blocks the Google Drive pop-out button in the top-right corner of the player */}
+          <div
+            className="absolute top-0 right-0 z-10"
+            style={{ width: "60px", height: "46px", cursor: "default" }}
+            title=""
+          />
+        </div>
       );
     }
     return (
