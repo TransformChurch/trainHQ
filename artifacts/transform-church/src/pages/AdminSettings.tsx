@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { Settings, Upload } from "lucide-react";
+import { Settings, Upload, HardDrive } from "lucide-react";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -30,6 +30,8 @@ export default function AdminSettings() {
   const { toast } = useToast();
   const [maxSizeMb, setMaxSizeMb] = useState("500");
   const [uploadEnabled, setUploadEnabled] = useState(true);
+  const [driveFolderUrl, setDriveFolderUrl] = useState("");
+  const [savingDriveFolder, setSavingDriveFolder] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [savingToggle, setSavingToggle] = useState(false);
@@ -42,6 +44,8 @@ export default function AdminSettings() {
         if (sizeSetting) setMaxSizeMb(sizeSetting.value);
         const enabledSetting = settings?.find(s => s.key === "video_upload_enabled");
         if (enabledSetting) setUploadEnabled(enabledSetting.value !== "false");
+        const folderSetting = settings?.find(s => s.key === "drive_upload_folder_url");
+        if (folderSetting) setDriveFolderUrl(folderSetting.value);
       })
       .catch(() => {})
       .finally(() => setLoading(false));
@@ -62,6 +66,19 @@ export default function AdminSettings() {
       toast({ title: "Failed to save settings", variant: "destructive" });
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleSaveDriveFolder = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSavingDriveFolder(true);
+    try {
+      await saveSetting("drive_upload_folder_url", driveFolderUrl.trim());
+      toast({ title: "Drive folder URL saved" });
+    } catch {
+      toast({ title: "Failed to save setting", variant: "destructive" });
+    } finally {
+      setSavingDriveFolder(false);
     }
   };
 
@@ -148,6 +165,35 @@ export default function AdminSettings() {
               </Button>
             </form>
           )}
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <HardDrive className="w-5 h-5" />
+            Google Drive Upload Folder
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={handleSaveDriveFolder} className="space-y-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="drive-folder">Drive Folder URL</Label>
+              <p className="text-xs text-muted-foreground">
+                When set, a "Upload video to our Drive folder →" link appears above the Google Drive share link input whenever someone adds a video. Paste the URL of the shared Drive folder where videos should be uploaded.
+              </p>
+              <Input
+                id="drive-folder"
+                type="url"
+                value={driveFolderUrl}
+                onChange={e => setDriveFolderUrl(e.target.value)}
+                placeholder="https://drive.google.com/drive/folders/..."
+                className="max-w-lg"
+              />
+            </div>
+            <Button type="submit" disabled={savingDriveFolder}>
+              {savingDriveFolder ? "Saving..." : "Save"}
+            </Button>
+          </form>
         </CardContent>
       </Card>
     </div>

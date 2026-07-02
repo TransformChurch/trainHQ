@@ -59,6 +59,7 @@ function VideoSourcePicker({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [maxSizeMb, setMaxSizeMb] = useState(500);
   const [uploadEnabled, setUploadEnabled] = useState(true);
+  const [driveFolderUrl, setDriveFolderUrl] = useState("");
   const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
   useEffect(() => {
@@ -69,6 +70,8 @@ function VideoSourcePicker({
         if (s) setMaxSizeMb(parseInt(s.value));
         const enabled = rows?.find(r => r.key === "video_upload_enabled");
         if (enabled) setUploadEnabled(enabled.value !== "false");
+        const folder = rows?.find(r => r.key === "drive_upload_folder_url");
+        if (folder?.value) setDriveFolderUrl(folder.value);
       })
       .catch(() => {});
   }, []);
@@ -142,6 +145,17 @@ function VideoSourcePicker({
 
       {sourceType === "drive" && (
         <div className="space-y-1.5">
+          {driveFolderUrl && (
+            <a
+              href={driveFolderUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 text-xs font-medium text-primary hover:underline"
+            >
+              <HardDrive className="w-3.5 h-3.5" />
+              Upload video to our Drive folder →
+            </a>
+          )}
           <Label>Google Drive Share Link</Label>
           <Input
             value={url}
