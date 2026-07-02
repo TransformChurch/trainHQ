@@ -150,9 +150,9 @@ function VideoSourcePicker({
               href={driveFolderUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 text-xs font-medium text-primary hover:underline"
+              className="inline-flex items-center gap-2 rounded-md border border-primary/40 bg-primary/5 px-3 py-1.5 text-xs font-semibold text-primary shadow-sm hover:bg-primary/10 hover:border-primary transition-colors"
             >
-              <HardDrive className="w-3.5 h-3.5" />
+              <HardDrive className="w-3.5 h-3.5 shrink-0" />
               Upload video to our Drive folder →
             </a>
           )}
