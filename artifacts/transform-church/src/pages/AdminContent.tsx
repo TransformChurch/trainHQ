@@ -1402,10 +1402,10 @@ function DocumentsTab() {
             {folders.length > 0 && (
               <div className="space-y-1.5">
                 <Label>Folder</Label>
-                <Select value={String(newParentId ?? "")} onValueChange={v => setNewParentId(v ? parseInt(v) : null)}>
+                <Select value={newParentId !== null ? String(newParentId) : "__none__"} onValueChange={v => setNewParentId(v === "__none__" ? null : parseInt(v))}>
                   <SelectTrigger><SelectValue placeholder="None (Unfiled)" /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">None (Unfiled)</SelectItem>
+                    <SelectItem value="__none__">None (Unfiled)</SelectItem>
                     {folders.map(f => <SelectItem key={f.id} value={String(f.id)}>{f.title}</SelectItem>)}
                   </SelectContent>
                 </Select>
@@ -1442,10 +1442,10 @@ function DocumentsTab() {
                   {folders.filter(f => f.id !== editDoc.id).length > 0 && (
                     <div className="space-y-1.5">
                       <Label>Folder</Label>
-                      <Select value={String(editParentId ?? "")} onValueChange={v => setEditParentId(v ? parseInt(v) : null)}>
+                      <Select value={editParentId !== null ? String(editParentId) : "__none__"} onValueChange={v => setEditParentId(v === "__none__" ? null : parseInt(v))}>
                         <SelectTrigger><SelectValue placeholder="None (Unfiled)" /></SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="">None (Unfiled)</SelectItem>
+                          <SelectItem value="__none__">None (Unfiled)</SelectItem>
                           {folders.map(f => <SelectItem key={f.id} value={String(f.id)}>{f.title}</SelectItem>)}
                         </SelectContent>
                       </Select>
