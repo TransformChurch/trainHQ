@@ -1,11 +1,14 @@
-import { useAdminListUsers, useGetProgressMatrix, useUpdateUserRole, useListTracks, getAdminListUsersQueryKey } from "@workspace/api-client-react";
+import { useAdminListUsers, useGetProgressMatrix, useUpdateUserRole, useListTracks, useGetMe, getAdminListUsersQueryKey } from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
-import { CheckCircle2, XCircle, MinusCircle, Shield, Users, Plus, Trash2, UserPlus, UserMinus, UserCog } from "lucide-react";
+import {
+  CheckCircle2, XCircle, MinusCircle, Shield, Users, Plus, Trash2,
+  UserPlus, UserMinus, UserCog, Copy, Download, ClipboardCheck, Clock, UserCheck,
+} from "lucide-react";
 import { useState, useEffect } from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -28,22 +31,54 @@ async function apiFetch(path: string, opts?: RequestInit) {
   return res.json();
 }
 
-type Group = { id: number; name: string; description: string | null; createdAt: string; memberCount: number };
-type GroupMember = { id: number; groupId: number; addedAt: string; user: { id: string; firstName: string; lastName: string; email: string; role: string } };
+type Group = {
+  id: number;
+  name: string;
+  description: string | null;
+  createdAt: string;
+  memberCount: number;
+  pendingRequests: number;
+};
+type GroupMember = {
+  id: number;
+  groupId: number;
+  addedAt: string;
+  user: { id: string; firstName: string; lastName: string; email: string; role: string };
+};
+type GroupManagerRow = {
+  id: number;
+  groupId: number;
+  addedAt: string;
+  user: { id: string; firstName: string; lastName: string; email: string; role: string };
+};
+type JoinRequest = {
+  id: number;
+  groupId: number;
+  status: string;
+  requestedAt: string;
+  user: { id: string; firstName: string; lastName: string; email: string };
+};
 
 function GroupsTab() {
   const { data: users } = useAdminListUsers();
+  const { data: me } = useGetMe();
   const { toast } = useToast();
+  const isAdmin = me?.role === "admin";
+
   const [groups, setGroups] = useState<Group[]>([]);
   const [loadingGroups, setLoadingGroups] = useState(true);
   const [selectedGroup, setSelectedGroup] = useState<Group | null>(null);
   const [members, setMembers] = useState<GroupMember[]>([]);
+  const [groupManagers, setGroupManagers] = useState<GroupManagerRow[]>([]);
+  const [joinRequests, setJoinRequests] = useState<JoinRequest[]>([]);
   const [loadingMembers, setLoadingMembers] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [newName, setNewName] = useState("");
   const [newDesc, setNewDesc] = useState("");
   const [addMemberUserId, setAddMemberUserId] = useState("");
+  const [addManagerUserId, setAddManagerUserId] = useState("");
   const [manageMembersOpen, setManageMembersOpen] = useState(false);
+  const [manageDialogTab, setManageDialogTab] = useState<"members" | "managers" | "requests">("members");
 
   const loadGroups = async () => {
     try {
@@ -56,15 +91,28 @@ function GroupsTab() {
     }
   };
 
-  const loadMembers = async (groupId: number) => {
+  const loadGroupData = async (groupId: number) => {
     setLoadingMembers(true);
     try {
-      const data = await apiFetch(`/api/groups/${groupId}/members`);
-      setMembers(data);
+      const [memberData, reqData] = await Promise.all([
+        apiFetch(`/api/groups/${groupId}/members`),
+        apiFetch(`/api/groups/${groupId}/join-requests`),
+      ]);
+      setMembers(memberData);
+      setJoinRequests(reqData);
     } catch {
-      toast({ title: "Failed to load members", variant: "destructive" });
+      toast({ title: "Failed to load group data", variant: "destructive" });
     } finally {
       setLoadingMembers(false);
+    }
+  };
+
+  const loadManagers = async (groupId: number) => {
+    try {
+      const data = await apiFetch(`/api/groups/${groupId}/managers`);
+      setGroupManagers(data);
+    } catch {
+      toast({ title: "Failed to load managers", variant: "destructive" });
     }
   };
 
@@ -98,10 +146,13 @@ function GroupsTab() {
     }
   };
 
-  const openManageMembers = (group: Group) => {
+  const openManageDialog = (group: Group, tab: "members" | "managers" | "requests" = "members") => {
     setSelectedGroup(group);
     setAddMemberUserId("");
-    loadMembers(group.id);
+    setAddManagerUserId("");
+    setManageDialogTab(tab);
+    loadGroupData(group.id);
+    if (isAdmin) loadManagers(group.id);
     setManageMembersOpen(true);
   };
 
@@ -114,7 +165,7 @@ function GroupsTab() {
       });
       toast({ title: "Member added" });
       setAddMemberUserId("");
-      loadMembers(selectedGroup.id);
+      loadGroupData(selectedGroup.id);
       loadGroups();
     } catch (err: any) {
       const msg = err.message?.includes("already") ? "User is already in this group" : "Failed to add member";
@@ -127,22 +178,90 @@ function GroupsTab() {
     try {
       await apiFetch(`/api/groups/${selectedGroup.id}/members/${userId}`, { method: "DELETE" });
       toast({ title: "Member removed" });
-      loadMembers(selectedGroup.id);
+      loadGroupData(selectedGroup.id);
       loadGroups();
     } catch {
       toast({ title: "Failed to remove member", variant: "destructive" });
     }
   };
 
+  const handleAddManager = async () => {
+    if (!selectedGroup || !addManagerUserId) return;
+    try {
+      await apiFetch(`/api/groups/${selectedGroup.id}/managers`, {
+        method: "POST",
+        body: JSON.stringify({ userId: addManagerUserId }),
+      });
+      toast({ title: "Manager assigned" });
+      setAddManagerUserId("");
+      loadManagers(selectedGroup.id);
+    } catch (err: any) {
+      const msg = err.message?.includes("already") ? "User is already a manager of this group" : "Failed to assign manager";
+      toast({ title: msg, variant: "destructive" });
+    }
+  };
+
+  const handleRemoveManager = async (userId: string) => {
+    if (!selectedGroup) return;
+    try {
+      await apiFetch(`/api/groups/${selectedGroup.id}/managers/${userId}`, { method: "DELETE" });
+      toast({ title: "Manager removed" });
+      loadManagers(selectedGroup.id);
+    } catch {
+      toast({ title: "Failed to remove manager", variant: "destructive" });
+    }
+  };
+
+  const handleJoinRequestAction = async (requestId: number, action: "approve" | "deny") => {
+    if (!selectedGroup) return;
+    try {
+      await apiFetch(`/api/groups/${selectedGroup.id}/join-requests/${requestId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ action }),
+      });
+      toast({ title: action === "approve" ? "Request approved — user added to group" : "Request denied" });
+      loadGroupData(selectedGroup.id);
+      loadGroups();
+    } catch {
+      toast({ title: "Failed to process request", variant: "destructive" });
+    }
+  };
+
+  const handleCopyEmails = async (group: Group) => {
+    try {
+      const data = await apiFetch(`/api/groups/${group.id}/emails`);
+      const emails: string[] = data.emails;
+      if (emails.length === 0) {
+        toast({ title: "No members in this group" });
+        return;
+      }
+      await navigator.clipboard.writeText(emails.join(", "));
+      toast({ title: `Copied ${emails.length} email${emails.length !== 1 ? "s" : ""} to clipboard` });
+    } catch {
+      toast({ title: "Failed to copy emails", variant: "destructive" });
+    }
+  };
+
+  const handleDownloadCsv = (group: Group) => {
+    const a = document.createElement("a");
+    a.href = `${BASE}/api/groups/${group.id}/export.csv`;
+    a.download = `group-${group.name.replace(/[^a-z0-9]/gi, "_")}-export.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  };
+
   const memberUserIds = new Set(members.map(m => m.user.id));
   const eligibleUsers = users?.filter(u => !memberUserIds.has(u.id)) ?? [];
+  const managerUserIds = new Set(groupManagers.map(m => m.user.id));
+  const eligibleManagers = users?.filter(u => (u.role === "manager" || u.role === "admin") && !managerUserIds.has(u.id)) ?? [];
 
   if (loadingGroups) return <div className="p-8 text-center text-muted-foreground">Loading groups...</div>;
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <p className="text-muted-foreground">Create groups to assign modules to multiple users at once.</p>
+        <p className="text-muted-foreground">Manage groups, members, and join requests.</p>
         <Dialog open={createOpen} onOpenChange={setCreateOpen}>
           <DialogTrigger asChild>
             <Button size="sm"><Plus className="w-4 h-4 mr-2" /> New Group</Button>
@@ -185,21 +304,52 @@ function GroupsTab() {
                       <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{group.description}</p>
                     )}
                   </div>
-                  <Button
-                    variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive shrink-0"
-                    onClick={() => handleDelete(group.id)}
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </Button>
+                  {isAdmin && (
+                    <Button
+                      variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive shrink-0"
+                      onClick={() => handleDelete(group.id)}
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </Button>
+                  )}
                 </div>
-                <div className="flex items-center justify-between">
+
+                <div className="flex items-center gap-1.5 mb-3 flex-wrap">
                   <Badge variant="secondary" className="text-xs">
                     <Users className="w-3 h-3 mr-1" />
                     {group.memberCount} member{group.memberCount !== 1 ? "s" : ""}
                   </Badge>
-                  <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => openManageMembers(group)}>
-                    Manage Members
+                  {group.pendingRequests > 0 && (
+                    <button
+                      className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-700 hover:bg-amber-100 transition-colors"
+                      onClick={() => openManageDialog(group, "requests")}
+                    >
+                      <Clock className="w-3 h-3" />
+                      {group.pendingRequests} request{group.pendingRequests !== 1 ? "s" : ""}
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex flex-wrap gap-1.5">
+                  <Button size="sm" variant="outline" className="h-7 text-xs flex-1 min-w-0" onClick={() => openManageDialog(group)}>
+                    <UserCog className="w-3 h-3 mr-1" /> Manage
                   </Button>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button size="sm" variant="outline" className="h-7 w-7 p-0" onClick={() => handleCopyEmails(group)}>
+                        <Copy className="w-3 h-3" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Copy member emails</TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button size="sm" variant="outline" className="h-7 w-7 p-0" onClick={() => handleDownloadCsv(group)}>
+                        <Download className="w-3 h-3" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Download CSV with completion data</TooltipContent>
+                  </Tooltip>
                 </div>
               </CardContent>
             </Card>
@@ -207,65 +357,196 @@ function GroupsTab() {
         </div>
       )}
 
-      {/* Manage Members Dialog */}
+      {/* Manage Group Dialog */}
       <Dialog open={manageMembersOpen} onOpenChange={setManageMembersOpen}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle>Manage Members — {selectedGroup?.name}</DialogTitle>
+            <DialogTitle>{selectedGroup?.name}</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4">
-            {/* Add member */}
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Add Member</label>
-              <div className="flex gap-2">
-                <select
-                  className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
-                  value={addMemberUserId}
-                  onChange={e => setAddMemberUserId(e.target.value)}
-                >
-                  <option value="">Select a user...</option>
-                  {eligibleUsers.map(u => (
-                    <option key={u.id} value={u.id}>
-                      {u.firstName} {u.lastName} ({u.email})
-                    </option>
-                  ))}
-                </select>
-                <Button size="sm" onClick={handleAddMember} disabled={!addMemberUserId}>
-                  <UserPlus className="w-4 h-4" />
-                </Button>
-              </div>
-              {eligibleUsers.length === 0 && (
-                <p className="text-xs text-muted-foreground">All users are already in this group.</p>
-              )}
-            </div>
 
-            {/* Member list */}
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Current Members ({members.length})</label>
+          <Tabs value={manageDialogTab} onValueChange={v => setManageDialogTab(v as any)}>
+            <TabsList className="w-full">
+              <TabsTrigger value="members" className="flex-1">
+                Members
+                {members.length > 0 && (
+                  <Badge variant="secondary" className="ml-1.5 text-xs h-4 px-1">{members.length}</Badge>
+                )}
+              </TabsTrigger>
+              {isAdmin && (
+                <TabsTrigger value="managers" className="flex-1">
+                  Managers
+                  {groupManagers.length > 0 && (
+                    <Badge variant="secondary" className="ml-1.5 text-xs h-4 px-1">{groupManagers.length}</Badge>
+                  )}
+                </TabsTrigger>
+              )}
+              <TabsTrigger value="requests" className="flex-1">
+                Requests
+                {joinRequests.length > 0 && (
+                  <span className="ml-1.5 inline-flex items-center justify-center rounded-full bg-amber-100 px-1.5 text-xs font-semibold text-amber-700 min-w-[1rem] h-4">
+                    {joinRequests.length}
+                  </span>
+                )}
+              </TabsTrigger>
+            </TabsList>
+
+            {/* Members Tab */}
+            <TabsContent value="members" className="space-y-4 mt-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Add Member</label>
+                <div className="flex gap-2">
+                  <select
+                    className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                    value={addMemberUserId}
+                    onChange={e => setAddMemberUserId(e.target.value)}
+                  >
+                    <option value="">Select a user...</option>
+                    {eligibleUsers.map(u => (
+                      <option key={u.id} value={u.id}>
+                        {u.firstName} {u.lastName} ({u.email})
+                      </option>
+                    ))}
+                  </select>
+                  <Button size="sm" onClick={handleAddMember} disabled={!addMemberUserId}>
+                    <UserPlus className="w-4 h-4" />
+                  </Button>
+                </div>
+                {eligibleUsers.length === 0 && (
+                  <p className="text-xs text-muted-foreground">All users are already in this group.</p>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Current Members ({members.length})</label>
+                {loadingMembers ? (
+                  <div className="text-center py-4 text-sm text-muted-foreground">Loading...</div>
+                ) : members.length === 0 ? (
+                  <p className="text-sm text-muted-foreground py-2">No members yet.</p>
+                ) : (
+                  <div className="space-y-2 max-h-56 overflow-y-auto">
+                    {members.map(m => (
+                      <div key={m.id} className="flex items-center justify-between bg-muted/30 rounded px-3 py-2">
+                        <div>
+                          <p className="text-sm font-medium">{m.user.firstName} {m.user.lastName}</p>
+                          <p className="text-xs text-muted-foreground">{m.user.email}</p>
+                        </div>
+                        <Button
+                          variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive"
+                          onClick={() => handleRemoveMember(m.user.id)}
+                        >
+                          <UserMinus className="w-3.5 h-3.5" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </TabsContent>
+
+            {/* Managers Tab (admin-only) */}
+            {isAdmin && (
+              <TabsContent value="managers" className="space-y-4 mt-4">
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Assign Manager</label>
+                  <p className="text-xs text-muted-foreground">Assigned managers can manage members and approve join requests for this group.</p>
+                  <div className="flex gap-2">
+                    <select
+                      className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                      value={addManagerUserId}
+                      onChange={e => setAddManagerUserId(e.target.value)}
+                    >
+                      <option value="">Select a manager or admin...</option>
+                      {eligibleManagers.map(u => (
+                        <option key={u.id} value={u.id}>
+                          {u.firstName} {u.lastName} ({u.role})
+                        </option>
+                      ))}
+                    </select>
+                    <Button size="sm" onClick={handleAddManager} disabled={!addManagerUserId}>
+                      <UserPlus className="w-4 h-4" />
+                    </Button>
+                  </div>
+                  {eligibleManagers.length === 0 && (
+                    <p className="text-xs text-muted-foreground">No additional managers or admins to assign.</p>
+                  )}
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Current Managers ({groupManagers.length})</label>
+                  {groupManagers.length === 0 ? (
+                    <p className="text-sm text-muted-foreground py-2">No managers assigned. Managers can manage this group's members and approve join requests.</p>
+                  ) : (
+                    <div className="space-y-2 max-h-56 overflow-y-auto">
+                      {groupManagers.map(m => (
+                        <div key={m.id} className="flex items-center justify-between bg-muted/30 rounded px-3 py-2">
+                          <div>
+                            <p className="text-sm font-medium">{m.user.firstName} {m.user.lastName}</p>
+                            <p className="text-xs text-muted-foreground capitalize">{m.user.role}</p>
+                          </div>
+                          <Button
+                            variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive"
+                            onClick={() => handleRemoveManager(m.user.id)}
+                          >
+                            <UserMinus className="w-3.5 h-3.5" />
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </TabsContent>
+            )}
+
+            {/* Join Requests Tab */}
+            <TabsContent value="requests" className="mt-4">
               {loadingMembers ? (
                 <div className="text-center py-4 text-sm text-muted-foreground">Loading...</div>
-              ) : members.length === 0 ? (
-                <p className="text-sm text-muted-foreground py-2">No members yet.</p>
+              ) : joinRequests.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  <ClipboardCheck className="w-8 h-8 mx-auto mb-2 opacity-40" />
+                  <p className="text-sm">No pending join requests.</p>
+                </div>
               ) : (
-                <div className="space-y-2 max-h-64 overflow-y-auto">
-                  {members.map(m => (
-                    <div key={m.id} className="flex items-center justify-between bg-muted/30 rounded px-3 py-2">
+                <div className="space-y-3">
+                  {joinRequests.map(jr => (
+                    <div key={jr.id} className="flex items-center justify-between bg-muted/30 rounded px-3 py-2.5">
                       <div>
-                        <p className="text-sm font-medium">{m.user.firstName} {m.user.lastName}</p>
-                        <p className="text-xs text-muted-foreground">{m.user.email}</p>
+                        <p className="text-sm font-medium">{jr.user.firstName} {jr.user.lastName}</p>
+                        <p className="text-xs text-muted-foreground">{jr.user.email}</p>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          Requested {new Date(jr.requestedAt).toLocaleDateString()}
+                        </p>
                       </div>
-                      <Button
-                        variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive"
-                        onClick={() => handleRemoveMember(m.user.id)}
-                      >
-                        <UserMinus className="w-3.5 h-3.5" />
-                      </Button>
+                      <div className="flex gap-1.5">
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              size="icon" className="h-7 w-7 bg-green-600 hover:bg-green-700 text-white"
+                              onClick={() => handleJoinRequestAction(jr.id, "approve")}
+                            >
+                              <UserCheck className="w-3.5 h-3.5" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>Approve</TooltipContent>
+                        </Tooltip>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              size="icon" variant="outline" className="h-7 w-7 text-destructive hover:text-destructive"
+                              onClick={() => handleJoinRequestAction(jr.id, "deny")}
+                            >
+                              <XCircle className="w-3.5 h-3.5" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>Deny</TooltipContent>
+                        </Tooltip>
+                      </div>
                     </div>
                   ))}
                 </div>
               )}
-            </div>
-          </div>
+            </TabsContent>
+          </Tabs>
         </DialogContent>
       </Dialog>
     </div>
