@@ -1126,8 +1126,9 @@ function DocumentsTab() {
 
   const folders = docs.filter(d => d.resourceType === "folder");
   const fileDocs = docs.filter(d => d.resourceType === "file");
-  const visibleDocs = selectedFolder === "all"
-    ? fileDocs
+  // "all" shows folders first then files; other views show only file docs
+  const visibleItems = selectedFolder === "all"
+    ? [...folders, ...fileDocs]
     : selectedFolder === "unfiled"
     ? fileDocs.filter(d => d.parentId === null)
     : fileDocs.filter(d => d.parentId === selectedFolder);
@@ -1184,10 +1185,9 @@ function DocumentsTab() {
     if (!newTitle.trim() || !newUrl.trim()) return;
     setCreating(true);
     try {
-      const resourceType = newUrl.includes("/file/d/") ? "file" : "folder";
       await repoFetch("/api/admin/documents", {
         method: "POST",
-        body: JSON.stringify({ title: newTitle.trim(), description: newDesc.trim() || null, driveUrl: newUrl.trim(), resourceType, parentId: newParentId }),
+        body: JSON.stringify({ title: newTitle.trim(), description: newDesc.trim() || null, driveUrl: newUrl.trim(), resourceType: "file", parentId: newParentId }),
       });
       toast({ title: "Document added" });
       setCreateFileOpen(false);
@@ -1253,7 +1253,7 @@ function DocumentsTab() {
 
   const handleDelete = async (doc: RepoDoc) => {
     const msg = doc.resourceType === "folder"
-      ? `Delete folder "${doc.title}"? Its documents will be moved to Unfiled.`
+      ? `Delete folder "${doc.title}"? This will also permanently delete all documents inside it.`
       : `Delete "${doc.title}"?`;
     if (!confirm(msg)) return;
     try {
@@ -1266,9 +1266,7 @@ function DocumentsTab() {
     }
   };
 
-  const detectedUrlType = newUrl.includes("drive.google.com")
-    ? (newUrl.includes("/file/d/") ? "file" : "folder-link")
-    : null;
+  const isDriveUrl = newUrl.includes("drive.google.com");
 
   const navBtn = (active: boolean, label: string, count: number, onClick: () => void, onDelete?: () => void) => (
     <div className={`group flex items-center gap-1 rounded-md ${active ? "bg-sidebar-accent" : ""}`}>
@@ -1328,26 +1326,31 @@ function DocumentsTab() {
           </Button>
         </div>
 
-        {visibleDocs.length === 0 ? (
+        {visibleItems.length === 0 ? (
           <div className="border border-dashed rounded-lg p-12 text-center text-muted-foreground">
             <FileText className="w-8 h-8 mx-auto mb-3 opacity-40" />
             <p className="text-sm font-medium mb-1">No documents here yet</p>
-            <p className="text-xs">Click "Add Document" to link a Google Drive file or folder link.</p>
+            <p className="text-xs">Click "Add Document" to link a Google Drive file.</p>
           </div>
         ) : (
           <div className="space-y-2">
-            {visibleDocs.map(doc => {
-              const folderName = doc.parentId ? folders.find(f => f.id === doc.parentId)?.title : null;
+            {visibleItems.map(doc => {
+              const isFolder = doc.resourceType === "folder";
+              const folderName = !isFolder && doc.parentId ? folders.find(f => f.id === doc.parentId)?.title : null;
               return (
                 <div key={doc.id} className="flex items-center gap-3 bg-muted/30 rounded-lg px-4 py-3">
-                  <div className="rounded-md p-1.5 bg-blue-50 text-blue-600 shrink-0">
-                    <FileText className="w-4 h-4" />
+                  <div className={`rounded-md p-1.5 shrink-0 ${isFolder ? "bg-amber-50 text-amber-600" : "bg-blue-50 text-blue-600"}`}>
+                    {isFolder ? <FolderOpen className="w-4 h-4" /> : <FileText className="w-4 h-4" />}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium truncate">{doc.title}</p>
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-medium truncate">{doc.title}</p>
+                      {isFolder && <Badge variant="outline" className="text-xs h-4 px-1.5 shrink-0">Folder</Badge>}
+                    </div>
                     <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                       {folderName && <span className="text-xs text-muted-foreground"><FolderOpen className="w-3 h-3 inline mr-0.5" />{folderName}</span>}
                       {doc.description && <span className="text-xs text-muted-foreground truncate max-w-xs">{doc.description}</span>}
+                      {isFolder && <span className="text-xs text-muted-foreground">{folderCount(doc.id)} doc{folderCount(doc.id) !== 1 ? "s" : ""}</span>}
                     </div>
                   </div>
                   {doc.accessCount === 0 ? (
@@ -1359,7 +1362,7 @@ function DocumentsTab() {
                       <Shield className="w-3 h-3" />{doc.accessCount} {doc.accessCount === 1 ? "grant" : "grants"}
                     </Badge>
                   )}
-                  {doc.driveUrl && (
+                  {!isFolder && doc.driveUrl && (
                     <a href={doc.driveUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-primary hover:underline shrink-0">Open</a>
                   )}
                   <div className="flex items-center gap-1 shrink-0">
@@ -1390,12 +1393,9 @@ function DocumentsTab() {
             <div className="space-y-1.5">
               <Label>Google Drive URL</Label>
               <Input value={newUrl} onChange={e => setNewUrl(e.target.value)} required placeholder="https://drive.google.com/..." />
-              {detectedUrlType && (
+              {isDriveUrl && (
                 <p className="text-xs text-muted-foreground flex items-center gap-1.5">
-                  {detectedUrlType === "file"
-                    ? <><FileText className="w-3.5 h-3.5 text-blue-500" /> File — students will see an inline preview</>
-                    : <><FolderOpen className="w-3.5 h-3.5 text-amber-500" /> Drive folder — students will open it in Google Drive</>
-                  }
+                  <FileText className="w-3.5 h-3.5 text-blue-500" /> Google Drive link detected — students will be able to preview or open in Drive
                 </p>
               )}
             </div>
