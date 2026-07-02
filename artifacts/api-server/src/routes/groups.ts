@@ -105,6 +105,26 @@ router.get("/", requireManagerOrAdmin, async (req, res) => {
   }
 });
 
+// ─── GET /groups/mine — shortcut: groups the current user manages ─────────────
+
+router.get("/mine", requireManagerOrAdmin, async (req, res) => {
+  try {
+    const dbUser = res.locals.dbUser;
+    if (dbUser.role === "admin") {
+      res.json(await buildGroupList());
+      return;
+    }
+    const managed = await db
+      .select({ groupId: groupManagersTable.groupId })
+      .from(groupManagersTable)
+      .where(eq(groupManagersTable.userId, dbUser.id));
+    const groupIds = managed.map(r => r.groupId);
+    res.json(groupIds.length > 0 ? await buildGroupList(groupIds) : []);
+  } catch {
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 // ─── GET /groups/available — student-facing: all groups with membership status ─
 
 router.get("/available", requireAuth, async (req, res) => {
@@ -517,14 +537,17 @@ router.get("/:groupId/export.csv", requireManagerOrAdmin, async (req, res) => {
 
       let completedCount = 0;
       for (const moduleId of userModules) {
+        const vids = videosPerModule.get(moduleId) ?? [];
+        const watched = watchedMap.get(user.id) ?? new Set();
+        const allVideosWatched = vids.length > 0 && vids.every(vid => watched.has(vid));
+
         if (modulesWithQuiz.has(moduleId)) {
-          // Module complete = quiz passed
-          if (passedQuizMap.get(user.id)?.has(moduleId)) completedCount++;
+          // Module complete = all videos watched AND quiz passed
+          const quizPassed = passedQuizMap.get(user.id)?.has(moduleId) ?? false;
+          if (allVideosWatched && quizPassed) completedCount++;
         } else {
           // Module complete = all videos watched
-          const vids = videosPerModule.get(moduleId) ?? [];
-          const watched = watchedMap.get(user.id) ?? new Set();
-          if (vids.length > 0 && vids.every(vid => watched.has(vid))) completedCount++;
+          if (allVideosWatched) completedCount++;
         }
       }
 
@@ -600,7 +623,13 @@ router.post("/:groupId/join-requests", requireAuth, async (req, res) => {
       res.status(401).json({ error: "Unauthorized" });
       return;
     }
-    const userId = dbUserRows[0].id;
+    const dbUser = dbUserRows[0];
+    // Only students can request to join; managers/admins manage groups directly
+    if (dbUser.role !== "student") {
+      res.status(403).json({ error: "Only students can submit join requests" });
+      return;
+    }
+    const userId = dbUser.id;
     const groupId = parseInt(req.params.groupId as string);
 
     // Already a member?
