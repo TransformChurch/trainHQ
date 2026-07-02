@@ -23,7 +23,8 @@ import {
 import {
   Accordion, AccordionContent, AccordionItem, AccordionTrigger,
 } from "@/components/ui/accordion";
-import { Plus, Trash2, Video, BookOpen, HelpCircle, Users, Pencil, Globe, Lock, Mail, Upload, Link, HardDrive, Image as ImageIcon } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Plus, Trash2, Video, BookOpen, HelpCircle, Users, Pencil, Globe, Lock, Mail, Upload, Link, HardDrive, Image as ImageIcon, FileText, FolderOpen } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { useUpload } from "@workspace/object-storage-web";
@@ -1031,6 +1032,239 @@ function AssignmentManager() {
   );
 }
 
+// ── Documents Tab ─────────────────────────────────────────────────────────────
+
+type DriveResource = {
+  id: number;
+  groupId: number;
+  label: string;
+  driveUrl: string;
+  resourceType: "file" | "folder";
+};
+
+type GroupWithResources = {
+  id: number;
+  name: string;
+  description: string | null;
+  resources: DriveResource[];
+};
+
+function DocumentsTab() {
+  const { toast } = useToast();
+  const [groups, setGroups] = useState<GroupWithResources[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedGroupId, setSelectedGroupId] = useState<number | null>(null);
+  const [newLabel, setNewLabel] = useState("");
+  const [newUrl, setNewUrl] = useState("");
+  const [adding, setAdding] = useState(false);
+
+  const loadAll = async () => {
+    setLoading(true);
+    try {
+      const groupList = await apiFetch("/api/groups");
+      const withResources = await Promise.all(
+        groupList.map(async (g: any) => {
+          try {
+            const resources = await apiFetch(`/api/groups/${g.id}/drive-resources`);
+            return { ...g, resources };
+          } catch {
+            return { ...g, resources: [] };
+          }
+        })
+      );
+      setGroups(withResources);
+      if (withResources.length > 0 && selectedGroupId === null) {
+        setSelectedGroupId(withResources[0].id);
+      }
+    } catch {
+      toast({ title: "Failed to load groups", variant: "destructive" });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { loadAll(); }, []);
+
+  const selectedGroup = groups.find(g => g.id === selectedGroupId) ?? null;
+
+  const handleAdd = async () => {
+    if (!selectedGroup || !newLabel.trim() || !newUrl.trim()) return;
+    if (!newUrl.includes("drive.google.com")) {
+      toast({ title: "Please enter a valid Google Drive URL", variant: "destructive" });
+      return;
+    }
+    setAdding(true);
+    try {
+      await apiFetch(`/api/groups/${selectedGroup.id}/drive-resources`, {
+        method: "POST",
+        body: JSON.stringify({ label: newLabel.trim(), driveUrl: newUrl.trim() }),
+      });
+      toast({ title: "Document added" });
+      setNewLabel("");
+      setNewUrl("");
+      loadAll();
+    } catch {
+      toast({ title: "Failed to add document", variant: "destructive" });
+    } finally {
+      setAdding(false);
+    }
+  };
+
+  const handleDelete = async (groupId: number, resourceId: number) => {
+    try {
+      await apiFetch(`/api/groups/${groupId}/drive-resources/${resourceId}`, { method: "DELETE" });
+      toast({ title: "Document removed" });
+      loadAll();
+    } catch {
+      toast({ title: "Failed to remove document", variant: "destructive" });
+    }
+  };
+
+  const detectedType = newUrl.includes("drive.google.com")
+    ? newUrl.includes("/file/d/") ? "file" : "folder"
+    : null;
+
+  if (loading) {
+    return <div className="py-16 text-center text-muted-foreground">Loading groups...</div>;
+  }
+
+  if (groups.length === 0) {
+    return (
+      <Card className="border-dashed">
+        <CardContent className="p-12 text-center">
+          <FileText className="w-10 h-10 text-muted-foreground/40 mx-auto mb-3" />
+          <h3 className="font-medium mb-1">No groups yet</h3>
+          <p className="text-sm text-muted-foreground">Create groups first, then assign documents to them.</p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <div className="flex gap-6 min-h-[500px]">
+      {/* Group sidebar */}
+      <div className="w-56 shrink-0 space-y-1">
+        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3 px-1">Groups</p>
+        {groups.map(g => (
+          <button
+            key={g.id}
+            onClick={() => { setSelectedGroupId(g.id); setNewLabel(""); setNewUrl(""); }}
+            className={`w-full text-left px-3 py-2.5 rounded-md text-sm transition-colors flex items-center justify-between gap-2 ${
+              selectedGroupId === g.id
+                ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
+                : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+            }`}
+          >
+            <span className="truncate">{g.name}</span>
+            {g.resources.length > 0 && (
+              <Badge variant="secondary" className="text-xs h-4 px-1 shrink-0">{g.resources.length}</Badge>
+            )}
+          </button>
+        ))}
+      </div>
+
+      {/* Resource panel */}
+      <div className="flex-1 min-w-0 space-y-6">
+        {selectedGroup ? (
+          <>
+            <div>
+              <h3 className="font-semibold text-lg">{selectedGroup.name}</h3>
+              {selectedGroup.description && (
+                <p className="text-sm text-muted-foreground mt-0.5">{selectedGroup.description}</p>
+              )}
+            </div>
+
+            {/* Add resource form */}
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm font-semibold">Add Document or Folder</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="grid sm:grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Label</Label>
+                    <Input
+                      placeholder="e.g. Onboarding Guide"
+                      value={newLabel}
+                      onChange={e => setNewLabel(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Google Drive URL</Label>
+                    <div className="flex gap-2">
+                      <Input
+                        placeholder="https://drive.google.com/..."
+                        value={newUrl}
+                        onChange={e => setNewUrl(e.target.value)}
+                        className="flex-1"
+                      />
+                      <Button
+                        onClick={handleAdd}
+                        disabled={adding || !newLabel.trim() || !newUrl.trim()}
+                        size="sm"
+                      >
+                        <Plus className="w-4 h-4 mr-1" /> Add
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+                {detectedType && (
+                  <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+                    {detectedType === "file"
+                      ? <><FileText className="w-3.5 h-3.5 text-blue-500" /> <strong>File</strong> — students will see an inline preview panel</>
+                      : <><FolderOpen className="w-3.5 h-3.5 text-amber-500" /> <strong>Folder</strong> — students will open it in a new tab</>
+                    }
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Resource list */}
+            {selectedGroup.resources.length === 0 ? (
+              <div className="border border-dashed rounded-lg p-10 text-center text-muted-foreground">
+                <FileText className="w-8 h-8 mx-auto mb-2 opacity-40" />
+                <p className="text-sm">No documents yet for this group.</p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <p className="text-sm font-medium text-muted-foreground">{selectedGroup.resources.length} document{selectedGroup.resources.length !== 1 ? "s" : ""}</p>
+                {selectedGroup.resources.map(r => (
+                  <div key={r.id} className="flex items-center gap-3 bg-muted/30 rounded-lg px-4 py-3">
+                    <div className={`rounded-md p-1.5 shrink-0 ${r.resourceType === "file" ? "bg-blue-50 text-blue-600" : "bg-amber-50 text-amber-600"}`}>
+                      {r.resourceType === "file" ? <FileText className="w-4 h-4" /> : <FolderOpen className="w-4 h-4" />}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{r.label}</p>
+                      <p className="text-xs text-muted-foreground truncate mt-0.5">{r.driveUrl}</p>
+                    </div>
+                    <Badge variant="outline" className="text-xs capitalize shrink-0">{r.resourceType}</Badge>
+                    <a
+                      href={r.driveUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs text-primary hover:underline shrink-0"
+                    >
+                      Open
+                    </a>
+                    <Button
+                      variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive shrink-0"
+                      onClick={() => handleDelete(r.groupId, r.id)}
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
+        ) : (
+          <div className="text-center text-muted-foreground py-16">Select a group to manage its documents.</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function AdminContent() {
@@ -1088,9 +1322,9 @@ export default function AdminContent() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold font-serif">Content Manager</h1>
-          <p className="text-muted-foreground mt-2">Manage tracks, modules, videos, quiz questions, and assignments.</p>
+          <p className="text-muted-foreground mt-2">Manage tracks, modules, videos, quiz questions, assignments, and documents.</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2" id="content-header-actions">
           <AssignmentManager />
           <Dialog open={addTrackOpen} onOpenChange={setAddTrackOpen}>
             <DialogTrigger asChild>
@@ -1122,62 +1356,79 @@ export default function AdminContent() {
         </DialogContent>
       </Dialog>
 
-      <div className="space-y-4">
-        {tracks?.map(track => (
-          <Card key={track.id}>
-            <CardHeader className="pb-3">
-              <div className="flex items-start justify-between gap-4">
-                <div className="flex items-start gap-4 min-w-0">
-                  {track.imageUrl && (
-                    <img src={resolveStorageUrl(track.imageUrl)} alt={track.name} className="w-14 h-14 rounded-lg object-cover shrink-0 border border-border" />
-                  )}
-                  <div className="min-w-0">
-                    <CardTitle className="text-xl">{track.name}</CardTitle>
-                    {track.description && <p className="text-sm text-muted-foreground mt-1">{track.description}</p>}
+      <Tabs defaultValue="tracks">
+        <TabsList className="mb-6">
+          <TabsTrigger value="tracks">
+            <BookOpen className="w-4 h-4 mr-2" /> Training Tracks
+          </TabsTrigger>
+          <TabsTrigger value="documents">
+            <FileText className="w-4 h-4 mr-2" /> Documents
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="tracks">
+          <div className="space-y-4">
+            {tracks?.map(track => (
+              <Card key={track.id}>
+                <CardHeader className="pb-3">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="flex items-start gap-4 min-w-0">
+                      {track.imageUrl && (
+                        <img src={resolveStorageUrl(track.imageUrl)} alt={track.name} className="w-14 h-14 rounded-lg object-cover shrink-0 border border-border" />
+                      )}
+                      <div className="min-w-0">
+                        <CardTitle className="text-xl">{track.name}</CardTitle>
+                        {track.description && <p className="text-sm text-muted-foreground mt-1">{track.description}</p>}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <Button
+                        variant="ghost" size="sm"
+                        onClick={() => openEditTrack(track)}
+                      >
+                        <Pencil className="w-4 h-4" />
+                      </Button>
+                      <Button
+                        variant="ghost" size="sm"
+                        className="text-destructive hover:text-destructive"
+                        onClick={() => {
+                          if (confirm(`Delete "${track.name}"? This will remove all modules, videos and quiz questions inside it.`)) {
+                            deleteTrack({ trackId: track.id }, {
+                              onSuccess: () => {
+                                toast({ title: "Track deleted" });
+                                queryClient.invalidateQueries({ queryKey: getListTracksQueryKey() });
+                              },
+                            });
+                          }
+                        }}
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    </div>
                   </div>
-                </div>
-                <div className="flex items-center gap-1 shrink-0">
-                  <Button
-                    variant="ghost" size="sm"
-                    onClick={() => openEditTrack(track)}
-                  >
-                    <Pencil className="w-4 h-4" />
-                  </Button>
-                  <Button
-                    variant="ghost" size="sm"
-                    className="text-destructive hover:text-destructive"
-                    onClick={() => {
-                      if (confirm(`Delete "${track.name}"? This will remove all modules, videos and quiz questions inside it.`)) {
-                        deleteTrack({ trackId: track.id }, {
-                          onSuccess: () => {
-                            toast({ title: "Track deleted" });
-                            queryClient.invalidateQueries({ queryKey: getListTracksQueryKey() });
-                          },
-                        });
-                      }
-                    }}
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </Button>
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <ModuleManager trackId={track.id} />
-            </CardContent>
-          </Card>
-        ))}
-        {tracks?.length === 0 && (
-          <Card className="border-dashed bg-muted/10">
-            <CardContent className="p-12 text-center">
-              <BookOpen className="w-12 h-12 text-muted-foreground/40 mx-auto mb-4" />
-              <h3 className="font-semibold text-lg mb-2">No tracks yet</h3>
-              <p className="text-muted-foreground mb-6 text-sm">Create your first training track to get started.</p>
-              <Button onClick={() => setAddTrackOpen(true)}><Plus className="w-4 h-4 mr-2" /> New Track</Button>
-            </CardContent>
-          </Card>
-        )}
-      </div>
+                </CardHeader>
+                <CardContent>
+                  <ModuleManager trackId={track.id} />
+                </CardContent>
+              </Card>
+            ))}
+            {tracks?.length === 0 && (
+              <Card className="border-dashed bg-muted/10">
+                <CardContent className="p-12 text-center">
+                  <BookOpen className="w-12 h-12 text-muted-foreground/40 mx-auto mb-4" />
+                  <h3 className="font-semibold text-lg mb-2">No tracks yet</h3>
+                  <p className="text-muted-foreground mb-6 text-sm">Create your first training track to get started.</p>
+                  <Button onClick={() => setAddTrackOpen(true)}><Plus className="w-4 h-4 mr-2" /> New Track</Button>
+                </CardContent>
+              </Card>
+            )}
+          </div>
+        </TabsContent>
+
+        <TabsContent value="documents">
+          <DocumentsTab />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }
