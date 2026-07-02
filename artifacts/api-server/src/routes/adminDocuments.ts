@@ -9,6 +9,7 @@ import {
 } from "@workspace/db";
 import { eq, and, inArray, sql, isNull } from "drizzle-orm";
 import { requireManagerOrAdmin } from "../middlewares/requireAuth";
+import { canEditContent } from "../lib/canEditContent";
 
 const router = Router();
 
@@ -177,7 +178,16 @@ router.post("/", requireManagerOrAdmin, async (req, res) => {
 
 router.patch("/:id", requireManagerOrAdmin, async (req, res) => {
   try {
+    const actor = res.locals.dbUser;
     const id = parseInt(req.params.id as string);
+
+    const existing = await db.select().from(documentsTable).where(eq(documentsTable.id, id)).limit(1);
+    if (!existing[0]) { res.status(404).json({ error: "Not found" }); return; }
+    if (!(await canEditContent(actor, "document", id, existing[0].createdByClerkId))) {
+      res.status(403).json({ error: "You don't have permission to edit this document." });
+      return;
+    }
+
     const { title, description, driveUrl, parentId, sortOrder } = req.body as {
       title?: string;
       description?: string | null;
@@ -208,7 +218,16 @@ router.patch("/:id", requireManagerOrAdmin, async (req, res) => {
 
 router.delete("/:id", requireManagerOrAdmin, async (req, res) => {
   try {
+    const actor = res.locals.dbUser;
     const id = parseInt(req.params.id as string);
+
+    const existing = await db.select().from(documentsTable).where(eq(documentsTable.id, id)).limit(1);
+    if (!existing[0]) { res.status(404).json({ error: "Not found" }); return; }
+    if (!(await canEditContent(actor, "document", id, existing[0].createdByClerkId))) {
+      res.status(403).json({ error: "You don't have permission to delete this document." });
+      return;
+    }
+
     await db.delete(documentsTable).where(eq(documentsTable.id, id));
     res.status(204).send();
   } catch {

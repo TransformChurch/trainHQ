@@ -11,3 +11,4 @@ export * from "./settings";
 export * from "./contentAuditLog";
 export * from "./growthTracks";
 export * from "./documents";
+export * from "./contentEditorGrants";

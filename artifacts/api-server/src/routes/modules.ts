@@ -6,6 +6,7 @@ import { requireAuth, requireManagerOrAdmin, getDbUser } from "../middlewares/re
 import { CreateModuleBody, UpdateModuleBody, CreateQuizQuestionBody, SubmitQuizBody } from "@workspace/api-zod";
 import { logContentChange } from "../lib/auditLog";
 import { checkGrowthTrackProgression } from "../lib/growthTrackProgression";
+import { canEditContent } from "../lib/canEditContent";
 
 const router = Router();
 
@@ -48,13 +49,14 @@ router.get("/", requireAuth, async (req, res) => {
 // POST /modules
 router.post("/", requireManagerOrAdmin, async (req, res) => {
   try {
+    const auth = getAuth(req);
     const actor = res.locals.dbUser;
     const parsed = CreateModuleBody.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ error: "Invalid input" });
       return;
     }
-    const inserted = await db.insert(modulesTable).values(parsed.data).returning();
+    const inserted = await db.insert(modulesTable).values({ ...parsed.data, createdByClerkId: auth!.userId! }).returning();
     const m = inserted[0];
     logContentChange({
       actorId: actor.id,
@@ -143,6 +145,14 @@ router.patch("/:moduleId", requireManagerOrAdmin, async (req, res) => {
   try {
     const actor = res.locals.dbUser;
     const moduleId = parseInt(req.params.moduleId as string);
+
+    const existing = await db.select().from(modulesTable).where(eq(modulesTable.id, moduleId)).limit(1);
+    if (!existing[0]) { res.status(404).json({ error: "Not found" }); return; }
+    if (!(await canEditContent(actor, "module", moduleId, existing[0].createdByClerkId))) {
+      res.status(403).json({ error: "You don't have permission to edit this module." });
+      return;
+    }
+
     const parsed = UpdateModuleBody.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ error: "Invalid input" });
@@ -175,6 +185,11 @@ router.delete("/:moduleId", requireManagerOrAdmin, async (req, res) => {
     const actor = res.locals.dbUser;
     const moduleId = parseInt(req.params.moduleId as string);
     const existing = await db.select().from(modulesTable).where(eq(modulesTable.id, moduleId)).limit(1);
+    if (!existing[0]) { res.status(404).json({ error: "Not found" }); return; }
+    if (!(await canEditContent(actor, "module", moduleId, existing[0].createdByClerkId))) {
+      res.status(403).json({ error: "You don't have permission to delete this module." });
+      return;
+    }
     if (existing[0]) {
       logContentChange({
         actorId: actor.id,

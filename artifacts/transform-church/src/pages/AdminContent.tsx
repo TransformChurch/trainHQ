@@ -11,7 +11,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, createContext, useContext } from "react";
+import { useUser } from "@clerk/react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -293,6 +294,127 @@ async function apiFetch(path: string, opts?: RequestInit) {
   return res;
 }
 
+// ── Content Permissions Context ───────────────────────────────────────────────
+
+type GrantedSets = { tracks: Set<number>; modules: Set<number>; videos: Set<number>; documents: Set<number> };
+type ContentPermsCtx = {
+  isAdmin: boolean;
+  myClerkId: string | null | undefined;
+  grantedIds: GrantedSets;
+  canEdit: (type: "track" | "module" | "video" | "document", item: { id: number; createdByClerkId?: string | null }) => boolean;
+};
+const ContentPermissionsCtx = createContext<ContentPermsCtx>({
+  isAdmin: true,
+  myClerkId: null,
+  grantedIds: { tracks: new Set(), modules: new Set(), videos: new Set(), documents: new Set() },
+  canEdit: () => true,
+});
+const useContentPerms = () => useContext(ContentPermissionsCtx);
+
+// ── Manage Editors Dialog (admin-only) ────────────────────────────────────────
+
+function ManageEditorsDialog({ contentType, contentId, contentName }: { contentType: "track" | "module" | "video"; contentId: number; contentName: string }) {
+  const { toast } = useToast();
+  const { data: allUsers } = useAdminListUsers();
+  const [open, setOpen] = useState(false);
+  const [grants, setGrants] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [selectedClerkId, setSelectedClerkId] = useState("");
+  const [granting, setGranting] = useState(false);
+
+  const managers = ((allUsers ?? []) as any[]).filter((u: any) => u.role === "manager");
+
+  const loadGrants = async () => {
+    setLoading(true);
+    try {
+      const r = await apiFetch(`/api/admin/content-grants?contentType=${contentType}&contentId=${contentId}`);
+      setGrants(await r?.json() ?? []);
+    } catch { toast({ title: "Failed to load editors", variant: "destructive" }); }
+    finally { setLoading(false); }
+  };
+
+  useEffect(() => { if (open) loadGrants(); }, [open]);
+
+  const handleGrant = async () => {
+    if (!selectedClerkId) return;
+    setGranting(true);
+    try {
+      await apiFetch("/api/admin/content-grants", {
+        method: "POST",
+        body: JSON.stringify({ contentType, contentId, granteeClerkId: selectedClerkId }),
+      });
+      setSelectedClerkId("");
+      await loadGrants();
+      toast({ title: "Editor access granted" });
+    } catch { toast({ title: "Failed to grant access", variant: "destructive" }); }
+    finally { setGranting(false); }
+  };
+
+  const handleRevoke = async (grantId: number) => {
+    try {
+      await apiFetch(`/api/admin/content-grants/${grantId}`, { method: "DELETE" });
+      await loadGrants();
+    } catch { toast({ title: "Failed to revoke access", variant: "destructive" }); }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button variant="ghost" size="sm" className="text-xs text-muted-foreground h-8 px-2" title="Manage who can edit this content">
+          <Shield className="w-3.5 h-3.5 mr-1" /> Editors
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader><DialogTitle>Manage Editors — {contentName}</DialogTitle></DialogHeader>
+        <p className="text-sm text-muted-foreground">Grant managers the ability to edit and delete this content.</p>
+        {loading ? (
+          <p className="text-sm text-muted-foreground py-4 text-center">Loading...</p>
+        ) : (
+          <div className="space-y-4 mt-2">
+            {grants.length === 0 ? (
+              <p className="text-sm text-muted-foreground py-2 border border-dashed rounded text-center">No editor grants yet — only the creator can edit this.</p>
+            ) : (
+              <div className="space-y-2">
+                {grants.map((g: any) => (
+                  <div key={g.id} className="flex items-center justify-between bg-muted/30 rounded px-3 py-2">
+                    <div>
+                      <p className="text-sm font-medium">{g.grantee?.firstName} {g.grantee?.lastName}</p>
+                      <p className="text-xs text-muted-foreground">{g.grantee?.email}</p>
+                    </div>
+                    <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive" onClick={() => handleRevoke(g.id)}>
+                      <X className="w-3.5 h-3.5" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+            {managers.length > 0 && (
+              <div className="border-t pt-4 space-y-3">
+                <p className="text-sm font-medium">Grant a manager edit access</p>
+                <div className="flex gap-2">
+                  <Select value={selectedClerkId} onValueChange={setSelectedClerkId}>
+                    <SelectTrigger className="flex-1">
+                      <SelectValue placeholder="Select a manager..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {managers.map((m: any) => (
+                        <SelectItem key={m.id} value={m.id}>{m.firstName} {m.lastName} — {m.email}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Button onClick={handleGrant} disabled={!selectedClerkId || granting} size="sm">
+                    {granting ? "..." : "Grant"}
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // ── Edit Video Dialog ─────────────────────────────────────────────────────────
 
 function EditVideoDialog({ video, moduleId, onSaved }: { video: VideoType; moduleId: number; onSaved: () => void }) {
@@ -462,6 +584,7 @@ function EditQuestionDialog({ question, moduleId, onSaved }: { question: QuizQue
 function ModuleManager({ trackId }: { trackId: number }) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const { canEdit, isAdmin } = useContentPerms();
   const { data: modules } = useListModules({ trackId }, { query: { queryKey: getListModulesQueryKey({ trackId }) } });
   const { mutate: createModule } = useCreateModule();
   const { mutate: updateModule } = useUpdateModule();
@@ -626,30 +749,37 @@ function ModuleManager({ trackId }: { trackId: number }) {
               <AccordionContent className="px-4 pb-3 space-y-3">
                 <VideoManager moduleId={mod.id} />
                 <QuizManager moduleId={mod.id} />
-                <div className="flex gap-2 pt-1">
-                  <Button
-                    variant="outline" size="sm"
-                    className="flex-1 justify-start"
-                    onClick={() => openEditDialog(mod)}
-                  >
-                    <Pencil className="w-3.5 h-3.5 mr-2" /> Edit Module
-                  </Button>
-                  <Button
-                    variant="ghost" size="sm"
-                    className="text-destructive hover:text-destructive flex-1 justify-start"
-                    onClick={() => {
-                      if (confirm("Delete this module and all its content?")) {
-                        deleteModule({ moduleId: mod.id }, {
-                          onSuccess: () => {
-                            toast({ title: "Module deleted" });
-                            queryClient.invalidateQueries({ queryKey: getListModulesQueryKey({ trackId }) });
-                          },
-                        });
-                      }
-                    }}
-                  >
-                    <Trash2 className="w-3.5 h-3.5 mr-2" /> Delete Module
-                  </Button>
+                <div className="flex gap-2 pt-1 flex-wrap">
+                  {isAdmin && (
+                    <ManageEditorsDialog contentType="module" contentId={mod.id} contentName={mod.title} />
+                  )}
+                  {canEdit("module", mod) && (
+                    <>
+                      <Button
+                        variant="outline" size="sm"
+                        className="flex-1 justify-start"
+                        onClick={() => openEditDialog(mod)}
+                      >
+                        <Pencil className="w-3.5 h-3.5 mr-2" /> Edit Module
+                      </Button>
+                      <Button
+                        variant="ghost" size="sm"
+                        className="text-destructive hover:text-destructive flex-1 justify-start"
+                        onClick={() => {
+                          if (confirm("Delete this module and all its content?")) {
+                            deleteModule({ moduleId: mod.id }, {
+                              onSuccess: () => {
+                                toast({ title: "Module deleted" });
+                                queryClient.invalidateQueries({ queryKey: getListModulesQueryKey({ trackId }) });
+                              },
+                            });
+                          }
+                        }}
+                      >
+                        <Trash2 className="w-3.5 h-3.5 mr-2" /> Delete Module
+                      </Button>
+                    </>
+                  )}
                 </div>
               </AccordionContent>
             </AccordionItem>
@@ -668,6 +798,7 @@ function ModuleManager({ trackId }: { trackId: number }) {
 function VideoManager({ moduleId }: { moduleId: number }) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const { canEdit } = useContentPerms();
   const { data: videos } = useListVideos({ moduleId }, { query: { queryKey: getListVideosQueryKey({ moduleId }) } });
   const { mutate: createVideo } = useCreateVideo();
   const { mutate: deleteVideo } = useDeleteVideo();
@@ -733,17 +864,19 @@ function VideoManager({ moduleId }: { moduleId: number }) {
       {videos?.sort((a, b) => a.order - b.order).map(v => (
         <div key={v.id} className="flex items-center justify-between bg-muted/30 rounded px-3 py-2">
           <span className="text-sm truncate max-w-[70%]">{v.order}. {v.title}</span>
-          <div className="flex items-center gap-1 shrink-0">
-            <EditVideoDialog video={v} moduleId={moduleId} onSaved={invalidate} />
-            <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive hover:text-destructive"
-              onClick={() => deleteVideo({ videoId: v.id }, { onSuccess: () => {
-                toast({ title: "Video removed" });
-                invalidate();
-              }})}
-            >
-              <Trash2 className="w-3 h-3" />
-            </Button>
-          </div>
+          {canEdit("video", v as any) && (
+            <div className="flex items-center gap-1 shrink-0">
+              <EditVideoDialog video={v} moduleId={moduleId} onSaved={invalidate} />
+              <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive hover:text-destructive"
+                onClick={() => deleteVideo({ videoId: v.id }, { onSuccess: () => {
+                  toast({ title: "Video removed" });
+                  invalidate();
+                }})}
+              >
+                <Trash2 className="w-3 h-3" />
+              </Button>
+            </div>
+          )}
         </div>
       ))}
     </div>
@@ -1624,6 +1757,37 @@ export default function AdminContent() {
   const { mutate: updateTrack } = useUpdateTrack();
   const { mutate: deleteTrack } = useDeleteTrack();
 
+  const { user } = useUser();
+  const myClerkId = user?.id ?? null;
+  const [currentRole, setCurrentRole] = useState<string>("manager");
+  const [myGrantedIds, setMyGrantedIds] = useState<GrantedSets>({
+    tracks: new Set(), modules: new Set(), videos: new Set(), documents: new Set(),
+  });
+  const isAdmin = currentRole === "admin";
+
+  useEffect(() => {
+    apiFetch("/api/admin/me").then(r => r?.json()).then((me: any) => {
+      if (me?.role) setCurrentRole(me.role);
+    }).catch(() => {});
+    apiFetch("/api/admin/content-grants/mine").then(r => r?.json()).then((g: any) => {
+      if (g) setMyGrantedIds({
+        tracks: new Set(g.tracks ?? []),
+        modules: new Set(g.modules ?? []),
+        videos: new Set(g.videos ?? []),
+        documents: new Set(g.documents ?? []),
+      });
+    }).catch(() => {});
+  }, []);
+
+  const canEdit = (type: "track" | "module" | "video" | "document", item: { id: number; createdByClerkId?: string | null }) => {
+    if (isAdmin) return true;
+    if (item.createdByClerkId && item.createdByClerkId === myClerkId) return true;
+    const key = (type + "s") as keyof GrantedSets;
+    return myGrantedIds[key].has(item.id);
+  };
+
+  const ctxValue: ContentPermsCtx = { isAdmin, myClerkId, grantedIds: myGrantedIds, canEdit };
+
   const [addTrackOpen, setAddTrackOpen] = useState(false);
   const [trackName, setTrackName] = useState("");
   const [trackDesc, setTrackDesc] = useState("");
@@ -1667,6 +1831,7 @@ export default function AdminContent() {
   };
 
   return (
+    <ContentPermissionsCtx.Provider value={ctxValue}>
     <div className="space-y-8 animate-in fade-in duration-500">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
@@ -1731,28 +1896,35 @@ export default function AdminContent() {
                       </div>
                     </div>
                     <div className="flex items-center gap-1 shrink-0">
-                      <Button
-                        variant="ghost" size="sm"
-                        onClick={() => openEditTrack(track)}
-                      >
-                        <Pencil className="w-4 h-4" />
-                      </Button>
-                      <Button
-                        variant="ghost" size="sm"
-                        className="text-destructive hover:text-destructive"
-                        onClick={() => {
-                          if (confirm(`Delete "${track.name}"? This will remove all modules, videos and quiz questions inside it.`)) {
-                            deleteTrack({ trackId: track.id }, {
-                              onSuccess: () => {
-                                toast({ title: "Track deleted" });
-                                queryClient.invalidateQueries({ queryKey: getListTracksQueryKey() });
-                              },
-                            });
-                          }
-                        }}
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </Button>
+                      {isAdmin && (
+                        <ManageEditorsDialog contentType="track" contentId={track.id} contentName={track.name} />
+                      )}
+                      {canEdit("track", track as any) && (
+                        <>
+                          <Button
+                            variant="ghost" size="sm"
+                            onClick={() => openEditTrack(track)}
+                          >
+                            <Pencil className="w-4 h-4" />
+                          </Button>
+                          <Button
+                            variant="ghost" size="sm"
+                            className="text-destructive hover:text-destructive"
+                            onClick={() => {
+                              if (confirm(`Delete "${track.name}"? This will remove all modules, videos and quiz questions inside it.`)) {
+                                deleteTrack({ trackId: track.id }, {
+                                  onSuccess: () => {
+                                    toast({ title: "Track deleted" });
+                                    queryClient.invalidateQueries({ queryKey: getListTracksQueryKey() });
+                                  },
+                                });
+                              }
+                            }}
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
+                        </>
+                      )}
                     </div>
                   </div>
                 </CardHeader>
@@ -1779,5 +1951,6 @@ export default function AdminContent() {
         </TabsContent>
       </Tabs>
     </div>
+    </ContentPermissionsCtx.Provider>
   );
 }

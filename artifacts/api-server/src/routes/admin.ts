@@ -5,8 +5,16 @@ import { eq, and, inArray, desc, isNull } from "drizzle-orm";
 import { requireAdmin, requireManagerOrAdmin, getDbUser } from "../middlewares/requireAuth";
 import { UpdateUserRoleBody } from "@workspace/api-zod";
 import adminDocumentsRouter from "./adminDocuments";
+import contentGrantsRouter from "./contentGrants";
 
 const router = Router();
+
+// ── GET /api/admin/me ─────────────────────────────────────────────────────────
+// Returns the current authenticated manager/admin's profile and role.
+router.get("/me", requireManagerOrAdmin, (req, res) => {
+  const u = res.locals.dbUser;
+  res.json({ id: u.id, clerkId: u.clerkId, role: u.role, firstName: u.firstName, lastName: u.lastName });
+});
 
 async function sendAssignmentEmail(
   toEmail: string,
@@ -370,5 +378,6 @@ router.get("/audit-log", requireAdmin, async (req, res) => {
 });
 
 router.use("/documents", adminDocumentsRouter);
+router.use("/content-grants", contentGrantsRouter);
 
 export default router;

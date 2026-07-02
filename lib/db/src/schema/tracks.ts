@@ -7,6 +7,7 @@ export const tracksTable = pgTable("tracks", {
   name: text("name").notNull(),
   description: text("description"),
   imageUrl: text("image_url"),
+  createdByClerkId: text("created_by_clerk_id"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 

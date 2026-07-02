@@ -5,6 +5,7 @@ import { eq, inArray } from "drizzle-orm";
 import { requireAuth, requireManagerOrAdmin, getDbUser } from "../middlewares/requireAuth";
 import { CreateTrackBody, UpdateTrackBody } from "@workspace/api-zod";
 import { logContentChange } from "../lib/auditLog";
+import { canEditContent } from "../lib/canEditContent";
 
 const router = Router();
 
@@ -21,13 +22,17 @@ router.get("/", requireAuth, async (req, res) => {
 // POST /tracks
 router.post("/", requireManagerOrAdmin, async (req, res) => {
   try {
+    const auth = getAuth(req);
     const actor = res.locals.dbUser;
     const parsed = CreateTrackBody.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ error: "Invalid input" });
       return;
     }
-    const inserted = await db.insert(tracksTable).values(parsed.data).returning();
+    const inserted = await db.insert(tracksTable).values({
+      ...parsed.data,
+      createdByClerkId: auth!.userId!,
+    }).returning();
     const t = inserted[0];
     logContentChange({
       actorId: actor.id,
@@ -85,16 +90,21 @@ router.patch("/:trackId", requireManagerOrAdmin, async (req, res) => {
   try {
     const actor = res.locals.dbUser;
     const trackId = parseInt(req.params.trackId as string);
+
+    const existing = await db.select().from(tracksTable).where(eq(tracksTable.id, trackId)).limit(1);
+    if (!existing[0]) { res.status(404).json({ error: "Not found" }); return; }
+
+    if (!(await canEditContent(actor, "track", trackId, existing[0].createdByClerkId))) {
+      res.status(403).json({ error: "You don't have permission to edit this track." });
+      return;
+    }
+
     const parsed = UpdateTrackBody.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ error: "Invalid input" });
       return;
     }
     const updated = await db.update(tracksTable).set(parsed.data).where(eq(tracksTable.id, trackId)).returning();
-    if (!updated[0]) {
-      res.status(404).json({ error: "Not found" });
-      return;
-    }
     const t = updated[0];
     logContentChange({
       actorId: actor.id,
@@ -117,17 +127,22 @@ router.delete("/:trackId", requireManagerOrAdmin, async (req, res) => {
     const actor = res.locals.dbUser;
     const trackId = parseInt(req.params.trackId as string);
     const existing = await db.select().from(tracksTable).where(eq(tracksTable.id, trackId)).limit(1);
-    if (existing[0]) {
-      logContentChange({
-        actorId: actor.id,
-        actorName: `${actor.firstName} ${actor.lastName}`,
-        action: "delete",
-        entityType: "track",
-        entityId: existing[0].id,
-        entityName: existing[0].name,
-        trackId: existing[0].id,
-      }).catch(() => {});
+    if (!existing[0]) { res.status(404).json({ error: "Not found" }); return; }
+
+    if (!(await canEditContent(actor, "track", trackId, existing[0].createdByClerkId))) {
+      res.status(403).json({ error: "You don't have permission to delete this track." });
+      return;
     }
+
+    logContentChange({
+      actorId: actor.id,
+      actorName: `${actor.firstName} ${actor.lastName}`,
+      action: "delete",
+      entityType: "track",
+      entityId: existing[0].id,
+      entityName: existing[0].name,
+      trackId: existing[0].id,
+    }).catch(() => {});
     await db.delete(tracksTable).where(eq(tracksTable.id, trackId));
     res.status(204).send();
   } catch {

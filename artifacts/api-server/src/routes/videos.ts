@@ -1,9 +1,11 @@
 import { Router } from "express";
+import { getAuth } from "@clerk/express";
 import { db, videosTable, modulesTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { requireAuth, requireManagerOrAdmin } from "../middlewares/requireAuth";
 import { CreateVideoBody, UpdateVideoBody } from "@workspace/api-zod";
 import { logContentChange } from "../lib/auditLog";
+import { canEditContent } from "../lib/canEditContent";
 
 const router = Router();
 
@@ -23,13 +25,17 @@ router.get("/", requireAuth, async (req, res) => {
 // POST /videos
 router.post("/", requireManagerOrAdmin, async (req, res) => {
   try {
+    const auth = getAuth(req);
     const actor = res.locals.dbUser;
     const parsed = CreateVideoBody.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ error: "Invalid input" });
       return;
     }
-    const inserted = await db.insert(videosTable).values(parsed.data).returning();
+    const inserted = await db.insert(videosTable).values({
+      ...parsed.data,
+      createdByClerkId: auth!.userId!,
+    }).returning();
     const v = inserted[0];
     const mod = await db.select({ trackId: modulesTable.trackId }).from(modulesTable).where(eq(modulesTable.id, v.moduleId)).limit(1);
     logContentChange({
@@ -68,6 +74,14 @@ router.patch("/:videoId", requireManagerOrAdmin, async (req, res) => {
   try {
     const actor = res.locals.dbUser;
     const videoId = parseInt(req.params.videoId as string);
+
+    const existing = await db.select().from(videosTable).where(eq(videosTable.id, videoId)).limit(1);
+    if (!existing[0]) { res.status(404).json({ error: "Not found" }); return; }
+    if (!(await canEditContent(actor, "video", videoId, existing[0].createdByClerkId))) {
+      res.status(403).json({ error: "You don't have permission to edit this video." });
+      return;
+    }
+
     const parsed = UpdateVideoBody.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ error: "Invalid input" });
@@ -101,18 +115,23 @@ router.delete("/:videoId", requireManagerOrAdmin, async (req, res) => {
     const actor = res.locals.dbUser;
     const videoId = parseInt(req.params.videoId as string);
     const existing = await db.select().from(videosTable).where(eq(videosTable.id, videoId)).limit(1);
-    if (existing[0]) {
-      const mod = await db.select({ trackId: modulesTable.trackId }).from(modulesTable).where(eq(modulesTable.id, existing[0].moduleId)).limit(1);
-      logContentChange({
-        actorId: actor.id,
-        actorName: `${actor.firstName} ${actor.lastName}`,
-        action: "delete",
-        entityType: "video",
-        entityId: existing[0].id,
-        entityName: existing[0].title,
-        trackId: mod[0]?.trackId ?? null,
-      }).catch(() => {});
+    if (!existing[0]) { res.status(404).json({ error: "Not found" }); return; }
+
+    if (!(await canEditContent(actor, "video", videoId, existing[0].createdByClerkId))) {
+      res.status(403).json({ error: "You don't have permission to delete this video." });
+      return;
     }
+
+    const mod = await db.select({ trackId: modulesTable.trackId }).from(modulesTable).where(eq(modulesTable.id, existing[0].moduleId)).limit(1);
+    logContentChange({
+      actorId: actor.id,
+      actorName: `${actor.firstName} ${actor.lastName}`,
+      action: "delete",
+      entityType: "video",
+      entityId: existing[0].id,
+      entityName: existing[0].title,
+      trackId: mod[0]?.trackId ?? null,
+    }).catch(() => {});
     await db.delete(videosTable).where(eq(videosTable.id, videoId));
     res.status(204).send();
   } catch {
