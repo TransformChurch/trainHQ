@@ -87,19 +87,32 @@ router.post("/import-folder", requireManagerOrAdmin, async (req, res) => {
     }
     const folderId = folderIdMatch[1];
 
-    // Drive API v3: list all files whose parent is this folder
-    const driveRes = await fetch(
-      `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(`'${folderId}' in parents and trashed = false`)}&fields=files(id,name,mimeType,webViewLink)&pageSize=200&key=${apiKey}`,
-    );
+    // Drive API v3: list all files whose parent is this folder.
+    // supportsAllDrives + includeItemsFromAllDrives are required for Shared/Team Drives.
+    const driveUrl = new URL("https://www.googleapis.com/drive/v3/files");
+    driveUrl.searchParams.set("q", `'${folderId}' in parents and trashed = false`);
+    driveUrl.searchParams.set("fields", "files(id,name,mimeType,webViewLink)");
+    driveUrl.searchParams.set("pageSize", "200");
+    driveUrl.searchParams.set("supportsAllDrives", "true");
+    driveUrl.searchParams.set("includeItemsFromAllDrives", "true");
+    driveUrl.searchParams.set("key", apiKey);
+
+    const driveRes = await fetch(driveUrl.toString());
 
     if (!driveRes.ok) {
       const errBody = await driveRes.text();
-      if (driveRes.status === 403 || driveRes.status === 404) {
-        res.status(400).json({ error: "Could not access that folder. Make sure it is shared publicly (\"Anyone with the link can view\")." });
+      console.error(`Drive API error (${driveRes.status}):`, errBody);
+      if (driveRes.status === 403) {
+        res.status(400).json({
+          error: "Google Drive returned 'forbidden'. Possible causes: (1) The folder is not shared with 'Anyone with the link'; (2) The Google API key has HTTP referrer or IP restrictions blocking server calls; (3) The Drive API is not enabled for this API key's project.",
+        });
         return;
       }
-      console.error("Drive API error:", errBody);
-      res.status(502).json({ error: "Google Drive API returned an error. Check that the folder is publicly shared." });
+      if (driveRes.status === 404) {
+        res.status(400).json({ error: "Folder not found. Double-check the URL." });
+        return;
+      }
+      res.status(502).json({ error: `Google Drive API returned ${driveRes.status}. Check the server logs for details.` });
       return;
     }
 
