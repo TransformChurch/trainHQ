@@ -9,7 +9,7 @@ export const documentsTable = pgTable("documents", {
   description: text("description"),
   driveUrl: text("drive_url"),
   resourceType: docResourceTypeEnum("resource_type").notNull().default("file"),
-  parentId: integer("parent_id"),
+  parentId: integer("parent_id").references((): any => documentsTable.id, { onDelete: "cascade" }),
   sortOrder: smallint("sort_order").notNull().default(0),
   createdByClerkId: text("created_by_clerk_id"),
   createdAt: timestamp("created_at").notNull().defaultNow(),

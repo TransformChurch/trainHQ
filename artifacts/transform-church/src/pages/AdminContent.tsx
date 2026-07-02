@@ -1103,8 +1103,13 @@ function DocumentsTab() {
   const loadDocs = async () => {
     setLoading(true);
     try {
-      const data = await repoFetch("/api/documents/admin");
-      setDocs(data);
+      const tree = await repoFetch("/api/admin/documents");
+      const allDocs: RepoDoc[] = [
+        ...tree.folders.map(({ documents: _docs, ...f }: any) => f as RepoDoc),
+        ...tree.folders.flatMap((f: any) => (f.documents ?? []) as RepoDoc[]),
+        ...(tree.unfiled as RepoDoc[]),
+      ];
+      setDocs(allDocs);
     } catch {
       toast({ title: "Failed to load repository", variant: "destructive" });
     } finally {
@@ -1133,7 +1138,7 @@ function DocumentsTab() {
     setAccessDoc(doc);
     setGrantsLoading(true);
     try {
-      setGrants(await repoFetch(`/api/documents/admin/${doc.id}/access`));
+      setGrants(await repoFetch(`/api/admin/documents/${doc.id}/access`));
     } catch {
       toast({ title: "Failed to load access", variant: "destructive" });
     } finally {
@@ -1142,7 +1147,7 @@ function DocumentsTab() {
   };
 
   const refreshGrants = async (docId: number) => {
-    const data = await repoFetch(`/api/documents/admin/${docId}/access`);
+    const data = await repoFetch(`/api/admin/documents/${docId}/access`);
     setGrants(data);
     setDocs(prev => prev.map(d => d.id === docId ? { ...d, accessCount: data.length } : d));
   };
@@ -1151,7 +1156,7 @@ function DocumentsTab() {
     if (!accessDoc || !addId) return;
     setAddingGrant(true);
     try {
-      await repoFetch(`/api/documents/admin/${accessDoc.id}/access`, {
+      await repoFetch(`/api/admin/documents/${accessDoc.id}/access`, {
         method: "POST",
         body: JSON.stringify({ principalType: addType, principalId: addId }),
       });
@@ -1167,7 +1172,7 @@ function DocumentsTab() {
   const handleRemoveGrant = async (grantId: number) => {
     if (!accessDoc) return;
     try {
-      await repoFetch(`/api/documents/admin/${accessDoc.id}/access/${grantId}`, { method: "DELETE" });
+      await repoFetch(`/api/admin/documents/${accessDoc.id}/access/${grantId}`, { method: "DELETE" });
       await refreshGrants(accessDoc.id);
     } catch {
       toast({ title: "Failed to remove access", variant: "destructive" });
@@ -1180,7 +1185,7 @@ function DocumentsTab() {
     setCreating(true);
     try {
       const resourceType = newUrl.includes("/file/d/") ? "file" : "folder";
-      await repoFetch("/api/documents/admin", {
+      await repoFetch("/api/admin/documents", {
         method: "POST",
         body: JSON.stringify({ title: newTitle.trim(), description: newDesc.trim() || null, driveUrl: newUrl.trim(), resourceType, parentId: newParentId }),
       });
@@ -1200,7 +1205,7 @@ function DocumentsTab() {
     if (!newTitle.trim()) return;
     setCreating(true);
     try {
-      await repoFetch("/api/documents/admin", {
+      await repoFetch("/api/admin/documents", {
         method: "POST",
         body: JSON.stringify({ title: newTitle.trim(), description: newDesc.trim() || null, resourceType: "folder" }),
       });
@@ -1228,7 +1233,7 @@ function DocumentsTab() {
     if (!editDoc) return;
     setSaving(true);
     try {
-      await repoFetch(`/api/documents/admin/${editDoc.id}`, {
+      await repoFetch(`/api/admin/documents/${editDoc.id}`, {
         method: "PATCH",
         body: JSON.stringify({
           title: editTitle.trim(),
@@ -1252,7 +1257,7 @@ function DocumentsTab() {
       : `Delete "${doc.title}"?`;
     if (!confirm(msg)) return;
     try {
-      await repoFetch(`/api/documents/admin/${doc.id}`, { method: "DELETE" });
+      await repoFetch(`/api/admin/documents/${doc.id}`, { method: "DELETE" });
       toast({ title: doc.resourceType === "folder" ? "Folder deleted" : "Document deleted" });
       if (selectedFolder === doc.id) setSelectedFolder("all");
       loadDocs();

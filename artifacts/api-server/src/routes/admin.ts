@@ -4,6 +4,7 @@ import { db, usersTable, assignmentsTable, modulesTable, quizResultsTable, group
 import { eq, and, inArray, desc, isNull } from "drizzle-orm";
 import { requireAdmin, requireManagerOrAdmin, getDbUser } from "../middlewares/requireAuth";
 import { UpdateUserRoleBody } from "@workspace/api-zod";
+import adminDocumentsRouter from "./adminDocuments";
 
 const router = Router();
 
@@ -367,5 +368,7 @@ router.get("/audit-log", requireAdmin, async (req, res) => {
     res.status(500).json({ error: "Internal server error" });
   }
 });
+
+router.use("/documents", adminDocumentsRouter);
 
 export default router;
