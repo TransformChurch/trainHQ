@@ -144,26 +144,52 @@ function VideoSourcePicker({
       )}
 
       {sourceType === "drive" && (
-        <div className="space-y-1.5">
-          {driveFolderUrl && (
-            <a
-              href={driveFolderUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 rounded-md border border-primary/40 bg-primary/5 px-3 py-1.5 text-xs font-semibold text-primary shadow-sm hover:bg-primary/10 hover:border-primary transition-colors"
-            >
-              <HardDrive className="w-3.5 h-3.5 shrink-0" />
-              Upload video to our Drive folder →
-            </a>
-          )}
-          <Label>Google Drive Share Link</Label>
-          <Input
-            value={url}
-            onChange={e => onUrlChange(convertDriveUrl(e.target.value))}
-            placeholder="https://drive.google.com/file/d/.../view"
-            required
-          />
-          {url && <p className="text-xs text-muted-foreground break-all">Embed: {url}</p>}
+        <div className="space-y-2.5">
+          {/* Step 1 */}
+          <div className="flex gap-3 items-start rounded-lg border border-border bg-muted/20 p-3">
+            <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground text-xs font-bold">1</div>
+            <div className="space-y-2 flex-1 min-w-0">
+              <p className="text-sm font-semibold leading-none">Upload video to Google Drive</p>
+              {driveFolderUrl ? (
+                <a
+                  href={driveFolderUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 rounded-md border border-primary/40 bg-primary/5 px-3 py-1.5 text-xs font-semibold text-primary shadow-sm hover:bg-primary/10 hover:border-primary transition-colors"
+                >
+                  <HardDrive className="w-3.5 h-3.5 shrink-0" />
+                  Upload video to our Drive folder →
+                </a>
+              ) : (
+                <p className="text-xs text-muted-foreground">Upload the video to your Google Drive account.</p>
+              )}
+            </div>
+          </div>
+
+          {/* Step 2 */}
+          <div className="flex gap-3 items-start rounded-lg border border-border bg-muted/20 p-3">
+            <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground text-xs font-bold">2</div>
+            <div className="space-y-2 flex-1 min-w-0">
+              <p className="text-sm font-semibold leading-none">Copy and paste the share link</p>
+              <p className="text-xs text-muted-foreground">Set sharing to "Anyone with the link" with <strong>Viewer</strong> permission.</p>
+              <Input
+                value={url}
+                onChange={e => onUrlChange(convertDriveUrl(e.target.value))}
+                placeholder="https://drive.google.com/file/d/.../view"
+                required
+              />
+              {url && <p className="text-xs text-muted-foreground break-all">Embed: {url}</p>}
+            </div>
+          </div>
+
+          {/* Step 3 */}
+          <div className="flex gap-3 items-start rounded-lg border border-dashed border-border bg-muted/10 p-3 opacity-70">
+            <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground text-xs font-bold">3</div>
+            <div className="space-y-1 flex-1 min-w-0">
+              <p className="text-sm font-semibold leading-none text-muted-foreground">Update description</p>
+              <p className="text-xs text-muted-foreground">Add a description for this video in the field below ↓</p>
+            </div>
+          </div>
         </div>
       )}
 
