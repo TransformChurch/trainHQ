@@ -87,7 +87,7 @@ export default function WatchVideo() {
           {/* Blocks the Google Drive pop-out button in the top-right corner of the player */}
           <div
             className="absolute top-0 right-0 z-10"
-            style={{ width: "60px", height: "46px", cursor: "default" }}
+            style={{ width: "120px", height: "92px", cursor: "default" }}
             title=""
           />
         </div>
