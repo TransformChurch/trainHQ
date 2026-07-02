@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { FileText, FolderOpen, ExternalLink, X, Lock } from "lucide-react";
+import { FileText, FolderOpen, ExternalLink, X, Lock, AlertTriangle } from "lucide-react";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -21,9 +21,26 @@ function extractFileId(url: string): string | null {
 }
 
 function PreviewModal({ doc, onClose }: { doc: RepoDoc; onClose: () => void }) {
+  const [iframeError, setIframeError] = useState(false);
+
   if (!doc.driveUrl) return null;
   const fileId = extractFileId(doc.driveUrl);
   const embedUrl = fileId ? `https://drive.google.com/file/d/${fileId}/preview` : null;
+
+  const ErrorState = (
+    <div className="flex-1 flex items-center justify-center flex-col gap-4 px-6 text-center">
+      <AlertTriangle className="w-12 h-12 text-amber-400 opacity-80" />
+      <div className="space-y-1">
+        <p className="font-medium">This file couldn't be previewed</p>
+        <p className="text-sm text-muted-foreground max-w-sm">
+          The file may not be publicly shared or the link may be incorrect. Try opening it directly in Google Drive.
+        </p>
+      </div>
+      <Button variant="outline" onClick={() => window.open(doc.driveUrl!, "_blank")}>
+        <ExternalLink className="w-4 h-4 mr-2" /> Open in Google Drive
+      </Button>
+    </div>
+  );
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-background">
@@ -33,23 +50,43 @@ function PreviewModal({ doc, onClose }: { doc: RepoDoc; onClose: () => void }) {
           <span className="font-medium truncate">{doc.title}</span>
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          <Button size="sm" variant="outline" onClick={() => window.open(doc.driveUrl!, "_blank")}>
-            <ExternalLink className="w-3.5 h-3.5 mr-1.5" /> Open in Drive
-          </Button>
+          {!iframeError && (
+            <Button size="sm" variant="outline" onClick={() => window.open(doc.driveUrl!, "_blank")}>
+              <ExternalLink className="w-3.5 h-3.5 mr-1.5" /> Open in Drive
+            </Button>
+          )}
           <Button size="icon" variant="ghost" onClick={onClose}>
             <X className="w-4 h-4" />
           </Button>
         </div>
       </div>
-      {embedUrl ? (
-        <iframe src={embedUrl} className="flex-1 w-full border-0" title={doc.title} allow="autoplay" />
+      {iframeError || !embedUrl ? (
+        embedUrl ? ErrorState : (
+          <div className="flex-1 flex items-center justify-center flex-col gap-4 text-muted-foreground">
+            <FileText className="w-12 h-12 opacity-40" />
+            <p className="text-sm">Preview not available for this file type.</p>
+            <Button variant="outline" onClick={() => window.open(doc.driveUrl!, "_blank")}>
+              <ExternalLink className="w-4 h-4 mr-2" /> Open in Google Drive
+            </Button>
+          </div>
+        )
       ) : (
-        <div className="flex-1 flex items-center justify-center flex-col gap-4 text-muted-foreground">
-          <FileText className="w-12 h-12 opacity-40" />
-          <p className="text-sm">Preview not available for this file type.</p>
-          <Button variant="outline" onClick={() => window.open(doc.driveUrl!, "_blank")}>
-            <ExternalLink className="w-4 h-4 mr-2" /> Open in Google Drive
-          </Button>
+        <div className="flex-1 flex flex-col relative">
+          <iframe
+            src={embedUrl}
+            className="flex-1 w-full border-0"
+            title={doc.title}
+            allow="autoplay"
+            onError={() => setIframeError(true)}
+          />
+          <div className="flex justify-center py-2 border-t bg-card shrink-0">
+            <button
+              className="text-xs text-muted-foreground hover:text-foreground underline-offset-2 hover:underline"
+              onClick={() => setIframeError(true)}
+            >
+              Not loading? The file may not be publicly shared.
+            </button>
+          </div>
         </div>
       )}
     </div>

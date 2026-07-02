@@ -24,7 +24,7 @@ import {
   Accordion, AccordionContent, AccordionItem, AccordionTrigger,
 } from "@/components/ui/accordion";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Plus, Trash2, Video, BookOpen, HelpCircle, Users, Pencil, Globe, Lock, Mail, Upload, Link, HardDrive, Image as ImageIcon, FileText, FolderOpen, Shield, X } from "lucide-react";
+import { Plus, Trash2, Video, BookOpen, HelpCircle, Users, Pencil, Globe, Lock, Mail, Upload, Link, HardDrive, Image as ImageIcon, FileText, FolderOpen, Shield, X, AlertTriangle } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { useUpload } from "@workspace/object-storage-web";
@@ -1346,6 +1346,11 @@ function DocumentsTab() {
                     <div className="flex items-center gap-2">
                       <p className="text-sm font-medium truncate">{doc.title}</p>
                       {isFolder && <Badge variant="outline" className="text-xs h-4 px-1.5 shrink-0">Folder</Badge>}
+                      {!isFolder && doc.driveUrl && !/\/file\/d\//.test(doc.driveUrl) && (
+                        <span title="URL doesn't look like a direct Google Drive file link — students may not be able to preview it" className="flex items-center gap-1 text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5 shrink-0">
+                          <AlertTriangle className="w-3 h-3" /> Bad link
+                        </span>
+                      )}
                     </div>
                     <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                       {folderName && <span className="text-xs text-muted-foreground"><FolderOpen className="w-3 h-3 inline mr-0.5" />{folderName}</span>}
