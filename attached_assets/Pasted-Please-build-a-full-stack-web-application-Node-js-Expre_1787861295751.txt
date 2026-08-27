@@ -1,0 +1,39 @@
+Please build a full-stack web application (Node.js/Express backend with a simple frontend) that integrates with Planning Center via OAuth 2.0 (Log In with Church Center).
+
+### 1. Requirements & Authentication Flow:
+- Implement OAuth 2.0 PKCE authentication flow using Planning Center API endpoints:
+  * Authorization Endpoint: https://api.planningcenteronline.com/oauth/authorize
+  * Token Endpoint: https://api.planningcenteronline.com/oauth/token
+  * Required Scope: `people`
+- Use the following environment variables (stored in Replit Secrets):
+  * PCO_CLIENT_ID
+  * PCO_CLIENT_SECRET
+  * PCO_REDIRECT_URI (e.g., https://<replit-app-name>.<username>.repl.co/auth/callback or custom domain)
+- Create a "Log in with Church Center" button on the frontend that kicks off the OAuth redirect.
+- Upon successful authentication:
+  * Store the user's `access_token`, `refresh_token`, and token expiration securely in the server session/database.
+  * Call the Planning Center People API endpoint (`GET https://api.planningcenteronline.com/people/v2/me`) to fetch the authenticated user's `pco_person_id`, name, and email.
+  * Store the user's `pco_person_id` in our local database linked to their session.
+
+### 2. Custom Field Integration (Module Completion):
+- Include a UI dashboard where the user can see a list of training modules and mark them as "Completed".
+- When a user marks a module as completed:
+  1. Trigger a backend route `POST /api/modules/complete`.
+  2. Use the user's stored OAuth `access_token` (handling refresh tokens if expired) to make an API call to Planning Center People.
+  3. Send a request to update the user's Custom Field Data in Planning Center.
+     - Endpoint: `PATCH https://api.planningcenteronline.com/people/v2/field_data/{field_data_id}`
+     - Body schema:
+       {
+         "data": {
+           "type": "FieldData",
+           "id": "<field_data_id>",
+           "attributes": {
+             "value": "<completion_status_or_date>"
+           }
+         }
+       }
+- Include clear configuration instructions in the README for how to find and map custom field IDs (`field_definition_id`) from Planning Center Settings into the environment variables or backend code.
+
+### 3. Code Quality & Error Handling:
+- Add middleware to auto-refresh tokens using the `refresh_token` when the 2-hour access token expires.
+- Provide clear error logging if the user denies OAuth permissions or if the Planning Center API returns a permission/scope error.
