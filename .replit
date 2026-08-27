@@ -1,6 +1,18 @@
-modules = ["nodejs-22"]
+modules = ["nodejs-22", "python-base-3.13"]
 
 [[ports]]
 localPort = 4011
 externalPort = 3001
+
+[[ports]]
+localPort = 8080
+externalPort = 8080
+
+[[ports]]
+localPort = 8081
+externalPort = 80
+
+[[ports]]
+localPort = 25632
+externalPort = 3002
 # This project uses the standard npm scripts documented in README.md.
