@@ -4,6 +4,7 @@ import pinoHttp from "pino-http";
 import { authMiddleware } from "./middlewares/auth";
 import router from "./routes";
 import { logger } from "./lib/logger";
+import planningCenterAuthRouter from "./routes/planningCenterAuth";
 
 const app: Express = express();
 const allowedOrigins = new Set(
@@ -73,6 +74,7 @@ app.use(express.urlencoded({
 }));
 app.use(authMiddleware);
 
+app.use("/api/auth", planningCenterAuthRouter);
 app.use("/api", router);
 
 export default app;

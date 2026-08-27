@@ -36,6 +36,60 @@ For a WordPress iframe or cross-domain integration:
 
 The token is held only in browser session storage and is sent as a bearer token to the API. This keeps the authentication integration independent of any hosted identity platform; an external site or identity gateway can mint the token after authenticating the user.
 
+## Planning Center / Church Center login
+
+Transform Church includes a Planning Center OAuth 2.0 integration that uses the
+authorization-code flow with PKCE and the `people` scope. Planning Center access
+and refresh tokens are encrypted with `SESSION_SECRET` and stored only in
+PostgreSQL. The browser receives the same short-lived application JWT used by
+the provider-neutral authentication layer; Planning Center tokens are never
+placed in browser storage, URLs, or logs.
+
+1. Create an OAuth application in Planning Center and enable **Log In with
+   Church Center**.
+2. Add the exact callback URL that the API will use. Locally this is typically
+   `http://localhost:3000/api/auth/planning-center/callback`; in production use
+   the published API origin with the same path.
+3. Add `PCO_CLIENT_ID`, `PCO_CLIENT_SECRET`, `PCO_REDIRECT_URI`, and a separate
+   high-entropy `SESSION_SECRET` to the server environment.
+4. Set `VITE_AUTH_LOGIN_URL=/api/auth/planning-center/start` when the frontend
+   and API share an origin. If they are deployed separately, use the absolute
+   API URL and include the frontend origin in `CORS_ALLOWED_ORIGINS`.
+5. Apply migrations with `npm run db:migrate`, then rebuild the frontend.
+
+The callback fetches `GET /people/v2/me`, links the returned Planning Center
+person ID to the local account, and stores the encrypted OAuth tokens. For
+security, an email-only match is not linked automatically; an administrator
+must first assign the Planning Center person ID to the existing local account.
+Access
+tokens are refreshed automatically before they expire. If a member denies
+consent or the People scope is missing, the sign-in page displays an actionable
+error and the API logs only a safe error code.
+
+### Mapping module completion custom fields
+
+Create one People custom field for each training module that should be
+synchronized. In Planning Center People, open the custom field configuration
+and copy its `field_definition_id`. Map each local Transform Church module ID
+to that definition ID in `PCO_MODULE_FIELD_DEFINITION_MAP`:
+
+```dotenv
+PCO_MODULE_FIELD_DEFINITION_MAP={"1":"123456","2":"123457"}
+```
+
+When a member marks a module complete, the API:
+
+1. Refreshes the member's Planning Center access token when necessary.
+2. Looks up the person's field-data record that matches the mapped
+   `field_definition_id`.
+3. Patches `/people/v2/field_data/{field_data_id}` with the completion date in
+   `YYYY-MM-DD` format.
+4. Records the completion locally only after Planning Center accepts the
+   update.
+
+If a mapping is absent or the custom field is not present on the member's
+profile, the UI shows a clear error and no local completion is recorded.
+
 `FRAME_ANCESTORS` is applied automatically during Vite development and preview. In production, your static web host must return the same header for the frontend files because it is the iframe resource. For example, in an Nginx site block:
 
 ```nginx

@@ -23,6 +23,8 @@ import Documents from "@/pages/Documents";
 import NotFound from "@/pages/not-found";
 import { useUpsertMe, useGetMe } from "@workspace/api-client-react";
 import { setAuthTokenGetter, setBaseUrl } from "@workspace/api-client-react";
+import { Button } from "@/components/ui/button";
+import { AlertCircle } from "lucide-react";
 
 const queryClient = new QueryClient();
 const TOKEN_STORAGE_KEY = "auth_bearer_token";
@@ -115,17 +117,62 @@ function AuthShell({ children }: { children: ReactNode }) {
 }
 
 function SignInPage() {
-  const loginUrl = import.meta.env.VITE_AUTH_LOGIN_URL;
-  useEffect(() => {
-    if (loginUrl) window.location.assign(loginUrl);
-  }, [loginUrl]);
+  const { isSignedIn } = useAuth();
+  const loginUrl = import.meta.env.VITE_AUTH_LOGIN_URL || "/api/auth/planning-center/start";
+  const errorCode = new URLSearchParams(window.location.search).get("auth_error");
+  const errorMessages: Record<string, string> = {
+    planning_center_access_denied: "Church Center access was not approved. You can try again when you are ready.",
+    invalid_oauth_state: "That sign-in request expired. Please start again.",
+    planning_center_profile_email_missing: "Your Planning Center profile needs an email address before you can sign in.",
+    planning_center_permission_error: "Planning Center did not grant the required People access.",
+    planning_center_not_configured: "Church Center sign-in has not been configured.",
+    planning_center_account_link_required: "A matching local account already exists. Ask an administrator to link it to Church Center.",
+    planning_center_identity_conflict: "This Church Center identity conflicts with another account. Ask an administrator for help.",
+  };
+
+  const handleSignIn = () => {
+    if (!loginUrl) return;
+    const target = new URL(loginUrl, window.location.origin);
+    if (!target.searchParams.has("return_to")) {
+      const returnPath = `${basePath}/sign-in`;
+      target.searchParams.set(
+        "return_to",
+        target.origin === window.location.origin
+          ? returnPath
+          : `${window.location.origin}${returnPath}`,
+      );
+    }
+    window.location.assign(target.toString());
+  };
+
+  if (isSignedIn) return <Redirect to="/dashboard" />;
   return (
     <AuthShell>
-      <p className="text-muted-foreground">
-        {loginUrl
-          ? "Redirecting to sign in…"
-          : "Sign-in has not been configured. Set VITE_AUTH_LOGIN_URL and rebuild the frontend."}
-      </p>
+      <div className="w-full rounded-xl border bg-card p-6 text-center shadow-sm">
+        <h1 className="text-2xl font-bold font-serif">Welcome back</h1>
+        <p className="mt-2 text-sm text-muted-foreground">
+          Use your Church Center account to access your training.
+        </p>
+        {errorCode && (
+          <div className="mt-5 flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-left text-sm text-destructive">
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>{errorMessages[errorCode] ?? "Church Center sign-in could not be completed. Please try again."}</span>
+          </div>
+        )}
+        <Button
+          className="mt-6 w-full"
+          size="lg"
+          onClick={handleSignIn}
+          disabled={!loginUrl}
+        >
+          Log in with Church Center
+        </Button>
+        {!loginUrl && (
+          <p className="mt-3 text-xs text-muted-foreground">
+            Sign-in has not been configured. Set VITE_AUTH_LOGIN_URL and rebuild the frontend.
+          </p>
+        )}
+      </div>
     </AuthShell>
   );
 }

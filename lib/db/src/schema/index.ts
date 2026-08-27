@@ -12,3 +12,4 @@ export * from "./contentAuditLog";
 export * from "./growthTracks";
 export * from "./documents";
 export * from "./contentEditorGrants";
+export * from "./planningCenter";

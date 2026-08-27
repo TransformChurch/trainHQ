@@ -169,7 +169,7 @@ export default function Dashboard() {
                           </p>
                         </div>
                         <div className="flex-shrink-0">
-                          {assignment.quizResult?.passed ? (
+                          {assignment.moduleCompletedAt || assignment.quizResult?.passed ? (
                             <div className="flex items-center gap-2 text-green-600 font-medium">
                               <CheckCircle2 className="w-5 h-5" /> Completed
                             </div>

@@ -1,4 +1,4 @@
-import { useGetModule, useGetQuiz, useSubmitQuiz, useGetQuizResult, getGetModuleQueryKey, getGetQuizResultQueryKey, getGetQuizQueryKey } from "@workspace/api-client-react";
+import { useGetModule, useGetQuiz, useSubmitQuiz, useGetQuizResult, getGetModuleQueryKey, getGetQuizResultQueryKey, getGetQuizQueryKey, useCompleteModule } from "@workspace/api-client-react";
 import { useParams, Link } from "wouter";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -24,11 +24,34 @@ export default function ModuleDetail() {
   });
 
   const { mutate: submitQuiz, isPending: isSubmitting } = useSubmitQuiz();
+  const { mutate: markComplete, isPending: isMarkingComplete } = useCompleteModule();
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
   const [answers, setAnswers] = useState<Record<number, number>>({});
   const [justSubmitted, setJustSubmitted] = useState(false);
+
+  const handleMarkComplete = () => {
+    markComplete({ moduleId }, {
+      onSuccess: (result) => {
+        queryClient.invalidateQueries({ queryKey: getGetModuleQueryKey(moduleId) });
+        queryClient.invalidateQueries({ queryKey: ["/api/dashboard/summary"] });
+        toast({
+          title: "Module completed",
+          description: result.planningCenterSynced
+            ? "Your completion was saved in Transform Church and Planning Center."
+            : "Your completion was saved.",
+        });
+      },
+      onError: (err) => {
+        toast({
+          title: "Could not sync completion",
+          description: err instanceof Error ? err.message : "Please try again.",
+          variant: "destructive",
+        });
+      },
+    });
+  };
 
   if (isLoading) {
     return <div className="p-8 text-center animate-pulse h-8 bg-muted w-1/3 mx-auto rounded"></div>;
@@ -94,6 +117,19 @@ export default function ModuleDetail() {
         </Link>
         <h1 className="text-3xl md:text-4xl font-bold font-serif text-foreground">{moduleData.title}</h1>
         <p className="text-lg text-muted-foreground mt-2">{moduleData.description}</p>
+        <div className="mt-5 flex flex-col items-start gap-2 sm:flex-row sm:items-center">
+          {moduleData.moduleCompletedAt ? (
+            <div className="flex items-center gap-2 rounded-lg border border-green-200 bg-green-50 px-4 py-2 text-sm font-medium text-green-700">
+              <CheckCircle2 className="h-4 w-4" />
+              Completed and synced {new Date(moduleData.moduleCompletedAt).toLocaleDateString()}
+            </div>
+          ) : (
+            <Button onClick={handleMarkComplete} disabled={isMarkingComplete}>
+              <CheckCircle2 className="mr-2 h-4 w-4" />
+              {isMarkingComplete ? "Syncing completion…" : "Mark Module Completed"}
+            </Button>
+          )}
+        </div>
         {anyNeedsReview && (
           <div className="mt-4 flex items-center gap-2 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3">
             <AlertTriangle className="w-4 h-4 shrink-0" />

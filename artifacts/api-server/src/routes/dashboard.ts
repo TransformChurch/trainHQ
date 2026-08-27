@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { getAuth } from "../middlewares/auth";
-import { db, assignmentsTable, modulesTable, quizResultsTable, watchHistoryTable, queueTable, videosTable } from "@workspace/db";
+import { db, assignmentsTable, modulesTable, quizResultsTable, watchHistoryTable, queueTable, videosTable, moduleCompletionsTable } from "@workspace/db";
 import { eq, and, desc, isNull } from "drizzle-orm";
 import { requireAuth, getDbUser } from "../middlewares/requireAuth";
 
@@ -34,6 +34,11 @@ router.get("/summary", requireAuth, async (req, res) => {
       .from(quizResultsTable)
       .where(eq(quizResultsTable.userId, dbUser.id));
     const quizMap = new Map(quizResults.map(qr => [qr.moduleId, qr]));
+    const completionRows = await db
+      .select()
+      .from(moduleCompletionsTable)
+      .where(eq(moduleCompletionsTable.userId, dbUser.id));
+    const completionMap = new Map(completionRows.map(row => [row.moduleId, row]));
 
     const assignedModules = assignmentRows.map(row => ({
       id: row.a.id,
@@ -48,6 +53,7 @@ router.get("/summary", requireAuth, async (req, res) => {
       quizResult: quizMap.get(row.a.moduleId)
         ? { ...quizMap.get(row.a.moduleId)!, takenAt: quizMap.get(row.a.moduleId)!.takenAt.toISOString() }
         : null,
+      moduleCompletedAt: completionMap.get(row.a.moduleId)?.completedAt.toISOString() ?? null,
     }));
 
     // Mark all unseen assignments as seen (fire and forget)
@@ -65,6 +71,7 @@ router.get("/summary", requireAuth, async (req, res) => {
 
     const allModules = await db.select().from(modulesTable);
     const completedModuleIds = new Set(quizResults.filter(qr => qr.passed).map(qr => qr.moduleId));
+    for (const completion of completionRows) completedModuleIds.add(completion.moduleId);
 
     const watchHistory = await db
       .select({ wh: watchHistoryTable, video: videosTable })

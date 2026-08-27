@@ -1,12 +1,13 @@
 import { Router } from "express";
 import { getAuth } from "../middlewares/auth";
-import { db, modulesTable, videosTable, watchHistoryTable, quizResultsTable, queueTable, quizQuestionsTable, assignmentsTable } from "@workspace/db";
+import { db, modulesTable, videosTable, watchHistoryTable, quizResultsTable, queueTable, quizQuestionsTable, assignmentsTable, moduleCompletionsTable } from "@workspace/db";
 import { eq, and, sql, inArray } from "drizzle-orm";
 import { requireAuth, requireManagerOrAdmin, getDbUser } from "../middlewares/requireAuth";
-import { CreateModuleBody, UpdateModuleBody, CreateQuizQuestionBody, SubmitQuizBody } from "@workspace/api-zod";
+import { CreateModuleBody, UpdateModuleBody, CreateQuizQuestionBody, SubmitQuizBody, CompleteModuleBody } from "@workspace/api-zod";
 import { logContentChange } from "../lib/auditLog";
 import { checkGrowthTrackProgression } from "../lib/growthTrackProgression";
 import { canEditContent } from "../lib/canEditContent";
+import { PlanningCenterError, updatePlanningCenterModuleCompletion } from "../lib/planningCenter";
 
 const router = Router();
 
@@ -73,6 +74,116 @@ router.post("/", requireManagerOrAdmin, async (req, res) => {
   }
 });
 
+// POST /modules/complete — sync completion to Planning Center, then persist locally
+router.post("/complete", requireAuth, async (req, res) => {
+  try {
+    const parsed = CompleteModuleBody.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: "Invalid input" });
+      return;
+    }
+    const auth = getAuth(req);
+    const dbUser = await getDbUser(auth!.userId!);
+    if (!dbUser) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
+    const moduleId = parsed.data.moduleId;
+    const moduleRows = await db.select({
+      id: modulesTable.id,
+      isPublic: modulesTable.isPublic,
+    })
+      .from(modulesTable)
+      .where(eq(modulesTable.id, moduleId))
+      .limit(1);
+    if (!moduleRows[0]) {
+      res.status(404).json({ error: "Module not found" });
+      return;
+    }
+    if (dbUser.role === "student" && !moduleRows[0].isPublic) {
+      const assignment = await db.select({ id: assignmentsTable.id })
+        .from(assignmentsTable)
+        .where(and(
+          eq(assignmentsTable.moduleId, moduleId),
+          eq(assignmentsTable.userId, dbUser.id),
+        ))
+        .limit(1);
+      if (!assignment[0]) {
+        res.status(403).json({ error: "You do not have access to this module" });
+        return;
+      }
+    }
+
+    const moduleVideos = await db.select({ id: videosTable.id })
+      .from(videosTable)
+      .where(eq(videosTable.moduleId, moduleId));
+    if (moduleVideos.length > 0) {
+      const completedVideos = await db.select({ videoId: watchHistoryTable.videoId })
+        .from(watchHistoryTable)
+        .where(and(
+          eq(watchHistoryTable.userId, dbUser.id),
+          eq(watchHistoryTable.completed, true),
+          inArray(watchHistoryTable.videoId, moduleVideos.map((video) => video.id)),
+        ));
+      if (new Set(completedVideos.map((row) => row.videoId)).size !== moduleVideos.length) {
+        res.status(409).json({
+          error: "Complete every video in this module before marking it complete",
+          code: "module_videos_incomplete",
+        });
+        return;
+      }
+    }
+
+    const quizQuestion = await db.select({ id: quizQuestionsTable.id })
+      .from(quizQuestionsTable)
+      .where(eq(quizQuestionsTable.moduleId, moduleId))
+      .limit(1);
+    if (quizQuestion[0]) {
+      const passedQuiz = await db.select({ id: quizResultsTable.id })
+        .from(quizResultsTable)
+        .where(and(
+          eq(quizResultsTable.userId, dbUser.id),
+          eq(quizResultsTable.moduleId, moduleId),
+          eq(quizResultsTable.passed, true),
+        ))
+        .limit(1);
+      if (!passedQuiz[0]) {
+        res.status(409).json({
+          error: "Pass the knowledge check before marking this module complete",
+          code: "module_quiz_incomplete",
+        });
+        return;
+      }
+    }
+
+    const completedAt = new Date();
+    await updatePlanningCenterModuleCompletion(dbUser, moduleId, completedAt);
+    const saved = await db.insert(moduleCompletionsTable).values({
+      userId: dbUser.id,
+      moduleId,
+      completedAt,
+    }).onConflictDoUpdate({
+      target: [moduleCompletionsTable.userId, moduleCompletionsTable.moduleId],
+      set: { completedAt },
+    }).returning();
+
+    void checkGrowthTrackProgression(dbUser.id, moduleId);
+    res.json({
+      moduleId,
+      completedAt: saved[0].completedAt.toISOString(),
+      planningCenterSynced: true,
+    });
+  } catch (err) {
+    if (err instanceof PlanningCenterError) {
+      req.log.warn({ code: err.code }, "Planning Center module completion sync failed");
+      res.status(err.status).json({ error: err.message, code: err.code });
+      return;
+    }
+    req.log.error({ err }, "Module completion failed");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 // GET /modules/:moduleId
 router.get("/:moduleId", requireAuth, async (req, res) => {
   try {
@@ -102,6 +213,12 @@ router.get("/:moduleId", requireAuth, async (req, res) => {
       ? await db.select().from(quizResultsTable).where(and(eq(quizResultsTable.userId, userId), eq(quizResultsTable.moduleId, moduleId))).limit(1)
       : [];
     const quizResult = quizResults[0] ?? null;
+    const moduleCompletions = userId
+      ? await db.select().from(moduleCompletionsTable).where(and(
+          eq(moduleCompletionsTable.userId, userId),
+          eq(moduleCompletionsTable.moduleId, moduleId),
+        )).limit(1)
+      : [];
 
     const watchMap = new Map(watchHistory.map(w => [w.videoId, w]));
     const queueMap = new Set(queueItems.map(q => q.videoId));
@@ -118,6 +235,7 @@ router.get("/:moduleId", requireAuth, async (req, res) => {
     res.json({
       ...mod,
       createdAt: mod.createdAt.toISOString(),
+      moduleCompletedAt: moduleCompletions[0]?.completedAt.toISOString() ?? null,
       videos: videos.map(v => {
         const wh = watchMap.get(v.id);
         return {

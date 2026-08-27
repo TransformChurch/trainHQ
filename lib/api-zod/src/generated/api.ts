@@ -220,6 +220,19 @@ export const ListModulesQueryParams = zod.object({
   "trackId": zod.coerce.number().optional()
 })
 
+/**
+ * @summary Mark a module complete and sync it to Planning Center
+ */
+export const CompleteModuleBody = zod.object({
+  "moduleId": zod.number().int().positive()
+})
+
+export const CompleteModuleResponse = zod.object({
+  "moduleId": zod.number(),
+  "completedAt": zod.string(),
+  "planningCenterSynced": zod.boolean()
+})
+
 export const ListModulesResponseItem = zod.object({
   "id": zod.number(),
   "trackId": zod.number(),
@@ -262,6 +275,7 @@ export const GetModuleResponse = zod.object({
   "order": zod.number(),
   "isPublic": zod.boolean(),
   "createdAt": zod.string(),
+  "moduleCompletedAt": zod.string().nullish(),
   "videos": zod.array(zod.object({
   "id": zod.number(),
   "moduleId": zod.number(),

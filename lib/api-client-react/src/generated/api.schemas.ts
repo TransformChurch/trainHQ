@@ -162,6 +162,8 @@ export interface ModuleDetail {
   order: number;
   isPublic: boolean;
   createdAt: string;
+  /** @nullable */
+  moduleCompletedAt?: string | null;
   videos: VideoWithProgress[];
   quizResult?: QuizResult;
   quizUnlocked: boolean;
