@@ -10,7 +10,7 @@ import type { UserWithProgressRole } from './userWithProgressRole';
 
 export interface UserWithProgress {
   id: string;
-  clerkId: string;
+  externalUserId: string;
   firstName: string;
   lastName: string;
   email: string;

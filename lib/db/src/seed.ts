@@ -1,11 +1,17 @@
 /**
  * Seed script — safe to run multiple times (idempotent).
- * Usage: pnpm --filter @workspace/db run seed
+ * Usage: npm run db:seed
  */
 import { drizzle } from "drizzle-orm/node-postgres";
+import { existsSync } from "node:fs";
+import { resolve } from "node:path";
 import pg from "pg";
 import { tracksTable, modulesTable, videosTable, quizQuestionsTable, settingsTable } from "./schema";
 import { eq } from "drizzle-orm";
+
+const rootEnvFile = [resolve(process.cwd(), "../../.env"), resolve(process.cwd(), ".env")]
+  .find(existsSync);
+if (rootEnvFile) process.loadEnvFile(rootEnvFile);
 
 if (!process.env.DATABASE_URL) {
   throw new Error("DATABASE_URL must be set");

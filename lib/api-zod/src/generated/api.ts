@@ -21,7 +21,7 @@ export const HealthCheckResponse = zod.object({
  */
 export const GetMeResponse = zod.object({
   "id": zod.string(),
-  "clerkId": zod.string(),
+  "externalUserId": zod.string(),
   "firstName": zod.string(),
   "lastName": zod.string(),
   "email": zod.string(),
@@ -43,7 +43,7 @@ export const UpsertMeBody = zod.object({
 
 export const UpsertMeResponse = zod.object({
   "id": zod.string(),
-  "clerkId": zod.string(),
+  "externalUserId": zod.string(),
   "firstName": zod.string(),
   "lastName": zod.string(),
   "email": zod.string(),
@@ -64,7 +64,7 @@ export const PatchMeBody = zod.object({
 
 export const PatchMeResponse = zod.object({
   "id": zod.string(),
-  "clerkId": zod.string(),
+  "externalUserId": zod.string(),
   "firstName": zod.string(),
   "lastName": zod.string(),
   "email": zod.string(),
@@ -768,7 +768,7 @@ export const ListMyAssignmentsResponse = zod.array(ListMyAssignmentsResponseItem
  */
 export const AdminListUsersResponseItem = zod.object({
   "id": zod.string(),
-  "clerkId": zod.string(),
+  "externalUserId": zod.string(),
   "firstName": zod.string(),
   "lastName": zod.string(),
   "email": zod.string(),
@@ -802,7 +802,7 @@ export const UpdateUserRoleBody = zod.object({
 
 export const UpdateUserRoleResponse = zod.object({
   "id": zod.string(),
-  "clerkId": zod.string(),
+  "externalUserId": zod.string(),
   "firstName": zod.string(),
   "lastName": zod.string(),
   "email": zod.string(),
@@ -870,7 +870,7 @@ export const GetProgressMatrixResponse = zod.object({
   "rows": zod.array(zod.object({
   "user": zod.object({
   "id": zod.string(),
-  "clerkId": zod.string(),
+  "externalUserId": zod.string(),
   "firstName": zod.string(),
   "lastName": zod.string(),
   "email": zod.string(),

@@ -1,45 +1,52 @@
-# [Project name]
+# Transform Church Training Platform
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+This project is intentionally self-hostable with Node.js, npm, PostgreSQL, and a persistent local storage volume.
 
 ## Run & Operate
 
-- `pnpm --filter @workspace/api-server run dev` — run the API server (port 5000)
-- `pnpm run typecheck` — full typecheck across all packages
-- `pnpm run build` — typecheck + build all packages
-- `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
-- `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
-- Required env: `DATABASE_URL` — Postgres connection string
+- `npm run dev:api` — build and run the API server
+- `npm run dev:web` — run the frontend Vite development server
+- `npm run build` — typecheck and build all packages
+- `npm start` — run the built API server
+- `npm run db:migrate` — apply tracked database migrations
+- `npm run db:generate` — generate a migration from schema changes
 
 ## Stack
 
-- pnpm workspaces, Node.js 24, TypeScript 5.9
+- npm workspaces, Node.js 22.18+, TypeScript 5.9
 - API: Express 5
 - DB: PostgreSQL + Drizzle ORM
 - Validation: Zod (`zod/v4`), `drizzle-zod`
 - API codegen: Orval (from OpenAPI spec)
-- Build: esbuild (CJS bundle)
+- Build: esbuild API bundle and Vite static frontend
 
 ## Where things live
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+- `lib/api-spec/openapi.yaml` — API contract source of truth
+- `lib/db/src/schema/` — PostgreSQL schema source of truth
+- `lib/db/migrations/` — tracked database migrations
+- `artifacts/transform-church/src/index.css` — frontend theme
+- `.env.example` — all runtime configuration
 
 ## Architecture decisions
 
-_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
+- Authentication uses provider-neutral HS256 bearer JWTs, so the host site or an identity gateway can control sign-in.
+- Uploads use a persistent local filesystem volume and short-lived HMAC-signed direct upload URLs.
+- Cross-origin API access and iframe embedding require explicit origin allowlists.
 
 ## Product
 
-_Describe the high-level user-facing capabilities of this app once they exist._
+Role-based learning tracks, videos, documents, groups, growth tracks, and administration.
 
 ## User preferences
 
-_Populate as you build — explicit user instructions worth remembering across sessions._
+No project-wide user preferences recorded.
 
 ## Gotchas
 
-_Populate as you build — sharp edges, "always run X before Y" rules._
+- Rebuild the frontend after changing `PUBLIC_URL` or `VITE_*` settings.
+- Back up the PostgreSQL database and `STORAGE_ROOT` together.
 
 ## Pointers
 
-- See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details
+- See `README.md` for portable installation and embedding guidance.

@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { getAuth } from "@clerk/express";
+import { getAuth } from "../middlewares/auth";
 import { db, usersTable, groupMembersTable, groupDriveResourcesTable, groupsTable } from "@workspace/db";
 import { eq, inArray } from "drizzle-orm";
 import { requireAuth, getDbUser } from "../middlewares/requireAuth";
@@ -18,7 +18,7 @@ router.get("/me", requireAuth, async (req, res) => {
     }
     res.json({
       id: user.id,
-      clerkId: user.clerkId,
+      externalUserId: user.externalUserId,
       firstName: user.firstName,
       lastName: user.lastName,
       email: user.email,
@@ -41,35 +41,36 @@ router.put("/me", requireAuth, async (req, res) => {
       return;
     }
     const { firstName, lastName, email, phone } = parsed.data;
-    const clerkId = auth!.userId!;
+    const externalUserId = auth!.userId!;
+    const configuredAdminEmail = process.env.INITIAL_ADMIN_EMAIL?.trim().toLowerCase();
+    const configuredAdminExternalUserId = process.env.INITIAL_ADMIN_EXTERNAL_USER_ID?.trim();
 
     const serializeUser = (u: typeof usersTable.$inferSelect) => ({
-      id: u.id, clerkId: u.clerkId, firstName: u.firstName, lastName: u.lastName,
+      id: u.id, externalUserId: u.externalUserId, firstName: u.firstName, lastName: u.lastName,
       email: u.email, phone: u.phone, role: u.role, createdAt: u.createdAt.toISOString(),
     });
 
-    // 1. Found by clerkId — normal update
-    const existingByClerkId = await getDbUser(clerkId);
-    if (existingByClerkId) {
+    // 1. Found by external identity — normal update
+    const existingByExternalUserId = await getDbUser(externalUserId);
+    if (existingByExternalUserId) {
       const updated = await db
         .update(usersTable)
         .set({ firstName, lastName, email, phone: phone ?? null })
-        .where(eq(usersTable.clerkId, clerkId))
+        .where(eq(usersTable.externalUserId, externalUserId))
         .returning();
       res.json(serializeUser(updated[0]));
       return;
     }
 
-    // 2. Not found by clerkId — check by email.
-    //    This handles users whose Clerk ID changed (e.g. dev→prod migration,
-    //    or linking a second sign-in method). Re-link the account in place so
+    // 2. Not found by external identity — check by email.
+    //    This handles users whose authentication subject changed. Re-link the account in place so
     //    their role and history are preserved.
     const byEmail = await db.select().from(usersTable).where(eq(usersTable.email, email)).limit(1);
     if (byEmail[0]) {
       const updated = await db
         .update(usersTable)
         .set({
-          clerkId,
+          externalUserId,
           firstName: firstName || byEmail[0].firstName,
           lastName: lastName || byEmail[0].lastName,
           phone: phone ?? byEmail[0].phone,
@@ -80,10 +81,18 @@ router.put("/me", requireAuth, async (req, res) => {
       return;
     }
 
-    // 3. Brand-new user — insert
+    // 3. Brand-new user — insert. An operator can bootstrap exactly one admin
+    // by configuring a trusted external identity before the first sign-in.
+    const hasConfiguredAdminIdentity =
+      (configuredAdminEmail !== undefined && email.trim().toLowerCase() === configuredAdminEmail) ||
+      (configuredAdminExternalUserId !== undefined && externalUserId === configuredAdminExternalUserId);
+    const existingAdmin = hasConfiguredAdminIdentity
+      ? await db.select({ id: usersTable.id }).from(usersTable).where(eq(usersTable.role, "admin")).limit(1)
+      : [];
+    const role = hasConfiguredAdminIdentity && existingAdmin.length === 0 ? "admin" : "student";
     const inserted = await db
       .insert(usersTable)
-      .values({ id: clerkId, clerkId, firstName, lastName, email, phone: phone ?? null, role: "student" })
+      .values({ id: externalUserId, externalUserId, firstName, lastName, email, phone: phone ?? null, role })
       .returning();
     res.json(serializeUser(inserted[0]));
   } catch (err) {
@@ -96,7 +105,7 @@ router.put("/me", requireAuth, async (req, res) => {
 router.patch("/me", requireAuth, async (req, res) => {
   try {
     const auth = getAuth(req);
-    const clerkId = auth!.userId!;
+    const externalUserId = auth!.userId!;
     const { firstName, lastName, phone } = req.body as { firstName?: string; lastName?: string; phone?: string | null };
     const updates: Partial<{ firstName: string; lastName: string; phone: string | null }> = {};
     if (firstName !== undefined && typeof firstName === "string" && firstName.trim()) updates.firstName = firstName.trim();
@@ -111,7 +120,7 @@ router.patch("/me", requireAuth, async (req, res) => {
     const updated = await db
       .update(usersTable)
       .set(updates)
-      .where(eq(usersTable.clerkId, clerkId))
+      .where(eq(usersTable.externalUserId, externalUserId))
       .returning();
 
     if (!updated[0]) {
@@ -119,7 +128,7 @@ router.patch("/me", requireAuth, async (req, res) => {
       return;
     }
     const u = updated[0];
-    res.json({ id: u.id, clerkId: u.clerkId, firstName: u.firstName, lastName: u.lastName, email: u.email, phone: u.phone, role: u.role, createdAt: u.createdAt.toISOString() });
+    res.json({ id: u.id, externalUserId: u.externalUserId, firstName: u.firstName, lastName: u.lastName, email: u.email, phone: u.phone, role: u.role, createdAt: u.createdAt.toISOString() });
   } catch {
     res.status(500).json({ error: "Internal server error" });
   }

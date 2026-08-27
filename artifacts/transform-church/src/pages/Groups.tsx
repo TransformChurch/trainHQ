@@ -6,12 +6,12 @@ import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { Users, Clock, CheckCircle2, UserPlus } from "lucide-react";
 
-const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
+const BASE = import.meta.env.VITE_API_URL?.replace(/\/$/, "") ?? import.meta.env.BASE_URL.replace(/\/$/, "");
 
 async function apiFetch(path: string, opts?: RequestInit) {
+  const token = sessionStorage.getItem("auth_bearer_token");
   const res = await fetch(`${BASE}${path}`, {
-    headers: { "Content-Type": "application/json" },
-    credentials: "include",
+    headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}), ...opts?.headers },
     ...opts,
   });
   if (!res.ok) throw new Error(await res.text());

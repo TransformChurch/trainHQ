@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { getAuth } from "@clerk/express";
+import { getAuth } from "../middlewares/auth";
 import { db, videosTable, modulesTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { requireAuth, requireManagerOrAdmin } from "../middlewares/requireAuth";
@@ -34,7 +34,7 @@ router.post("/", requireManagerOrAdmin, async (req, res) => {
     }
     const inserted = await db.insert(videosTable).values({
       ...parsed.data,
-      createdByClerkId: auth!.userId!,
+      createdByExternalUserId: auth!.userId!,
     }).returning();
     const v = inserted[0];
     const mod = await db.select({ trackId: modulesTable.trackId }).from(modulesTable).where(eq(modulesTable.id, v.moduleId)).limit(1);
@@ -77,7 +77,7 @@ router.patch("/:videoId", requireManagerOrAdmin, async (req, res) => {
 
     const existing = await db.select().from(videosTable).where(eq(videosTable.id, videoId)).limit(1);
     if (!existing[0]) { res.status(404).json({ error: "Not found" }); return; }
-    if (!(await canEditContent(actor, "video", videoId, existing[0].createdByClerkId))) {
+    if (!(await canEditContent(actor, "video", videoId, existing[0].createdByExternalUserId))) {
       res.status(403).json({ error: "You don't have permission to edit this video." });
       return;
     }
@@ -117,7 +117,7 @@ router.delete("/:videoId", requireManagerOrAdmin, async (req, res) => {
     const existing = await db.select().from(videosTable).where(eq(videosTable.id, videoId)).limit(1);
     if (!existing[0]) { res.status(404).json({ error: "Not found" }); return; }
 
-    if (!(await canEditContent(actor, "video", videoId, existing[0].createdByClerkId))) {
+    if (!(await canEditContent(actor, "video", videoId, existing[0].createdByExternalUserId))) {
       res.status(403).json({ error: "You don't have permission to delete this video." });
       return;
     }

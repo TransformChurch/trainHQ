@@ -1,14 +1,13 @@
-import app from "./app";
+import { existsSync } from "node:fs";
+import { resolve } from "node:path";
 import { logger } from "./lib/logger";
 
-const rawPort = process.env["PORT"];
+const rootEnvFile = [resolve(process.cwd(), "../../.env"), resolve(process.cwd(), ".env")]
+  .find(existsSync);
+if (rootEnvFile) process.loadEnvFile(rootEnvFile);
 
-if (!rawPort) {
-  throw new Error(
-    "PORT environment variable is required but was not provided.",
-  );
-}
-
+const { default: app } = await import("./app");
+const rawPort = process.env.PORT || "3000";
 const port = Number(rawPort);
 
 if (Number.isNaN(port) || port <= 0) {

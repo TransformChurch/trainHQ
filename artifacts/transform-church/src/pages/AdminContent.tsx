@@ -12,7 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useState, useEffect, useRef, createContext, useContext } from "react";
-import { useUser } from "@clerk/react";
+import { useAuth } from "@/App";
 import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -30,7 +30,7 @@ import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { useUpload } from "@workspace/object-storage-web";
 import type { Video as VideoType, QuizQuestion } from "@workspace/api-client-react";
-import { resolveStorageUrl } from "@/lib/storageUrl";
+import { StorageImage } from "@/lib/storageUrl";
 
 type VideoSourceType = "embed" | "drive" | "upload";
 
@@ -60,10 +60,10 @@ function VideoSourcePicker({
   const [maxSizeMb, setMaxSizeMb] = useState(500);
   const [uploadEnabled, setUploadEnabled] = useState(true);
   const [driveFolderUrl, setDriveFolderUrl] = useState("");
-  const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
+  const BASE = import.meta.env.VITE_API_URL?.replace(/\/$/, "") ?? import.meta.env.BASE_URL.replace(/\/$/, "");
 
   useEffect(() => {
-    fetch(`${BASE}/api/admin/settings`, { credentials: "include" })
+    fetch(`${BASE}/api/admin/settings`, { headers: sessionStorage.getItem("auth_bearer_token") ? { Authorization: `Bearer ${sessionStorage.getItem("auth_bearer_token")}` } : {} })
       .then(r => r.json())
       .then((rows: { key: string; value: string }[]) => {
         const s = rows?.find(r => r.key === "max_video_upload_size_mb");
@@ -78,6 +78,7 @@ function VideoSourcePicker({
 
   const { uploadFile, isUploading, progress } = useUpload({
     basePath: `${BASE}/api/storage`,
+    getAuthToken: () => sessionStorage.getItem("auth_bearer_token"),
     onSuccess: (response) => {
       onUploadComplete(response.objectPath);
       onUrlChange(response.objectPath);
@@ -255,10 +256,11 @@ function FormField({ label, children }: { label: string; children: React.ReactNo
 function ImageUploadPicker({ value, onChange }: { value: string; onChange: (url: string) => void }) {
   const { toast } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
+  const BASE = import.meta.env.VITE_API_URL?.replace(/\/$/, "") ?? import.meta.env.BASE_URL.replace(/\/$/, "");
 
   const { uploadFile, isUploading, progress } = useUpload({
     basePath: `${BASE}/api/storage`,
+    getAuthToken: () => sessionStorage.getItem("auth_bearer_token"),
     onSuccess: (response) => {
       onChange(response.objectPath);
       toast({ title: "Image uploaded" });
@@ -281,7 +283,7 @@ function ImageUploadPicker({ value, onChange }: { value: string; onChange: (url:
       </Label>
       {value ? (
         <div className="relative group w-full rounded-lg overflow-hidden border border-input bg-muted/20 aspect-video">
-          <img src={resolveStorageUrl(value)} alt="Preview" className="w-full h-full object-cover" />
+          <StorageImage src={value} alt="Preview" className="w-full h-full object-cover" />
           <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
             <Button type="button" size="sm" variant="secondary" onClick={() => fileInputRef.current?.click()}>
               Change
@@ -322,11 +324,15 @@ function ImageUploadPicker({ value, onChange }: { value: string; onChange: (url:
   );
 }
 
-const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
+const BASE = import.meta.env.VITE_API_URL?.replace(/\/$/, "") ?? import.meta.env.BASE_URL.replace(/\/$/, "");
 async function apiFetch(path: string, opts?: RequestInit) {
+  const token = sessionStorage.getItem("auth_bearer_token");
   const res = await fetch(`${BASE}${path}`, {
-    headers: { "Content-Type": "application/json" },
-    credentials: "include",
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...opts?.headers,
+    },
     ...opts,
   });
   if (!res.ok) throw new Error(await res.text());
@@ -339,13 +345,13 @@ async function apiFetch(path: string, opts?: RequestInit) {
 type GrantedSets = { tracks: Set<number>; modules: Set<number>; videos: Set<number>; documents: Set<number> };
 type ContentPermsCtx = {
   isAdmin: boolean;
-  myClerkId: string | null | undefined;
+  myExternalUserId: string | null | undefined;
   grantedIds: GrantedSets;
-  canEdit: (type: "track" | "module" | "video" | "document", item: { id: number; createdByClerkId?: string | null }) => boolean;
+  canEdit: (type: "track" | "module" | "video" | "document", item: { id: number; createdByExternalUserId?: string | null }) => boolean;
 };
 const ContentPermissionsCtx = createContext<ContentPermsCtx>({
   isAdmin: true,
-  myClerkId: null,
+  myExternalUserId: null,
   grantedIds: { tracks: new Set(), modules: new Set(), videos: new Set(), documents: new Set() },
   canEdit: () => true,
 });
@@ -359,7 +365,7 @@ function ManageEditorsDialog({ contentType, contentId, contentName }: { contentT
   const [open, setOpen] = useState(false);
   const [grants, setGrants] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
-  const [selectedClerkId, setSelectedClerkId] = useState("");
+  const [selectedExternalUserId, setSelectedExternalUserId] = useState("");
   const [granting, setGranting] = useState(false);
 
   const managers = ((allUsers ?? []) as any[]).filter((u: any) => u.role === "manager");
@@ -376,14 +382,14 @@ function ManageEditorsDialog({ contentType, contentId, contentName }: { contentT
   useEffect(() => { if (open) loadGrants(); }, [open]);
 
   const handleGrant = async () => {
-    if (!selectedClerkId) return;
+    if (!selectedExternalUserId) return;
     setGranting(true);
     try {
       await apiFetch("/api/admin/content-grants", {
         method: "POST",
-        body: JSON.stringify({ contentType, contentId, granteeClerkId: selectedClerkId }),
+        body: JSON.stringify({ contentType, contentId, granteeExternalUserId: selectedExternalUserId }),
       });
-      setSelectedClerkId("");
+      setSelectedExternalUserId("");
       await loadGrants();
       toast({ title: "Editor access granted" });
     } catch { toast({ title: "Failed to grant access", variant: "destructive" }); }
@@ -432,17 +438,17 @@ function ManageEditorsDialog({ contentType, contentId, contentName }: { contentT
               <div className="border-t pt-4 space-y-3">
                 <p className="text-sm font-medium">Grant a manager edit access</p>
                 <div className="flex gap-2">
-                  <Select value={selectedClerkId} onValueChange={setSelectedClerkId}>
+                  <Select value={selectedExternalUserId} onValueChange={setSelectedExternalUserId}>
                     <SelectTrigger className="flex-1">
                       <SelectValue placeholder="Select a manager..." />
                     </SelectTrigger>
                     <SelectContent>
                       {managers.map((m: any) => (
-                        <SelectItem key={m.id} value={m.id}>{m.firstName} {m.lastName} — {m.email}</SelectItem>
+                        <SelectItem key={m.id} value={m.externalUserId}>{m.firstName} {m.lastName} — {m.email}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
-                  <Button onClick={handleGrant} disabled={!selectedClerkId || granting} size="sm">
+                  <Button onClick={handleGrant} disabled={!selectedExternalUserId || granting} size="sm">
                     {granting ? "..." : "Grant"}
                   </Button>
                 </div>
@@ -763,7 +769,7 @@ function ModuleManager({ trackId }: { trackId: number }) {
               <AccordionTrigger className="px-4 py-3 hover:no-underline">
                 <div className="flex items-center gap-2 text-left flex-1 min-w-0">
                   {mod.imageUrl ? (
-                    <img src={resolveStorageUrl(mod.imageUrl)} alt={mod.title} className="w-8 h-8 rounded object-cover shrink-0 border border-border" />
+                    <StorageImage src={mod.imageUrl} alt={mod.title} className="w-8 h-8 rounded object-cover shrink-0 border border-border" />
                   ) : (
                     <Badge variant="outline" className="text-xs shrink-0">{mod.order}</Badge>
                   )}
@@ -1208,9 +1214,9 @@ function AssignmentManager() {
 // ── Document Repository Tab ───────────────────────────────────────────────────
 
 const repoFetch = async (path: string, opts?: RequestInit): Promise<any> => {
+  const token = sessionStorage.getItem("auth_bearer_token");
   const r = await fetch(`${BASE}${path}`, {
-    headers: { "Content-Type": "application/json" },
-    credentials: "include",
+    headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}), ...opts?.headers },
     ...opts,
   });
   if (!r.ok) throw new Error(await r.text());
@@ -1465,7 +1471,7 @@ function DocumentsTab() {
     } catch (err: any) {
       const msg: string = err?.message ?? "";
       if (msg.includes("GOOGLE_API_KEY")) {
-        toast({ title: "Google API key not configured", description: "Add GOOGLE_API_KEY to Replit Secrets to enable Drive folder import.", variant: "destructive" });
+        toast({ title: "Google API key not configured", description: "Set GOOGLE_API_KEY in the server environment to enable Drive folder import.", variant: "destructive" });
       } else {
         toast({ title: msg || "Failed to import from Drive", variant: "destructive" });
       }
@@ -1797,8 +1803,8 @@ export default function AdminContent() {
   const { mutate: updateTrack } = useUpdateTrack();
   const { mutate: deleteTrack } = useDeleteTrack();
 
-  const { user } = useUser();
-  const myClerkId = user?.id ?? null;
+  const { user } = useAuth();
+  const myExternalUserId = user?.id ?? null;
   const [currentRole, setCurrentRole] = useState<string>("manager");
   const [myGrantedIds, setMyGrantedIds] = useState<GrantedSets>({
     tracks: new Set(), modules: new Set(), videos: new Set(), documents: new Set(),
@@ -1819,14 +1825,14 @@ export default function AdminContent() {
     }).catch(() => {});
   }, []);
 
-  const canEdit = (type: "track" | "module" | "video" | "document", item: { id: number; createdByClerkId?: string | null }) => {
+  const canEdit = (type: "track" | "module" | "video" | "document", item: { id: number; createdByExternalUserId?: string | null }) => {
     if (isAdmin) return true;
-    if (item.createdByClerkId && item.createdByClerkId === myClerkId) return true;
+    if (item.createdByExternalUserId && item.createdByExternalUserId === myExternalUserId) return true;
     const key = (type + "s") as keyof GrantedSets;
     return myGrantedIds[key].has(item.id);
   };
 
-  const ctxValue: ContentPermsCtx = { isAdmin, myClerkId, grantedIds: myGrantedIds, canEdit };
+  const ctxValue: ContentPermsCtx = { isAdmin, myExternalUserId, grantedIds: myGrantedIds, canEdit };
 
   const [addTrackOpen, setAddTrackOpen] = useState(false);
   const [trackName, setTrackName] = useState("");
@@ -1928,7 +1934,7 @@ export default function AdminContent() {
                   <div className="flex items-start justify-between gap-4">
                     <div className="flex items-start gap-4 min-w-0">
                       {track.imageUrl && (
-                        <img src={resolveStorageUrl(track.imageUrl)} alt={track.name} className="w-14 h-14 rounded-lg object-cover shrink-0 border border-border" />
+                        <StorageImage src={track.imageUrl} alt={track.name} className="w-14 h-14 rounded-lg object-cover shrink-0 border border-border" />
                       )}
                       <div className="min-w-0">
                         <CardTitle className="text-xl">{track.name}</CardTitle>

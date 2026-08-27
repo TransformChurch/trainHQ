@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { getAuth } from "@clerk/express";
+import { getAuth } from "../middlewares/auth";
 import { db, contentEditorGrantsTable, usersTable } from "@workspace/db";
 import { and, eq, inArray } from "drizzle-orm";
 import { requireAdmin, requireManagerOrAdmin } from "../middlewares/requireAuth";
@@ -20,7 +20,7 @@ router.get("/mine", requireManagerOrAdmin, async (req, res) => {
     const grants = await db
       .select({ contentType: contentEditorGrantsTable.contentType, contentId: contentEditorGrantsTable.contentId })
       .from(contentEditorGrantsTable)
-      .where(eq(contentEditorGrantsTable.granteeClerkId, dbUser.clerkId));
+      .where(eq(contentEditorGrantsTable.granteeExternalUserId, dbUser.externalUserId));
 
     const result: Record<string, number[]> = { tracks: [], modules: [], videos: [], documents: [] };
     for (const g of grants) {
@@ -53,18 +53,18 @@ router.get("/", requireAdmin, async (req, res) => {
       ));
 
     // Enrich with user names
-    const clerkIds = grants.map(g => g.granteeClerkId);
-    const users = clerkIds.length > 0
-      ? await db.select({ clerkId: usersTable.clerkId, firstName: usersTable.firstName, lastName: usersTable.lastName, email: usersTable.email })
+    const externalUserIds = grants.map(g => g.granteeExternalUserId);
+    const users = externalUserIds.length > 0
+      ? await db.select({ externalUserId: usersTable.externalUserId, firstName: usersTable.firstName, lastName: usersTable.lastName, email: usersTable.email })
           .from(usersTable)
-          .where(inArray(usersTable.clerkId, clerkIds))
+          .where(inArray(usersTable.externalUserId, externalUserIds))
       : [];
-    const userMap = new Map(users.map(u => [u.clerkId, u]));
+    const userMap = new Map(users.map(u => [u.externalUserId, u]));
 
     res.json(grants.map(g => ({
       ...g,
       grantedAt: g.grantedAt.toISOString(),
-      grantee: userMap.get(g.granteeClerkId) ?? null,
+      grantee: userMap.get(g.granteeExternalUserId) ?? null,
     })));
   } catch {
     res.status(500).json({ error: "Internal server error" });
@@ -76,13 +76,13 @@ router.get("/", requireAdmin, async (req, res) => {
 
 router.post("/", requireAdmin, async (req, res) => {
   const auth = getAuth(req);
-  const { contentType, contentId, granteeClerkId } = req.body as {
+  const { contentType, contentId, granteeExternalUserId } = req.body as {
     contentType?: string;
     contentId?: number;
-    granteeClerkId?: string;
+    granteeExternalUserId?: string;
   };
-  if (!contentType || !contentId || !granteeClerkId) {
-    res.status(400).json({ error: "contentType, contentId, and granteeClerkId are required" });
+  if (!contentType || !contentId || !granteeExternalUserId) {
+    res.status(400).json({ error: "contentType, contentId, and granteeExternalUserId are required" });
     return;
   }
   if (!["track", "module", "video", "document"].includes(contentType)) {
@@ -92,7 +92,7 @@ router.post("/", requireAdmin, async (req, res) => {
   try {
     const inserted = await db
       .insert(contentEditorGrantsTable)
-      .values({ contentType, contentId, granteeClerkId, grantedByClerkId: auth!.userId! })
+      .values({ contentType, contentId, granteeExternalUserId, grantedByExternalUserId: auth!.userId! })
       .onConflictDoNothing()
       .returning();
     res.status(201).json({ ...inserted[0], grantedAt: inserted[0]?.grantedAt.toISOString() });

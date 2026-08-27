@@ -10,7 +10,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { getGetMeQueryKey } from "@workspace/api-client-react";
 import { Badge } from "@/components/ui/badge";
 
-const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
+const BASE = import.meta.env.VITE_API_URL?.replace(/\/$/, "") ?? import.meta.env.BASE_URL.replace(/\/$/, "");
 
 export default function Profile() {
   const { data: user, isLoading } = useGetMe();
@@ -37,8 +37,10 @@ export default function Profile() {
     try {
       const res = await fetch(`${BASE}/api/users/me`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+          ...(sessionStorage.getItem("auth_bearer_token") ? { Authorization: `Bearer ${sessionStorage.getItem("auth_bearer_token")}` } : {}),
+        },
         body: JSON.stringify({ firstName, lastName, phone: phone || null }),
       });
       if (!res.ok) throw new Error("Failed to update profile");

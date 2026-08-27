@@ -6,7 +6,7 @@ export const roleEnum = pgEnum("role", ["student", "manager", "admin"]);
 
 export const usersTable = pgTable("users", {
   id: text("id").primaryKey(),
-  clerkId: text("clerk_id").notNull().unique(),
+  externalUserId: text("external_user_id").notNull().unique(),
   firstName: text("first_name").notNull(),
   lastName: text("last_name").notNull(),
   email: text("email").notNull().unique(),

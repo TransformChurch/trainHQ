@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { getAuth } from "@clerk/express";
+import { getAuth } from "../middlewares/auth";
 import { db, modulesTable, videosTable, watchHistoryTable, quizResultsTable, queueTable, quizQuestionsTable, assignmentsTable } from "@workspace/db";
 import { eq, and, sql, inArray } from "drizzle-orm";
 import { requireAuth, requireManagerOrAdmin, getDbUser } from "../middlewares/requireAuth";
@@ -56,7 +56,7 @@ router.post("/", requireManagerOrAdmin, async (req, res) => {
       res.status(400).json({ error: "Invalid input" });
       return;
     }
-    const inserted = await db.insert(modulesTable).values({ ...parsed.data, createdByClerkId: auth!.userId! }).returning();
+    const inserted = await db.insert(modulesTable).values({ ...parsed.data, createdByExternalUserId: auth!.userId! }).returning();
     const m = inserted[0];
     logContentChange({
       actorId: actor.id,
@@ -148,7 +148,7 @@ router.patch("/:moduleId", requireManagerOrAdmin, async (req, res) => {
 
     const existing = await db.select().from(modulesTable).where(eq(modulesTable.id, moduleId)).limit(1);
     if (!existing[0]) { res.status(404).json({ error: "Not found" }); return; }
-    if (!(await canEditContent(actor, "module", moduleId, existing[0].createdByClerkId))) {
+    if (!(await canEditContent(actor, "module", moduleId, existing[0].createdByExternalUserId))) {
       res.status(403).json({ error: "You don't have permission to edit this module." });
       return;
     }
@@ -186,7 +186,7 @@ router.delete("/:moduleId", requireManagerOrAdmin, async (req, res) => {
     const moduleId = parseInt(req.params.moduleId as string);
     const existing = await db.select().from(modulesTable).where(eq(modulesTable.id, moduleId)).limit(1);
     if (!existing[0]) { res.status(404).json({ error: "Not found" }); return; }
-    if (!(await canEditContent(actor, "module", moduleId, existing[0].createdByClerkId))) {
+    if (!(await canEditContent(actor, "module", moduleId, existing[0].createdByExternalUserId))) {
       res.status(403).json({ error: "You don't have permission to delete this module." });
       return;
     }

@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { getAuth } from "@clerk/express";
+import { getAuth } from "../middlewares/auth";
 import { db, tracksTable, modulesTable, assignmentsTable, contentEditorGrantsTable } from "@workspace/db";
 import { eq, inArray, and, or } from "drizzle-orm";
 import { requireAuth, requireManagerOrAdmin, getDbUser } from "../middlewares/requireAuth";
@@ -23,7 +23,7 @@ router.get("/", requireAuth, async (req, res) => {
         .from(contentEditorGrantsTable)
         .where(and(
           eq(contentEditorGrantsTable.contentType, "track"),
-          eq(contentEditorGrantsTable.granteeClerkId, dbUser.clerkId),
+          eq(contentEditorGrantsTable.granteeExternalUserId, dbUser.externalUserId),
         ));
       const grantedIds = grants.map(g => g.contentId);
 
@@ -31,10 +31,10 @@ router.get("/", requireAuth, async (req, res) => {
         .where(
           grantedIds.length > 0
             ? or(
-                eq(tracksTable.createdByClerkId, dbUser.clerkId),
+                eq(tracksTable.createdByExternalUserId, dbUser.externalUserId),
                 inArray(tracksTable.id, grantedIds),
               )
-            : eq(tracksTable.createdByClerkId, dbUser.clerkId),
+            : eq(tracksTable.createdByExternalUserId, dbUser.externalUserId),
         )
         .orderBy(tracksTable.name);
     } else {
@@ -59,7 +59,7 @@ router.post("/", requireManagerOrAdmin, async (req, res) => {
     }
     const inserted = await db.insert(tracksTable).values({
       ...parsed.data,
-      createdByClerkId: auth!.userId!,
+      createdByExternalUserId: auth!.userId!,
     }).returning();
     const t = inserted[0];
     logContentChange({
@@ -122,7 +122,7 @@ router.patch("/:trackId", requireManagerOrAdmin, async (req, res) => {
     const existing = await db.select().from(tracksTable).where(eq(tracksTable.id, trackId)).limit(1);
     if (!existing[0]) { res.status(404).json({ error: "Not found" }); return; }
 
-    if (!(await canEditContent(actor, "track", trackId, existing[0].createdByClerkId))) {
+    if (!(await canEditContent(actor, "track", trackId, existing[0].createdByExternalUserId))) {
       res.status(403).json({ error: "You don't have permission to edit this track." });
       return;
     }
@@ -157,7 +157,7 @@ router.delete("/:trackId", requireManagerOrAdmin, async (req, res) => {
     const existing = await db.select().from(tracksTable).where(eq(tracksTable.id, trackId)).limit(1);
     if (!existing[0]) { res.status(404).json({ error: "Not found" }); return; }
 
-    if (!(await canEditContent(actor, "track", trackId, existing[0].createdByClerkId))) {
+    if (!(await canEditContent(actor, "track", trackId, existing[0].createdByExternalUserId))) {
       res.status(403).json({ error: "You don't have permission to delete this track." });
       return;
     }

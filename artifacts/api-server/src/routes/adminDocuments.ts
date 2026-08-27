@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { getAuth } from "@clerk/express";
+import { getAuth } from "../middlewares/auth";
 import {
   db,
   documentsTable,
@@ -65,7 +65,7 @@ router.get("/", requireManagerOrAdmin, async (req, res) => {
 router.post("/import-folder", requireManagerOrAdmin, async (req, res) => {
   const apiKey = process.env.GOOGLE_API_KEY;
   if (!apiKey) {
-    res.status(503).json({ error: "GOOGLE_API_KEY is not configured. Add it in Replit Secrets to enable Drive folder import." });
+    res.status(503).json({ error: "GOOGLE_API_KEY is not configured. Set it in the server environment to enable Drive folder import." });
     return;
   }
 
@@ -131,7 +131,7 @@ router.post("/import-folder", requireManagerOrAdmin, async (req, res) => {
       driveUrl: f.webViewLink,
       resourceType: "file" as const,
       parentId: parentId ?? null,
-      createdByClerkId: auth!.userId!,
+      createdByExternalUserId: auth!.userId!,
     }));
 
     const inserted = await db.insert(documentsTable).values(toInsert).returning();
@@ -166,7 +166,7 @@ router.post("/", requireManagerOrAdmin, async (req, res) => {
       driveUrl: driveUrl?.trim() || null,
       resourceType: type,
       parentId: parentId ?? null,
-      createdByClerkId: auth!.userId!,
+      createdByExternalUserId: auth!.userId!,
     }).returning();
     res.status(201).json({ ...inserted[0], createdAt: inserted[0].createdAt.toISOString(), accessCount: 0 });
   } catch {
@@ -183,7 +183,7 @@ router.patch("/:id", requireManagerOrAdmin, async (req, res) => {
 
     const existing = await db.select().from(documentsTable).where(eq(documentsTable.id, id)).limit(1);
     if (!existing[0]) { res.status(404).json({ error: "Not found" }); return; }
-    if (!(await canEditContent(actor, "document", id, existing[0].createdByClerkId))) {
+    if (!(await canEditContent(actor, "document", id, existing[0].createdByExternalUserId))) {
       res.status(403).json({ error: "You don't have permission to edit this document." });
       return;
     }
@@ -223,7 +223,7 @@ router.delete("/:id", requireManagerOrAdmin, async (req, res) => {
 
     const existing = await db.select().from(documentsTable).where(eq(documentsTable.id, id)).limit(1);
     if (!existing[0]) { res.status(404).json({ error: "Not found" }); return; }
-    if (!(await canEditContent(actor, "document", id, existing[0].createdByClerkId))) {
+    if (!(await canEditContent(actor, "document", id, existing[0].createdByExternalUserId))) {
       res.status(403).json({ error: "You don't have permission to delete this document." });
       return;
     }
@@ -302,7 +302,7 @@ router.post("/:id/access", requireManagerOrAdmin, async (req, res) => {
       documentId: id,
       principalType: principalType as "group" | "user",
       principalId,
-      grantedByClerkId: auth!.userId!,
+      grantedByExternalUserId: auth!.userId!,
     }).returning();
     res.status(201).json({ ...inserted[0], grantedAt: inserted[0].grantedAt.toISOString() });
   } catch {

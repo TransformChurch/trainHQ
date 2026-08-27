@@ -15,7 +15,7 @@ import {
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { useUpload } from "@workspace/object-storage-web";
-import { resolveStorageUrl } from "@/lib/storageUrl";
+import { StorageImage } from "@/lib/storageUrl";
 import {
   Plus, Trash2, ChevronUp, ChevronDown, Users, ListOrdered,
   Pencil, TrendingUp, CheckCircle2, Clock, UserMinus,
@@ -70,13 +70,13 @@ type GroupOption = {
 
 // ─── API helper ────────────────────────────────────────────────────────────
 
-const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
+const BASE = import.meta.env.VITE_API_URL?.replace(/\/$/, "") ?? import.meta.env.BASE_URL.replace(/\/$/, "");
 
 async function apiFetch<T = unknown>(path: string, opts?: RequestInit): Promise<T> {
+  const token = sessionStorage.getItem("auth_bearer_token");
   const res = await fetch(`${BASE}${path}`, {
     ...opts,
-    credentials: "include",
-    headers: { "Content-Type": "application/json", ...(opts?.headers ?? {}) },
+    headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(opts?.headers ?? {}) },
   });
   if (!res.ok) throw new Error(await res.text());
   if (res.status === 204) return null as T;
@@ -91,6 +91,7 @@ function ImageUploadPicker({ value, onChange }: { value: string; onChange: (url:
 
   const { uploadFile, isUploading, progress } = useUpload({
     basePath: `${BASE}/api/storage`,
+    getAuthToken: () => sessionStorage.getItem("auth_bearer_token"),
     onSuccess: (response) => {
       onChange(response.objectPath);
       toast({ title: "Image uploaded" });
@@ -106,7 +107,7 @@ function ImageUploadPicker({ value, onChange }: { value: string; onChange: (url:
       <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadFile(f); }} />
       {value ? (
         <div className="relative group w-full rounded-lg overflow-hidden border border-input bg-muted/20 aspect-video">
-          <img src={resolveStorageUrl(value)} alt="Preview" className="w-full h-full object-cover" />
+          <StorageImage src={value} alt="Preview" className="w-full h-full object-cover" />
           <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
             <Button type="button" size="sm" variant="secondary" onClick={() => fileInputRef.current?.click()}>Change</Button>
             <Button type="button" size="sm" variant="destructive" onClick={() => onChange("")}>Remove</Button>
@@ -633,7 +634,7 @@ function GrowthTrackCard({
     <Card className="flex flex-col">
       {track.imageUrl && (
         <div className="aspect-video w-full overflow-hidden rounded-t-lg">
-          <img src={resolveStorageUrl(track.imageUrl)} alt={track.name} className="w-full h-full object-cover" />
+          <StorageImage src={track.imageUrl} alt={track.name} className="w-full h-full object-cover" />
         </div>
       )}
       <CardHeader className="pb-2">

@@ -5,8 +5,7 @@ import { Button } from "@/components/ui/button";
 import { ArrowLeft, Clock, BookmarkPlus, BookmarkMinus } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
-
-const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
+import { useStorageUrl } from "@/lib/storageUrl";
 
 export default function WatchVideo() {
   const { videoId: videoIdStr } = useParams();
@@ -23,6 +22,7 @@ export default function WatchVideo() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const videoRef = useRef<HTMLVideoElement>(null);
+  const uploadedVideoUrl = useStorageUrl(video?.videoType === "upload" ? video.url : null);
   
   const inQueue = queue?.some(q => q.videoId === videoId);
 
@@ -67,7 +67,7 @@ export default function WatchVideo() {
       return (
         <video
           ref={videoRef}
-          src={`${BASE}/api/storage${video.url}`}
+          src={uploadedVideoUrl}
           className="w-full h-full bg-black"
           controls
           controlsList="nodownload"

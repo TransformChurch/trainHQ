@@ -984,7 +984,7 @@ components:
       properties:
         id:
           type: string
-        clerkId:
+        externalUserId:
           type: string
         firstName:
           type: string
@@ -999,7 +999,7 @@ components:
           enum: [student, manager, admin]
         createdAt:
           type: string
-      required: [id, clerkId, firstName, lastName, email, role, createdAt]
+      required: [id, externalUserId, firstName, lastName, email, role, createdAt]
 
     UserInput:
       type: object
@@ -1445,7 +1445,7 @@ components:
       properties:
         id:
           type: string
-        clerkId:
+        externalUserId:
           type: string
         firstName:
           type: string
@@ -1466,7 +1466,7 @@ components:
             $ref: "#/components/schemas/QuizResult"
         assignmentCount:
           type: integer
-      required: [id, clerkId, firstName, lastName, email, role, createdAt, quizResults, assignmentCount]
+      required: [id, externalUserId, firstName, lastName, email, role, createdAt, quizResults, assignmentCount]
 
     ProgressMatrix:
       type: object

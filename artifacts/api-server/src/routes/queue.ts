@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { getAuth } from "@clerk/express";
+import { getAuth } from "../middlewares/auth";
 import { db, queueTable, videosTable } from "@workspace/db";
 import { eq, and, desc } from "drizzle-orm";
 import { requireAuth, getDbUser } from "../middlewares/requireAuth";

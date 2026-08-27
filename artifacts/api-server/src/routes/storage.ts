@@ -4,14 +4,14 @@ import {
   RequestUploadUrlBody,
   RequestUploadUrlResponse,
 } from "@workspace/api-zod";
-import { ObjectStorageService, ObjectNotFoundError } from "../lib/objectStorage";
-import { ObjectPermission } from "../lib/objectAcl";
+import { ObjectStorageService, ObjectNotFoundError, UploadValidationError } from "../lib/objectStorage";
 import { db, settingsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { requireManagerOrAdmin, requireAuth } from "../middlewares/requireAuth";
 
 const router: IRouter = Router();
 const objectStorageService = new ObjectStorageService();
+const DEFAULT_MAX_IMAGE_UPLOAD_BYTES = 20 * 1024 * 1024;
 
 /**
  * POST /storage/uploads/request-url
@@ -31,9 +31,15 @@ router.post("/storage/uploads/request-url", requireManagerOrAdmin, async (req: R
   try {
     const { name, size, contentType } = parsed.data;
 
-    const isVideoUpload = contentType.startsWith("video/");
+    const normalizedContentType = contentType.toLowerCase().split(";", 1)[0];
+    const isVideoUpload = normalizedContentType.startsWith("video/");
+    const isImageUpload = normalizedContentType.startsWith("image/");
+    if (!isVideoUpload && !isImageUpload) {
+      res.status(415).json({ error: "Only image and video uploads are supported" });
+      return;
+    }
 
-    // Video-specific checks (images bypass these)
+    // Media-specific checks are repeated by the signed upload endpoint.
     if (isVideoUpload) {
       const enabledRows = await db.select().from(settingsTable).where(eq(settingsTable.key, "video_upload_enabled")).limit(1);
       const uploadEnabled = enabledRows[0]?.value !== "false";
@@ -50,9 +56,15 @@ router.post("/storage/uploads/request-url", requireManagerOrAdmin, async (req: R
         res.status(413).json({ error: `File size exceeds the maximum allowed size of ${maxMb} MB` });
         return;
       }
+    } else {
+      const maxImageBytes = getMaxImageUploadBytes();
+      if (size > maxImageBytes) {
+        res.status(413).json({ error: `Image exceeds the maximum allowed size of ${Math.floor(maxImageBytes / 1024 / 1024)} MB` });
+        return;
+      }
     }
 
-    const uploadURL = await objectStorageService.getObjectEntityUploadURL();
+    const uploadURL = await objectStorageService.getObjectEntityUploadURL(normalizedContentType, size);
     const objectPath = objectStorageService.normalizeObjectEntityPath(uploadURL);
 
     res.json(
@@ -67,6 +79,39 @@ router.post("/storage/uploads/request-url", requireManagerOrAdmin, async (req: R
     res.status(500).json({ error: "Failed to generate upload URL" });
   }
 });
+
+/**
+ * PUT /storage/uploads/*
+ *
+ * This route is intentionally unauthenticated: possession of its short-lived,
+ * HMAC-signed URL authorizes one upload to the generated object name.
+ */
+router.put("/storage/uploads/*objectName", async (req: Request, res: Response) => {
+  try {
+    const raw = req.params.objectName;
+    const objectName = Array.isArray(raw) ? raw.join("/") : raw;
+    await objectStorageService.uploadObject(
+      objectName,
+      typeof req.query.expires === "string" ? req.query.expires : undefined,
+      typeof req.query.token === "string" ? req.query.token : undefined,
+      req.get("content-type") || undefined,
+      typeof req.query.size === "string" ? req.query.size : undefined,
+      typeof req.query.contentType === "string" ? req.query.contentType : undefined,
+      req,
+    );
+    res.status(201).end();
+  } catch (error) {
+    req.log.warn({ err: error }, "Rejected object upload");
+    res.status(error instanceof UploadValidationError ? 400 : 403)
+      .json({ error: error instanceof UploadValidationError ? error.message : "Invalid, expired, or already-used upload URL" });
+  }
+});
+
+function getMaxImageUploadBytes(): number {
+  const configuredMb = Number.parseInt(process.env.MAX_IMAGE_UPLOAD_SIZE_MB || "", 10);
+  const maxMb = Number.isSafeInteger(configuredMb) && configuredMb > 0 ? configuredMb : 20;
+  return maxMb * 1024 * 1024;
+}
 
 /**
  * GET /storage/public-objects/*
@@ -97,6 +142,10 @@ router.get("/storage/public-objects/*filePath", async (req: Request, res: Respon
       res.end();
     }
   } catch (error) {
+    if (error instanceof ObjectNotFoundError) {
+      res.status(404).json({ error: "File not found" });
+      return;
+    }
     req.log.error({ err: error }, "Error serving public object");
     res.status(500).json({ error: "Failed to serve public object" });
   }

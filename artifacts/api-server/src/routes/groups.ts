@@ -16,7 +16,7 @@ import {
 } from "@workspace/db";
 import { eq, and, inArray } from "drizzle-orm";
 import { requireManagerOrAdmin, requireAdmin, requireAuth } from "../middlewares/requireAuth";
-import { getAuth } from "@clerk/express";
+import { getAuth } from "../middlewares/auth";
 
 const router = Router();
 
@@ -139,7 +139,7 @@ router.get("/available", requireAuth, async (req, res) => {
     const dbUser = await db
       .select()
       .from(usersTable)
-      .where(eq(usersTable.clerkId, auth.userId))
+      .where(eq(usersTable.externalUserId, auth.userId))
       .limit(1);
     if (!dbUser[0]) {
       res.status(401).json({ error: "Unauthorized" });
@@ -618,7 +618,7 @@ router.post("/:groupId/join-requests", requireAuth, async (req, res) => {
     const dbUserRows = await db
       .select()
       .from(usersTable)
-      .where(eq(usersTable.clerkId, auth.userId))
+      .where(eq(usersTable.externalUserId, auth.userId))
       .limit(1);
     if (!dbUserRows[0]) {
       res.status(401).json({ error: "Unauthorized" });

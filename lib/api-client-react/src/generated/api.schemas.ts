@@ -20,7 +20,7 @@ export const UserRole = {
 
 export interface User {
   id: string;
-  clerkId: string;
+  externalUserId: string;
   firstName: string;
   lastName: string;
   email: string;
@@ -338,7 +338,7 @@ export const UserWithProgressRole = {
 
 export interface UserWithProgress {
   id: string;
-  clerkId: string;
+  externalUserId: string;
   firstName: string;
   lastName: string;
   email: string;

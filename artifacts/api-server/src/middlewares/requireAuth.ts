@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from "express";
-import { getAuth } from "@clerk/express";
+import { getAuth } from "./auth";
 import { db, usersTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 
@@ -18,7 +18,7 @@ export async function requireAdmin(req: Request, res: Response, next: NextFuncti
     res.status(401).json({ error: "Unauthorized" });
     return;
   }
-  const user = await db.select().from(usersTable).where(eq(usersTable.clerkId, auth.userId)).limit(1);
+  const user = await db.select().from(usersTable).where(eq(usersTable.externalUserId, auth.userId)).limit(1);
   if (!user[0] || user[0].role !== "admin") {
     res.status(403).json({ error: "Forbidden" });
     return;
@@ -33,7 +33,7 @@ export async function requireManagerOrAdmin(req: Request, res: Response, next: N
     res.status(401).json({ error: "Unauthorized" });
     return;
   }
-  const user = await db.select().from(usersTable).where(eq(usersTable.clerkId, auth.userId)).limit(1);
+  const user = await db.select().from(usersTable).where(eq(usersTable.externalUserId, auth.userId)).limit(1);
   if (!user[0] || (user[0].role !== "admin" && user[0].role !== "manager")) {
     res.status(403).json({ error: "Forbidden" });
     return;
@@ -42,7 +42,7 @@ export async function requireManagerOrAdmin(req: Request, res: Response, next: N
   next();
 }
 
-export async function getDbUser(clerkId: string) {
-  const users = await db.select().from(usersTable).where(eq(usersTable.clerkId, clerkId)).limit(1);
+export async function getDbUser(externalUserId: string) {
+  const users = await db.select().from(usersTable).where(eq(usersTable.externalUserId, externalUserId)).limit(1);
   return users[0] ?? null;
 }

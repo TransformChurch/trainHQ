@@ -15,10 +15,10 @@ paths = [ "/" ]
 localPort = 25632
 
 [services.development]
-run = "pnpm --filter @workspace/transform-church run dev"
+run = "npm run dev --workspace=@workspace/transform-church"
 
 [services.production]
-build = [ "pnpm", "--filter", "@workspace/transform-church", "run", "build" ]
+build = [ "npm", "--workspace=@workspace/transform-church", "run", "build" ]
 publicDir = "artifacts/transform-church/dist/public"
 serve = "static"
 

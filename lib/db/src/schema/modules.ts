@@ -11,7 +11,7 @@ export const modulesTable = pgTable("modules", {
   imageUrl: text("image_url"),
   order: integer("order").notNull().default(0),
   isPublic: boolean("is_public").notNull().default(true),
-  createdByClerkId: text("created_by_clerk_id"),
+  createdByExternalUserId: text("created_by_external_user_id"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 

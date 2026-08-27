@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { getAuth } from "@clerk/express";
+import { getAuth } from "../middlewares/auth";
 import { db, usersTable, assignmentsTable, modulesTable, quizResultsTable, groupMembersTable, watchHistoryTable, videosTable, settingsTable, contentAuditLogTable } from "@workspace/db";
 import { eq, and, inArray, desc, isNull } from "drizzle-orm";
 import { requireAdmin, requireManagerOrAdmin, getDbUser } from "../middlewares/requireAuth";
@@ -13,7 +13,7 @@ const router = Router();
 // Returns the current authenticated manager/admin's profile and role.
 router.get("/me", requireManagerOrAdmin, (req, res) => {
   const u = res.locals.dbUser;
-  res.json({ id: u.id, clerkId: u.clerkId, role: u.role, firstName: u.firstName, lastName: u.lastName });
+  res.json({ id: u.id, externalUserId: u.externalUserId, role: u.role, firstName: u.firstName, lastName: u.lastName });
 });
 
 async function sendAssignmentEmail(
@@ -73,7 +73,7 @@ router.get("/users", requireManagerOrAdmin, async (req, res) => {
 
     res.json(users.map(u => ({
       id: u.id,
-      clerkId: u.clerkId,
+      externalUserId: u.externalUserId,
       firstName: u.firstName,
       lastName: u.lastName,
       email: u.email,
@@ -106,7 +106,7 @@ router.patch("/users/:userId/role", requireAdmin, async (req, res) => {
       return;
     }
     const u = updated[0];
-    res.json({ id: u.id, clerkId: u.clerkId, firstName: u.firstName, lastName: u.lastName, email: u.email, phone: u.phone, role: u.role, createdAt: u.createdAt.toISOString() });
+    res.json({ id: u.id, externalUserId: u.externalUserId, firstName: u.firstName, lastName: u.lastName, email: u.email, phone: u.phone, role: u.role, createdAt: u.createdAt.toISOString() });
   } catch {
     res.status(500).json({ error: "Internal server error" });
   }
@@ -265,7 +265,7 @@ router.get("/progress-matrix", requireManagerOrAdmin, async (req, res) => {
     const rows = users.map(user => ({
       user: {
         id: user.id,
-        clerkId: user.clerkId,
+        externalUserId: user.externalUserId,
         firstName: user.firstName,
         lastName: user.lastName,
         email: user.email,

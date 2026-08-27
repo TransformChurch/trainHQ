@@ -3,7 +3,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { FileText, FolderOpen, ExternalLink, X, Lock, AlertTriangle } from "lucide-react";
 
-const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
+const BASE = import.meta.env.VITE_API_URL?.replace(/\/$/, "") ?? import.meta.env.BASE_URL.replace(/\/$/, "");
 
 type RepoDoc = {
   id: number;
@@ -134,7 +134,11 @@ export default function Documents() {
   const [preview, setPreview] = useState<RepoDoc | null>(null);
 
   useEffect(() => {
-    fetch(`${BASE}/api/documents`, { credentials: "include" })
+    fetch(`${BASE}/api/documents`, {
+      headers: sessionStorage.getItem("auth_bearer_token")
+        ? { Authorization: `Bearer ${sessionStorage.getItem("auth_bearer_token")}` }
+        : {},
+    })
       .then(r => r.ok ? r.json() : Promise.reject(r.statusText))
       .then(setAllDocs)
       .catch(() => setError("Failed to load documents"))

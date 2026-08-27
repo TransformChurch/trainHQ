@@ -1,7 +1,7 @@
 import { Link, useLocation } from "wouter";
 import { useGetMe } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
-import { useClerk } from "@clerk/react";
+import { useAuth } from "@/App";
 import { BookOpen, LayoutDashboard, Settings, Video, ShieldCheck, LogOut, Menu, UserCircle, Users, TrendingUp, UsersRound, FileText } from "lucide-react";
 import wordmark from "@assets/TC_Black_Wordmark_1782833324395.png";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
@@ -9,7 +9,7 @@ import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 export function Sidebar() {
   const [location] = useLocation();
   const { data: user } = useGetMe();
-  const { signOut } = useClerk();
+  const { signOut } = useAuth();
   const basePath = import.meta.env.BASE_URL.replace(/\/$/, "");
 
   const isAdmin = user?.role === "admin";
@@ -39,7 +39,8 @@ export function Sidebar() {
   ];
 
   const handleSignOut = () => {
-    signOut({ redirectUrl: basePath || "/" });
+    signOut();
+    window.location.assign(basePath || "/");
   };
 
   const NavContent = () => (

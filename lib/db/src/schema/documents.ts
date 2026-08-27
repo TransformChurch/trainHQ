@@ -11,7 +11,7 @@ export const documentsTable = pgTable("documents", {
   resourceType: docResourceTypeEnum("resource_type").notNull().default("file"),
   parentId: integer("parent_id").references((): any => documentsTable.id, { onDelete: "cascade" }),
   sortOrder: smallint("sort_order").notNull().default(0),
-  createdByClerkId: text("created_by_clerk_id"),
+  createdByExternalUserId: text("created_by_external_user_id"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
@@ -20,7 +20,7 @@ export const documentAccessTable = pgTable("document_access", {
   documentId: integer("document_id").notNull().references(() => documentsTable.id, { onDelete: "cascade" }),
   principalType: docAccessPrincipalEnum("principal_type").notNull(),
   principalId: text("principal_id").notNull(),
-  grantedByClerkId: text("granted_by_clerk_id"),
+  grantedByExternalUserId: text("granted_by_external_user_id"),
   grantedAt: timestamp("granted_at").notNull().defaultNow(),
 });
 

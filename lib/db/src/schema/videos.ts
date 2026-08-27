@@ -13,7 +13,7 @@ export const videosTable = pgTable("videos", {
   durationSeconds: integer("duration_seconds"),
   order: integer("order").notNull().default(0),
   videoType: text("video_type").notNull().default("embed"),
-  createdByClerkId: text("created_by_clerk_id"),
+  createdByExternalUserId: text("created_by_external_user_id"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
