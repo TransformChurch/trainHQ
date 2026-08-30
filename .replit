@@ -21,4 +21,9 @@ router = "application"
 deploymentTarget = "autoscale"
 
 [nix]
+
+[userenv]
+
+[userenv.shared]
+PCO_REDIRECT_URI = "https://ab094c80-114d-44dd-b12c-b69b2172c9d7-00-h5z4q4nags9z.janeway.replit.dev/api/auth/planning-center/callback"
 # This project uses the standard npm scripts documented in README.md.
