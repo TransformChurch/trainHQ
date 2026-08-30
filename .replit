@@ -19,4 +19,6 @@ externalPort = 3002
 [deployment]
 router = "application"
 deploymentTarget = "autoscale"
+
+[nix]
 # This project uses the standard npm scripts documented in README.md.
