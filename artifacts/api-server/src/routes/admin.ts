@@ -6,6 +6,7 @@ import { requireAdmin, requireManagerOrAdmin, getDbUser } from "../middlewares/r
 import { UpdateUserRoleBody } from "@workspace/api-zod";
 import adminDocumentsRouter from "./adminDocuments";
 import contentGrantsRouter from "./contentGrants";
+import { syncPlanningCenterModuleAssignment } from "../lib/planningCenter";
 
 const router = Router();
 
@@ -171,6 +172,7 @@ router.post("/assignments", requireManagerOrAdmin, async (req, res) => {
         .where(and(eq(assignmentsTable.userId, userId), eq(assignmentsTable.moduleId, moduleId)))
         .limit(1);
 
+      let a;
       if (existing[0]) {
         const updateValues: Partial<typeof assignmentsTable.$inferInsert & { seenAt: Date | null; assignedAt: Date }> = {
           assignedBy: actor.id,
@@ -183,28 +185,29 @@ router.post("/assignments", requireManagerOrAdmin, async (req, res) => {
           .set(updateValues)
           .where(eq(assignmentsTable.id, existing[0].id))
           .returning();
-        const a = updated[0];
-        inserted.push({
-          id: a.id,
-          userId: a.userId,
-          moduleId: a.moduleId,
-          module: moduleData ? { ...moduleData, createdAt: moduleData.createdAt.toISOString() } : null,
-          assignedBy: a.assignedBy,
-          assignedAt: a.assignedAt.toISOString(),
-          dueDate: a.dueDate ? a.dueDate.toISOString() : null,
-          seenAt: a.seenAt ? a.seenAt.toISOString() : null,
-          quizResult: null,
-        });
-        continue;
+        a = updated[0];
+      } else {
+        const rows = await db.insert(assignmentsTable).values({
+          userId,
+          moduleId,
+          assignedBy: actor.id,
+          dueDate: dueDate ? new Date(dueDate) : null,
+        }).returning();
+        a = rows[0];
       }
 
-      const rows = await db.insert(assignmentsTable).values({
-        userId,
-        moduleId,
-        assignedBy: actor.id,
-        dueDate: dueDate ? new Date(dueDate) : null,
-      }).returning();
-      const a = rows[0];
+      const targetUsers = await db.select().from(usersTable).where(eq(usersTable.id, userId)).limit(1);
+      const targetUser = targetUsers[0];
+      const planningCenterSync = targetUser
+        ? await syncPlanningCenterModuleAssignment(targetUser, moduleId, a.assignedAt)
+        : {
+            status: "failed" as const,
+            code: "assignment_user_missing",
+            message: "The assigned member could not be found.",
+          };
+      if (planningCenterSync.status === "failed") {
+        req.log.warn({ userId, moduleId, code: planningCenterSync.code }, "Planning Center assignment sync failed");
+      }
       inserted.push({
         id: a.id,
         userId: a.userId,
@@ -213,8 +216,9 @@ router.post("/assignments", requireManagerOrAdmin, async (req, res) => {
         assignedBy: a.assignedBy,
         assignedAt: a.assignedAt.toISOString(),
         dueDate: a.dueDate ? a.dueDate.toISOString() : null,
-        seenAt: null,
+        seenAt: a.seenAt ? a.seenAt.toISOString() : null,
         quizResult: null,
+        planningCenterSync,
       });
 
       // Send email notification for new assignments
@@ -233,7 +237,8 @@ router.post("/assignments", requireManagerOrAdmin, async (req, res) => {
     }
 
     res.status(201).json(inserted);
-  } catch {
+  } catch (err) {
+    req.log.error({ err }, "Admin module assignment failed");
     res.status(500).json({ error: "Internal server error" });
   }
 });

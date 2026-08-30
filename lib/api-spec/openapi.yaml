@@ -239,6 +239,25 @@ paths:
               schema:
                 $ref: "#/components/schemas/Module"
 
+  /modules/complete:
+    post:
+      operationId: completeModule
+      tags: [modules]
+      summary: Mark a module complete and sync its completion date to Planning Center
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CompleteModuleInput"
+      responses:
+        "200":
+          description: Module completion synchronized and recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompleteModuleResult"
+
   /modules/{moduleId}:
     get:
       operationId: getModule
@@ -1148,6 +1167,8 @@ components:
           type: boolean
         createdAt:
           type: string
+        moduleCompletedAt:
+          type: ["string", "null"]
         videos:
           type: array
           items:
@@ -1157,6 +1178,24 @@ components:
         quizUnlocked:
           type: boolean
       required: [id, trackId, title, order, isPublic, createdAt, videos, quizUnlocked]
+
+    CompleteModuleInput:
+      type: object
+      properties:
+        moduleId:
+          type: integer
+      required: [moduleId]
+
+    CompleteModuleResult:
+      type: object
+      properties:
+        moduleId:
+          type: integer
+        completedAt:
+          type: string
+        planningCenterSynced:
+          type: boolean
+      required: [moduleId, completedAt, planningCenterSynced]
 
     Video:
       type: object
@@ -1404,7 +1443,21 @@ components:
           type: boolean
         quizResult:
           $ref: "#/components/schemas/QuizResult"
+        planningCenterSync:
+          $ref: "#/components/schemas/PlanningCenterSyncResult"
       required: [id, userId, moduleId, module, assignedBy, assignedAt]
+
+    PlanningCenterSyncResult:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [synced, skipped, failed]
+        code:
+          type: string
+        message:
+          type: string
+      required: [status]
 
     AssignmentInput:
       type: object
@@ -1413,11 +1466,17 @@ components:
           type: array
           items:
             type: string
+        groupId:
+          type: integer
         moduleId:
           type: integer
         dueDate:
           type: ["string", "null"]
-      required: [userIds, moduleId]
+        notifyEmail:
+          type: boolean
+        resetProgress:
+          type: boolean
+      required: [moduleId]
 
     DashboardSummary:
       type: object

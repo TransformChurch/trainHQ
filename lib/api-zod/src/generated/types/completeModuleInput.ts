@@ -6,9 +6,6 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export interface PatchMeInput {
-  firstName?: string;
-  lastName?: string;
-  /** @nullable */
-  phone?: string | null;
+export interface CompleteModuleInput {
+  moduleId: number;
 }

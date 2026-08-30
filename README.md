@@ -66,29 +66,41 @@ tokens are refreshed automatically before they expire. If a member denies
 consent or the People scope is missing, the sign-in page displays an actionable
 error and the API logs only a safe error code.
 
-### Mapping module completion custom fields
+### Mapping module assignment and completion custom fields
 
-Create one People custom field for each training module that should be
-synchronized. In Planning Center People, open the custom field configuration
-and copy its `field_definition_id`. Map each local Transform Church module ID
-to that definition ID in `PCO_MODULE_FIELD_DEFINITION_MAP`:
+Create two People custom fields for each training module that should be
+synchronized: one for the assignment date and one for the completion date. In
+Planning Center People, open the custom field configuration and copy each
+`field_definition_id`. Map each local Transform Church module ID to both
+definition IDs in `PCO_MODULE_FIELD_DEFINITION_MAP`:
 
 ```dotenv
-PCO_MODULE_FIELD_DEFINITION_MAP={"1":"123456","2":"123457"}
+PCO_MODULE_FIELD_DEFINITION_MAP={"1":{"assigned":"123456","completed":"123457"},"2":{"assigned":"123458","completed":"123459"}}
 ```
 
-When a member marks a module complete, the API:
+The `assigned` field is updated when an administrator assigns or reassigns a
+module, using the assignment's actual date. The `completed` field is updated
+when the member completes the module. The two fields are never overwritten by
+one another. Existing completion-only mappings such as
+`{"1":"123456"}` remain valid for completion updates, but they do not enable
+assignment-date updates until migrated to the two-field format.
+
+When either lifecycle event runs, the API:
 
 1. Refreshes the member's Planning Center access token when necessary.
 2. Looks up the person's field-data record that matches the mapped
    `field_definition_id`.
-3. Patches `/people/v2/field_data/{field_data_id}` with the completion date in
+3. Patches `/people/v2/field_data/{field_data_id}` with the relevant date in
    `YYYY-MM-DD` format.
-4. Records the completion locally only after Planning Center accepts the
-   update.
+4. For completion, records the local completion only after Planning Center
+   accepts the update.
 
-If a mapping is absent or the custom field is not present on the member's
-profile, the UI shows a clear error and no local completion is recorded.
+If an assigned-date mapping is absent, the local assignment still succeeds and
+the admin result identifies the Planning Center update as skipped or failed.
+If a completion mapping is absent or the custom field is not present on the
+member's profile, the UI shows a clear error and no local completion is
+recorded. For bulk assignments, one member's provider failure does not hide
+the results for other members.
 
 `FRAME_ANCESTORS` is applied automatically during Vite development and preview. In production, your static web host must return the same header for the frontend files because it is the iframe resource. For example, in an Nginx site block:
 

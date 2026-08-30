@@ -424,7 +424,7 @@ export async function getValidPlanningCenterAccessToken(userId: string): Promise
   if (!token) {
     throw new PlanningCenterError(
       "planning_center_not_connected",
-      "Sign in with Church Center before syncing module completion.",
+      "This member's Church Center connection is missing. They need to sign in again.",
       409,
     );
   }
@@ -434,15 +434,14 @@ export async function getValidPlanningCenterAccessToken(userId: string): Promise
   return refreshAccessToken(userId, token.refreshTokenEncrypted);
 }
 
-function fieldDefinitionIdForModule(moduleId: number): string {
-  const raw = process.env.PCO_MODULE_FIELD_DEFINITION_MAP?.trim();
-  if (!raw) {
-    throw new PlanningCenterError(
-      "planning_center_field_mapping_missing",
-      "This module has not been mapped to a Planning Center custom field.",
-      503,
-    );
-  }
+export type PlanningCenterDateField = "assigned" | "completed";
+
+type ModuleFieldMapping = {
+  assigned?: string | number;
+  completed?: string | number;
+};
+
+export function parseModuleFieldMapping(raw: string): Record<string, ModuleFieldMapping | string | number> {
   let mapping: unknown;
   try {
     mapping = JSON.parse(raw);
@@ -460,14 +459,36 @@ function fieldDefinitionIdForModule(moduleId: number): string {
       503,
     );
   }
-  const value = (mapping as Record<string, unknown>)[String(moduleId)];
+  return mapping as Record<string, ModuleFieldMapping | string | number>;
+}
+
+export function fieldDefinitionIdForModule(
+  moduleId: number,
+  dateField: PlanningCenterDateField,
+): string {
+  const raw = process.env.PCO_MODULE_FIELD_DEFINITION_MAP?.trim();
+  if (!raw) {
+    throw new PlanningCenterError(
+      "planning_center_field_mapping_missing",
+      `This module has no Planning Center ${dateField} date field mapping.`,
+      503,
+    );
+  }
+  const mapping = parseModuleFieldMapping(raw);
+  const moduleMapping = mapping[String(moduleId)];
+  // A string/number entry is the legacy completion-only format.
+  const value = typeof moduleMapping === "object" && moduleMapping !== null
+    ? moduleMapping[dateField]
+    : dateField === "completed"
+      ? moduleMapping
+      : undefined;
   if (
     (typeof value !== "string" && typeof value !== "number") ||
     String(value).trim() === ""
   ) {
     throw new PlanningCenterError(
       "planning_center_field_mapping_missing",
-      "This module has not been mapped to a Planning Center custom field.",
+      `This module has no Planning Center ${dateField} date field mapping.`,
       503,
     );
   }
@@ -539,19 +560,20 @@ export function buildFieldDatumUpdate(fieldDataId: string, completedAt: Date) {
   };
 }
 
-export async function updatePlanningCenterModuleCompletion(
+async function updatePlanningCenterDateField(
   user: { id: string; planningCenterPersonId: string | null },
   moduleId: number,
-  completedAt: Date,
+  dateField: PlanningCenterDateField,
+  date: Date,
 ) {
   if (!user.planningCenterPersonId) {
     throw new PlanningCenterError(
       "planning_center_not_connected",
-      "Sign in with Church Center before syncing module completion.",
+      "This member has not connected Church Center.",
       409,
     );
   }
-  const fieldDefinitionId = fieldDefinitionIdForModule(moduleId);
+  const fieldDefinitionId = fieldDefinitionIdForModule(moduleId, dateField);
   const accessToken = await getValidPlanningCenterAccessToken(user.id);
   const fieldDataId = await findFieldDataIdAcrossPages(
     `/people/${encodeURIComponent(user.planningCenterPersonId)}/field_data`,
@@ -561,19 +583,70 @@ export async function updatePlanningCenterModuleCompletion(
   if (!fieldDataId) {
     throw new PlanningCenterError(
       "planning_center_field_data_missing",
-      "The mapped custom field is not available on your Planning Center profile.",
+      `The mapped Planning Center ${dateField} date field is not available on this member's profile.`,
       422,
     );
   }
-
   await peopleRequest(
     `/field_data/${encodeURIComponent(fieldDataId)}`,
     accessToken,
     {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(buildFieldDatumUpdate(fieldDataId, completedAt)),
+      body: JSON.stringify(buildFieldDatumUpdate(fieldDataId, date)),
     },
   );
   return { fieldDataId };
+}
+
+export async function updatePlanningCenterModuleAssignment(
+  user: { id: string; planningCenterPersonId: string | null },
+  moduleId: number,
+  assignedAt: Date,
+) {
+  return updatePlanningCenterDateField(user, moduleId, "assigned", assignedAt);
+}
+
+export type PlanningCenterAssignmentSyncResult =
+  | { status: "synced" }
+  | { status: "skipped"; message: string }
+  | { status: "failed"; code: string; message: string };
+
+export async function syncPlanningCenterModuleAssignment(
+  user: { id: string; planningCenterPersonId: string | null },
+  moduleId: number,
+  assignedAt: Date,
+  sync: (
+    user: { id: string; planningCenterPersonId: string | null },
+    moduleId: number,
+    assignedAt: Date,
+  ) => Promise<unknown> = updatePlanningCenterModuleAssignment,
+): Promise<PlanningCenterAssignmentSyncResult> {
+  if (!user.planningCenterPersonId) {
+    return {
+      status: "skipped",
+      message: "Church Center is not connected for this member.",
+    };
+  }
+  try {
+    await sync(user, moduleId, assignedAt);
+    return { status: "synced" };
+  } catch (err) {
+    if (err instanceof PlanningCenterError) {
+      return { status: "failed", code: err.code, message: err.message };
+    }
+    return {
+      status: "failed",
+      code: "planning_center_assignment_sync_failed",
+      message: "Planning Center could not be updated for this member.",
+    };
+  }
+}
+
+export async function updatePlanningCenterModuleCompletion(
+  user: { id: string; planningCenterPersonId: string | null },
+  moduleId: number,
+  completedAt: Date,
+) {
+  return updatePlanningCenterDateField(user, moduleId, "completed", completedAt);
 }

@@ -32,7 +32,7 @@ export default function ModuleDetail() {
   const [justSubmitted, setJustSubmitted] = useState(false);
 
   const handleMarkComplete = () => {
-    markComplete({ moduleId }, {
+    markComplete({ data: { moduleId } }, {
       onSuccess: (result) => {
         queryClient.invalidateQueries({ queryKey: getGetModuleQueryKey(moduleId) });
         queryClient.invalidateQueries({ queryKey: ["/api/dashboard/summary"] });

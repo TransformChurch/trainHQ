@@ -1072,15 +1072,32 @@ function AssignmentManager() {
       } else {
         body.groupId = parseInt(selectedGroup);
       }
-      await apiFetch("/api/admin/assignments", {
+      const response = await apiFetch("/api/admin/assignments", {
         method: "POST",
         body: JSON.stringify(body),
       });
+      if (!response) throw new Error("Assignment response was empty");
+      const results = await response.json() as Array<{
+        planningCenterSync?: { status: "synced" | "skipped" | "failed"; message?: string };
+      }>;
+      const synced = results.filter(result => result.planningCenterSync?.status === "synced").length;
+      const skipped = results.filter(result => result.planningCenterSync?.status === "skipped").length;
+      const failed = results.filter(result => result.planningCenterSync?.status === "failed");
       const targetLabel = assignTo === "group"
         ? `group "${groups.find(g => String(g.id) === selectedGroup)?.name}"`
         : "user";
       const extras = [notifyEmail ? "email sent" : "", resetProgress ? "progress reset" : ""].filter(Boolean).join(", ");
-      toast({ title: `Module assigned to ${targetLabel}${extras ? ` — ${extras}` : ""}` });
+      toast({
+        title: `Module assigned to ${targetLabel}${extras ? ` — ${extras}` : ""}`,
+        description: [
+          `${synced} Planning Center profile${synced === 1 ? "" : "s"} updated`,
+          skipped > 0 ? `${skipped} skipped because Church Center is not connected` : "",
+          failed.length > 0
+            ? `${failed.length} failed${failed[0]?.planningCenterSync?.message ? `: ${failed[0].planningCenterSync.message}` : ""}`
+            : "",
+        ].filter(Boolean).join("; ") + ".",
+        variant: failed.length > 0 ? "destructive" : undefined,
+      });
       setOpen(false);
       setSelectedUser(""); setSelectedGroup(""); setSelectedModule(""); setDueDate(""); setNotifyEmail(false); setResetProgress(false);
     } catch {

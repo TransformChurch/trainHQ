@@ -3,10 +3,13 @@ import test from "node:test";
 import {
   buildFieldDatumUpdate,
   exchangeAuthorizationCode,
+  fieldDefinitionIdForModule,
   fetchCurrentPerson,
   findFieldDataId,
   findFieldDataIdAcrossPages,
   planningCenterPeopleUrl,
+  PlanningCenterError,
+  syncPlanningCenterModuleAssignment,
 } from "./planningCenter";
 
 const originalFetch = globalThis.fetch;
@@ -108,6 +111,59 @@ test("field data uses the Planning Center relationship and FieldDatum resource t
       },
     },
   );
+});
+
+test("assignment and completion mappings resolve to separate custom fields", () => {
+  process.env.PCO_MODULE_FIELD_DEFINITION_MAP = JSON.stringify({
+    "42": { assigned: "assignment-field", completed: "completion-field" },
+  });
+  assert.equal(fieldDefinitionIdForModule(42, "assigned"), "assignment-field");
+  assert.equal(fieldDefinitionIdForModule(42, "completed"), "completion-field");
+});
+
+test("legacy completion-only mappings remain completion-only", () => {
+  process.env.PCO_MODULE_FIELD_DEFINITION_MAP = JSON.stringify({ "42": "completion-field" });
+  assert.equal(fieldDefinitionIdForModule(42, "completed"), "completion-field");
+  assert.throws(
+    () => fieldDefinitionIdForModule(42, "assigned"),
+    /assigned date field mapping/,
+  );
+});
+
+test("bulk assignment sync outcomes remain independent across success, skip, and failure", async () => {
+  const users = [
+    { id: "user-1", planningCenterPersonId: "person-1" },
+    { id: "user-2", planningCenterPersonId: null },
+    { id: "user-3", planningCenterPersonId: "person-3" },
+  ];
+  const results = await Promise.all(users.map((user) =>
+    syncPlanningCenterModuleAssignment(
+      user,
+      42,
+      new Date("2026-08-30T12:00:00.000Z"),
+      async (connectedUser) => {
+        if (connectedUser.planningCenterPersonId === "person-3") {
+          throw new PlanningCenterError(
+            "planning_center_field_data_missing",
+            "Add the mapped assignment field to this member's Planning Center profile.",
+            409,
+          );
+        }
+      },
+    )
+  ));
+  assert.deepEqual(results, [
+    { status: "synced" },
+    {
+      status: "skipped",
+      message: "Church Center is not connected for this member.",
+    },
+    {
+      status: "failed",
+      code: "planning_center_field_data_missing",
+      message: "Add the mapped assignment field to this member's Planning Center profile.",
+    },
+  ]);
 });
 
 test("field-data discovery follows pagination before reporting a missing mapping", async () => {
