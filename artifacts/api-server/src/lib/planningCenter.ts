@@ -292,10 +292,35 @@ export async function fetchCurrentPerson(accessToken: string): Promise<PlanningC
   const lastName = typeof attributes.last_name === "string" && attributes.last_name.trim()
     ? attributes.last_name.trim()
     : nameParts.slice(1).join(" ") || "Member";
-  const email = [attributes.email, attributes.primary_email, attributes.contact_email]
+  let email = [attributes.email, attributes.primary_email, attributes.contact_email]
     .find((value): value is string => typeof value === "string" && value.includes("@"))
     ?.trim()
     .toLowerCase();
+  if (!email) {
+    const emailsResponse = await peopleRequest<{
+      data?: Array<{
+        attributes?: {
+          address?: unknown;
+          primary?: unknown;
+          blocked?: unknown;
+        };
+      }>;
+    }>(`/people/${encodeURIComponent(id)}/emails`, accessToken);
+    const emails = (emailsResponse.data ?? [])
+      .map((item) => ({
+        address: typeof item.attributes?.address === "string"
+          ? item.attributes.address.trim().toLowerCase()
+          : "",
+        primary: item.attributes?.primary === true,
+        blocked: item.attributes?.blocked === true,
+      }))
+      .filter((item) => item.address.includes("@"))
+      .sort((left, right) =>
+        Number(right.primary) - Number(left.primary) ||
+        Number(left.blocked) - Number(right.blocked)
+      );
+    email = emails[0]?.address;
+  }
   if (!email) {
     throw new PlanningCenterError(
       "planning_center_profile_email_missing",

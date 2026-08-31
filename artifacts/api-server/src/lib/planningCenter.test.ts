@@ -71,6 +71,62 @@ test("current-person lookup uses People v2 and extracts identity data", async ()
   });
 });
 
+test("current-person lookup fetches the person's email relationship", async () => {
+  const requested: string[] = [];
+  globalThis.fetch = async (input, init) => {
+    const url = String(input);
+    requested.push(url);
+    assert.equal(new Headers(init?.headers).get("authorization"), "Bearer access-token");
+    if (url === "https://api.planningcenteronline.com/people/v2/me") {
+      return new Response(JSON.stringify({
+        data: {
+          id: "98765",
+          attributes: {
+            first_name: "Jordan",
+            last_name: "Rivera",
+          },
+        },
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+    }
+    assert.equal(
+      url,
+      "https://api.planningcenteronline.com/people/v2/people/98765/emails",
+    );
+    return new Response(JSON.stringify({
+      data: [
+        {
+          id: "email-1",
+          attributes: {
+            address: "alternate@example.com",
+            primary: false,
+            blocked: false,
+          },
+        },
+        {
+          id: "email-2",
+          attributes: {
+            address: "Jordan@example.com",
+            primary: true,
+            blocked: false,
+          },
+        },
+      ],
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  };
+
+  const person = await fetchCurrentPerson("access-token");
+  assert.deepEqual(requested, [
+    "https://api.planningcenteronline.com/people/v2/me",
+    "https://api.planningcenteronline.com/people/v2/people/98765/emails",
+  ]);
+  assert.deepEqual(person, {
+    id: "98765",
+    firstName: "Jordan",
+    lastName: "Rivera",
+    email: "jordan@example.com",
+  });
+});
+
 test("People URL construction keeps relative paths in v2 and accepts only trusted next links", () => {
   assert.equal(
     planningCenterPeopleUrl("/people/98765/field_data").toString(),
