@@ -75,6 +75,268 @@ export const PatchMeResponse = zod.object({
 
 
 /**
+ * @summary Check whether the current user can access Facilities
+ */
+export const GetFacilitiesAccessResponse = zod.object({
+  "allowed": zod.boolean()
+})
+
+
+/**
+ * @summary List visible request categories and cards
+ */
+export const ListFacilitiesCategoriesResponseItem = zod.object({
+  "id": zod.number().int(),
+  "name": zod.string(),
+  "description": zod.string().nullish(),
+  "sortOrder": zod.number().int(),
+  "isActive": zod.boolean(),
+  "createdAt": zod.string().optional(),
+  "updatedAt": zod.string().optional(),
+  "requests": zod.array(zod.object({
+  "id": zod.number().int(),
+  "categoryId": zod.number().int(),
+  "eyebrow": zod.string().nullish(),
+  "title": zod.string(),
+  "description": zod.string(),
+  "useWhen": zod.string().nullish(),
+  "url": zod.string().url(),
+  "buttonLabel": zod.string(),
+  "icon": zod.string(),
+  "sortOrder": zod.number().int(),
+  "isActive": zod.boolean(),
+  "createdAt": zod.string().optional(),
+  "updatedAt": zod.string().optional()
+})).optional()
+})
+export const ListFacilitiesCategoriesResponse = zod.array(ListFacilitiesCategoriesResponseItem)
+
+
+/**
+ * @summary List all Facilities categories and cards
+ */
+export const AdminListFacilitiesCategoriesResponseItem = zod.object({
+  "id": zod.number().int(),
+  "name": zod.string(),
+  "description": zod.string().nullish(),
+  "sortOrder": zod.number().int(),
+  "isActive": zod.boolean(),
+  "createdAt": zod.string().optional(),
+  "updatedAt": zod.string().optional(),
+  "requests": zod.array(zod.object({
+  "id": zod.number().int(),
+  "categoryId": zod.number().int(),
+  "eyebrow": zod.string().nullish(),
+  "title": zod.string(),
+  "description": zod.string(),
+  "useWhen": zod.string().nullish(),
+  "url": zod.string().url(),
+  "buttonLabel": zod.string(),
+  "icon": zod.string(),
+  "sortOrder": zod.number().int(),
+  "isActive": zod.boolean(),
+  "createdAt": zod.string().optional(),
+  "updatedAt": zod.string().optional()
+})).optional()
+})
+export const AdminListFacilitiesCategoriesResponse = zod.array(AdminListFacilitiesCategoriesResponseItem)
+
+
+/**
+ * @summary List explicit Facilities access grants
+ */
+export const ListFacilitiesAccessGrantsResponseItem = zod.object({
+  "id": zod.number().int(),
+  "userId": zod.string(),
+  "grantedByExternalUserId": zod.string(),
+  "grantedAt": zod.string()
+})
+export const ListFacilitiesAccessGrantsResponse = zod.array(ListFacilitiesAccessGrantsResponseItem)
+
+
+/**
+ * @summary Grant or revoke a user's Facilities access
+ */
+export const UpdateFacilitiesAccessParams = zod.object({
+  "userId": zod.coerce.string()
+})
+
+export const UpdateFacilitiesAccessBody = zod.object({
+  "enabled": zod.boolean()
+})
+
+export const UpdateFacilitiesAccessResponse = zod.object({
+  "allowed": zod.boolean()
+})
+
+
+/**
+ * @summary Create a request category
+ */
+export const CreateFacilitiesCategoryBody = zod.object({
+  "name": zod.string(),
+  "description": zod.string().nullish(),
+  "sortOrder": zod.number().int().optional(),
+  "isActive": zod.boolean().optional()
+})
+
+export const CreateFacilitiesCategoryResponse = zod.object({
+  "id": zod.number().int(),
+  "name": zod.string(),
+  "description": zod.string().nullish(),
+  "sortOrder": zod.number().int(),
+  "isActive": zod.boolean(),
+  "createdAt": zod.string().optional(),
+  "updatedAt": zod.string().optional(),
+  "requests": zod.array(zod.object({
+  "id": zod.number().int(),
+  "categoryId": zod.number().int(),
+  "eyebrow": zod.string().nullish(),
+  "title": zod.string(),
+  "description": zod.string(),
+  "useWhen": zod.string().nullish(),
+  "url": zod.string().url(),
+  "buttonLabel": zod.string(),
+  "icon": zod.string(),
+  "sortOrder": zod.number().int(),
+  "isActive": zod.boolean(),
+  "createdAt": zod.string().optional(),
+  "updatedAt": zod.string().optional()
+})).optional()
+})
+
+
+/**
+ * @summary Update a request category
+ */
+export const UpdateFacilitiesCategoryParams = zod.object({
+  "categoryId": zod.coerce.number().int()
+})
+
+export const UpdateFacilitiesCategoryBody = zod.object({
+  "name": zod.string().optional(),
+  "description": zod.string().nullish(),
+  "sortOrder": zod.number().int().optional(),
+  "isActive": zod.boolean().optional()
+})
+
+export const UpdateFacilitiesCategoryResponse = zod.object({
+  "id": zod.number().int(),
+  "name": zod.string(),
+  "description": zod.string().nullish(),
+  "sortOrder": zod.number().int(),
+  "isActive": zod.boolean(),
+  "createdAt": zod.string().optional(),
+  "updatedAt": zod.string().optional(),
+  "requests": zod.array(zod.object({
+  "id": zod.number().int(),
+  "categoryId": zod.number().int(),
+  "eyebrow": zod.string().nullish(),
+  "title": zod.string(),
+  "description": zod.string(),
+  "useWhen": zod.string().nullish(),
+  "url": zod.string().url(),
+  "buttonLabel": zod.string(),
+  "icon": zod.string(),
+  "sortOrder": zod.number().int(),
+  "isActive": zod.boolean(),
+  "createdAt": zod.string().optional(),
+  "updatedAt": zod.string().optional()
+})).optional()
+})
+
+
+/**
+ * @summary Delete a category and its request cards
+ */
+export const DeleteFacilitiesCategoryParams = zod.object({
+  "categoryId": zod.coerce.number().int()
+})
+
+export const DeleteFacilitiesCategoryResponse = zod.void()
+
+
+/**
+ * @summary Create a request card
+ */
+export const CreateFacilitiesRequestBody = zod.object({
+  "categoryId": zod.number().int(),
+  "eyebrow": zod.string().nullish(),
+  "title": zod.string(),
+  "description": zod.string(),
+  "useWhen": zod.string().nullish(),
+  "url": zod.string().url(),
+  "buttonLabel": zod.string().optional(),
+  "icon": zod.string().optional(),
+  "sortOrder": zod.number().int().optional(),
+  "isActive": zod.boolean().optional()
+})
+
+export const CreateFacilitiesRequestResponse = zod.object({
+  "id": zod.number().int(),
+  "categoryId": zod.number().int(),
+  "eyebrow": zod.string().nullish(),
+  "title": zod.string(),
+  "description": zod.string(),
+  "useWhen": zod.string().nullish(),
+  "url": zod.string().url(),
+  "buttonLabel": zod.string(),
+  "icon": zod.string(),
+  "sortOrder": zod.number().int(),
+  "isActive": zod.boolean(),
+  "createdAt": zod.string().optional(),
+  "updatedAt": zod.string().optional()
+})
+
+
+/**
+ * @summary Update a request card, link, or button
+ */
+export const UpdateFacilitiesRequestParams = zod.object({
+  "requestId": zod.coerce.number().int()
+})
+
+export const UpdateFacilitiesRequestBody = zod.object({
+  "categoryId": zod.number().int().optional(),
+  "eyebrow": zod.string().nullish(),
+  "title": zod.string().optional(),
+  "description": zod.string().optional(),
+  "useWhen": zod.string().nullish(),
+  "url": zod.string().url().optional(),
+  "buttonLabel": zod.string().optional(),
+  "icon": zod.string().optional(),
+  "sortOrder": zod.number().int().optional(),
+  "isActive": zod.boolean().optional()
+})
+
+export const UpdateFacilitiesRequestResponse = zod.object({
+  "id": zod.number().int(),
+  "categoryId": zod.number().int(),
+  "eyebrow": zod.string().nullish(),
+  "title": zod.string(),
+  "description": zod.string(),
+  "useWhen": zod.string().nullish(),
+  "url": zod.string().url(),
+  "buttonLabel": zod.string(),
+  "icon": zod.string(),
+  "sortOrder": zod.number().int(),
+  "isActive": zod.boolean(),
+  "createdAt": zod.string().optional(),
+  "updatedAt": zod.string().optional()
+})
+
+
+/**
+ * @summary Delete a request card
+ */
+export const DeleteFacilitiesRequestParams = zod.object({
+  "requestId": zod.coerce.number().int()
+})
+
+export const DeleteFacilitiesRequestResponse = zod.void()
+
+
+/**
  * @summary Get student dashboard summary (assigned modules, progress, queue count)
  */
 export const GetDashboardSummaryResponse = zod.object({

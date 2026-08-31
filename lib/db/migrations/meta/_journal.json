@@ -22,6 +22,13 @@
       "when": 1787940000000,
       "tag": "0002_planning_center_oauth",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1788200000000,
+      "tag": "0003_facilities_request_hub",
+      "breakpoints": true
     }
   ]
 }

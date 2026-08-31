@@ -7,6 +7,7 @@ import { UpdateUserRoleBody } from "@workspace/api-zod";
 import adminDocumentsRouter from "./adminDocuments";
 import contentGrantsRouter from "./contentGrants";
 import { syncPlanningCenterModuleAssignment } from "../lib/planningCenter";
+import adminFacilitiesRouter from "./adminFacilities";
 
 const router = Router();
 
@@ -384,5 +385,6 @@ router.get("/audit-log", requireAdmin, async (req, res) => {
 
 router.use("/documents", adminDocumentsRouter);
 router.use("/content-grants", contentGrantsRouter);
+router.use("/facilities", adminFacilitiesRouter);
 
 export default router;

@@ -2,9 +2,10 @@ import { Link, useLocation } from "wouter";
 import { useGetMe } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/App";
-import { BookOpen, LayoutDashboard, Settings, Video, ShieldCheck, LogOut, Menu, UserCircle, Users, TrendingUp, UsersRound, FileText } from "lucide-react";
+import { BookOpen, LayoutDashboard, Settings, Video, ShieldCheck, LogOut, Menu, UserCircle, Users, TrendingUp, UsersRound, FileText, Wrench } from "lucide-react";
 import wordmark from "@assets/TC_Black_Wordmark_1782833324395.png";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
+import { useEffect, useState } from "react";
 
 export function Sidebar() {
   const [location] = useLocation();
@@ -15,8 +16,28 @@ export function Sidebar() {
   const isAdmin = user?.role === "admin";
   const isManager = user?.role === "manager";
   const isManagerOrAdmin = isAdmin || isManager;
+  const [facilitiesAllowed, setFacilitiesAllowed] = useState(false);
 
   const isProfileIncomplete = user && (!user.phone || !user.firstName || !user.lastName);
+
+  useEffect(() => {
+    if (!user) {
+      setFacilitiesAllowed(false);
+      return;
+    }
+    if (user.role === "admin") {
+      setFacilitiesAllowed(true);
+      return;
+    }
+    const token = sessionStorage.getItem("auth_bearer_token");
+    const apiBase = import.meta.env.VITE_API_URL?.replace(/\/$/, "") ?? basePath;
+    fetch(`${apiBase}/api/facilities/access`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    })
+      .then((response) => response.ok ? response.json() : { allowed: false })
+      .then((result: { allowed?: boolean }) => setFacilitiesAllowed(result.allowed === true))
+      .catch(() => setFacilitiesAllowed(false));
+  }, [user?.id, user?.role, basePath]);
 
   const navItems = [
     { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -24,6 +45,7 @@ export function Sidebar() {
     { href: "/queue", label: "My Queue", icon: Video },
     { href: "/groups", label: "Groups", icon: UsersRound },
     { href: "/documents", label: "Documents", icon: FileText },
+    ...(facilitiesAllowed ? [{ href: "/facilities", label: "Facilities", icon: Wrench }] : []),
     { href: "/profile", label: "My Profile", icon: UserCircle, badge: isProfileIncomplete ? "!" : undefined },
   ];
 
@@ -36,6 +58,7 @@ export function Sidebar() {
   const adminOnlyItems = [
     { href: "/admin", label: "Admin Dashboard", icon: ShieldCheck },
     { href: "/admin/settings", label: "Admin Settings", icon: Settings },
+    { href: "/admin/facilities", label: "Facilities Manager", icon: Wrench },
   ];
 
   const handleSignOut = () => {

@@ -31,6 +31,8 @@ tags:
     description: Dashboard summary data
   - name: storage
     description: Object storage upload and serving endpoints
+  - name: facilities
+    description: Categorized request directory and access
 
 paths:
   /healthz:
@@ -97,6 +99,205 @@ paths:
                 $ref: "#/components/schemas/User"
 
   # ── Dashboard ───────────────────────────────────────────────────────────
+  /facilities/access:
+    get:
+      operationId: getFacilitiesAccess
+      tags: [facilities]
+      summary: Check whether the current user can access Facilities
+      responses:
+        "200":
+          description: Current user's Facilities access
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FacilitiesAccessStatus"
+
+  /facilities:
+    get:
+      operationId: listFacilitiesCategories
+      tags: [facilities]
+      summary: List visible request categories and cards
+      responses:
+        "200":
+          description: Facilities directory
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/FacilitiesCategory"
+        "403":
+          description: Facilities access has not been granted
+
+  /admin/facilities:
+    get:
+      operationId: adminListFacilitiesCategories
+      tags: [admin]
+      summary: List all Facilities categories and cards
+      responses:
+        "200":
+          description: Full Facilities directory
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/FacilitiesCategory"
+
+  /admin/facilities/access:
+    get:
+      operationId: listFacilitiesAccessGrants
+      tags: [admin]
+      summary: List explicit Facilities access grants
+      responses:
+        "200":
+          description: Facilities access grants
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/FacilitiesAccessGrant"
+
+  /admin/facilities/access/{userId}:
+    put:
+      operationId: updateFacilitiesAccess
+      tags: [admin]
+      summary: Grant or revoke a user's Facilities access
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FacilitiesAccessUpdate"
+      responses:
+        "200":
+          description: Updated access status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FacilitiesAccessStatus"
+
+  /admin/facilities/categories:
+    post:
+      operationId: createFacilitiesCategory
+      tags: [admin]
+      summary: Create a request category
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FacilitiesCategoryInput"
+      responses:
+        "201":
+          description: Created category
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FacilitiesCategory"
+
+  /admin/facilities/categories/{categoryId}:
+    patch:
+      operationId: updateFacilitiesCategory
+      tags: [admin]
+      summary: Update a request category
+      parameters:
+        - name: categoryId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FacilitiesCategoryUpdate"
+      responses:
+        "200":
+          description: Updated category
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FacilitiesCategory"
+    delete:
+      operationId: deleteFacilitiesCategory
+      tags: [admin]
+      summary: Delete a category and its request cards
+      parameters:
+        - name: categoryId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /admin/facilities/requests:
+    post:
+      operationId: createFacilitiesRequest
+      tags: [admin]
+      summary: Create a request card
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FacilitiesRequestInput"
+      responses:
+        "201":
+          description: Created request card
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FacilitiesRequest"
+
+  /admin/facilities/requests/{requestId}:
+    patch:
+      operationId: updateFacilitiesRequest
+      tags: [admin]
+      summary: Update a request card, link, or button
+      parameters:
+        - name: requestId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FacilitiesRequestUpdate"
+      responses:
+        "200":
+          description: Updated request card
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FacilitiesRequest"
+    delete:
+      operationId: deleteFacilitiesRequest
+      tags: [admin]
+      summary: Delete a request card
+      parameters:
+        - name: requestId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
   /dashboard/summary:
     get:
       operationId: getDashboardSummary
@@ -1019,6 +1220,164 @@ components:
         createdAt:
           type: string
       required: [id, externalUserId, firstName, lastName, email, role, createdAt]
+
+    FacilitiesAccessStatus:
+      type: object
+      properties:
+        allowed:
+          type: boolean
+      required: [allowed]
+
+    FacilitiesAccessUpdate:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+      required: [enabled]
+
+    FacilitiesAccessGrant:
+      type: object
+      properties:
+        id:
+          type: integer
+        userId:
+          type: string
+        grantedByExternalUserId:
+          type: string
+        grantedAt:
+          type: string
+      required: [id, userId, grantedByExternalUserId, grantedAt]
+
+    FacilitiesRequest:
+      type: object
+      properties:
+        id:
+          type: integer
+        categoryId:
+          type: integer
+        eyebrow:
+          type: ["string", "null"]
+        title:
+          type: string
+        description:
+          type: string
+        useWhen:
+          type: ["string", "null"]
+        url:
+          type: string
+          format: uri
+        buttonLabel:
+          type: string
+        icon:
+          type: string
+        sortOrder:
+          type: integer
+        isActive:
+          type: boolean
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+      required: [id, categoryId, title, description, url, buttonLabel, icon, sortOrder, isActive]
+
+    FacilitiesCategory:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        description:
+          type: ["string", "null"]
+        sortOrder:
+          type: integer
+        isActive:
+          type: boolean
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+        requests:
+          type: array
+          items:
+            $ref: "#/components/schemas/FacilitiesRequest"
+      required: [id, name, sortOrder, isActive]
+
+    FacilitiesCategoryInput:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: ["string", "null"]
+        sortOrder:
+          type: integer
+        isActive:
+          type: boolean
+      required: [name]
+
+    FacilitiesCategoryUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: ["string", "null"]
+        sortOrder:
+          type: integer
+        isActive:
+          type: boolean
+
+    FacilitiesRequestInput:
+      type: object
+      properties:
+        categoryId:
+          type: integer
+        eyebrow:
+          type: ["string", "null"]
+        title:
+          type: string
+        description:
+          type: string
+        useWhen:
+          type: ["string", "null"]
+        url:
+          type: string
+          format: uri
+        buttonLabel:
+          type: string
+        icon:
+          type: string
+        sortOrder:
+          type: integer
+        isActive:
+          type: boolean
+      required: [categoryId, title, description, url]
+
+    FacilitiesRequestUpdate:
+      type: object
+      properties:
+        categoryId:
+          type: integer
+        eyebrow:
+          type: ["string", "null"]
+        title:
+          type: string
+        description:
+          type: string
+        useWhen:
+          type: ["string", "null"]
+        url:
+          type: string
+          format: uri
+        buttonLabel:
+          type: string
+        icon:
+          type: string
+        sortOrder:
+          type: integer
+        isActive:
+          type: boolean
 
     UserInput:
       type: object

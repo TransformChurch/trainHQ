@@ -30,6 +30,97 @@ export interface User {
   createdAt: string;
 }
 
+export interface FacilitiesAccessStatus {
+  allowed: boolean;
+}
+
+export interface FacilitiesAccessUpdate {
+  enabled: boolean;
+}
+
+export interface FacilitiesAccessGrant {
+  id: number;
+  userId: string;
+  grantedByExternalUserId: string;
+  grantedAt: string;
+}
+
+export interface FacilitiesRequest {
+  id: number;
+  categoryId: number;
+  /** @nullable */
+  eyebrow?: string | null;
+  title: string;
+  description: string;
+  /** @nullable */
+  useWhen?: string | null;
+  url: string;
+  buttonLabel: string;
+  icon: string;
+  sortOrder: number;
+  isActive: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface FacilitiesCategory {
+  id: number;
+  name: string;
+  /** @nullable */
+  description?: string | null;
+  sortOrder: number;
+  isActive: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+  requests?: FacilitiesRequest[];
+}
+
+export interface FacilitiesCategoryInput {
+  name: string;
+  /** @nullable */
+  description?: string | null;
+  sortOrder?: number;
+  isActive?: boolean;
+}
+
+export interface FacilitiesCategoryUpdate {
+  name?: string;
+  /** @nullable */
+  description?: string | null;
+  sortOrder?: number;
+  isActive?: boolean;
+}
+
+export interface FacilitiesRequestInput {
+  categoryId: number;
+  /** @nullable */
+  eyebrow?: string | null;
+  title: string;
+  description: string;
+  /** @nullable */
+  useWhen?: string | null;
+  url: string;
+  buttonLabel?: string;
+  icon?: string;
+  sortOrder?: number;
+  isActive?: boolean;
+}
+
+export interface FacilitiesRequestUpdate {
+  categoryId?: number;
+  /** @nullable */
+  eyebrow?: string | null;
+  title?: string;
+  description?: string;
+  /** @nullable */
+  useWhen?: string | null;
+  url?: string;
+  buttonLabel?: string;
+  icon?: string;
+  sortOrder?: number;
+  isActive?: boolean;
+}
+
 export interface UserInput {
   firstName: string;
   lastName: string;

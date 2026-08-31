@@ -26,6 +26,15 @@ import type {
   CompleteModuleInput,
   CompleteModuleResult,
   DashboardSummary,
+  FacilitiesAccessGrant,
+  FacilitiesAccessStatus,
+  FacilitiesAccessUpdate,
+  FacilitiesCategory,
+  FacilitiesCategoryInput,
+  FacilitiesCategoryUpdate,
+  FacilitiesRequest,
+  FacilitiesRequestInput,
+  FacilitiesRequestUpdate,
   GetAuditLogParams,
   Group,
   GroupInput,
@@ -401,6 +410,851 @@ export const usePatchMe = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getPatchMeMutationOptions(options));
+    }
+
+export const getGetFacilitiesAccessUrl = () => {
+
+
+
+
+  return `/api/facilities/access`
+}
+
+/**
+ * @summary Check whether the current user can access Facilities
+ */
+export const getFacilitiesAccess = async ( options?: Parameters<typeof customFetch>[1]): Promise<FacilitiesAccessStatus> => {
+
+  return customFetch<FacilitiesAccessStatus>(getGetFacilitiesAccessUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetFacilitiesAccessQueryKey = () => {
+    return [
+    `/api/facilities/access`
+    ] as const;
+    }
+
+
+export const getGetFacilitiesAccessQueryOptions = <TData = Awaited<ReturnType<typeof getFacilitiesAccess>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFacilitiesAccess>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetFacilitiesAccessQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getFacilitiesAccess>>> = ({ signal }) => getFacilitiesAccess({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getFacilitiesAccess>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetFacilitiesAccessQueryResult = NonNullable<Awaited<ReturnType<typeof getFacilitiesAccess>>>
+export type GetFacilitiesAccessQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Check whether the current user can access Facilities
+ */
+
+export function useGetFacilitiesAccess<TData = Awaited<ReturnType<typeof getFacilitiesAccess>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFacilitiesAccess>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetFacilitiesAccessQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getListFacilitiesCategoriesUrl = () => {
+
+
+
+
+  return `/api/facilities`
+}
+
+/**
+ * @summary List visible request categories and cards
+ */
+export const listFacilitiesCategories = async ( options?: Parameters<typeof customFetch>[1]): Promise<FacilitiesCategory[]> => {
+
+  return customFetch<FacilitiesCategory[]>(getListFacilitiesCategoriesUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListFacilitiesCategoriesQueryKey = () => {
+    return [
+    `/api/facilities`
+    ] as const;
+    }
+
+
+export const getListFacilitiesCategoriesQueryOptions = <TData = Awaited<ReturnType<typeof listFacilitiesCategories>>, TError = ErrorType<void>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listFacilitiesCategories>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListFacilitiesCategoriesQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listFacilitiesCategories>>> = ({ signal }) => listFacilitiesCategories({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listFacilitiesCategories>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListFacilitiesCategoriesQueryResult = NonNullable<Awaited<ReturnType<typeof listFacilitiesCategories>>>
+export type ListFacilitiesCategoriesQueryError = ErrorType<void>
+
+
+/**
+ * @summary List visible request categories and cards
+ */
+
+export function useListFacilitiesCategories<TData = Awaited<ReturnType<typeof listFacilitiesCategories>>, TError = ErrorType<void>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listFacilitiesCategories>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListFacilitiesCategoriesQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getAdminListFacilitiesCategoriesUrl = () => {
+
+
+
+
+  return `/api/admin/facilities`
+}
+
+/**
+ * @summary List all Facilities categories and cards
+ */
+export const adminListFacilitiesCategories = async ( options?: Parameters<typeof customFetch>[1]): Promise<FacilitiesCategory[]> => {
+
+  return customFetch<FacilitiesCategory[]>(getAdminListFacilitiesCategoriesUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getAdminListFacilitiesCategoriesQueryKey = () => {
+    return [
+    `/api/admin/facilities`
+    ] as const;
+    }
+
+
+export const getAdminListFacilitiesCategoriesQueryOptions = <TData = Awaited<ReturnType<typeof adminListFacilitiesCategories>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof adminListFacilitiesCategories>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getAdminListFacilitiesCategoriesQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof adminListFacilitiesCategories>>> = ({ signal }) => adminListFacilitiesCategories({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof adminListFacilitiesCategories>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type AdminListFacilitiesCategoriesQueryResult = NonNullable<Awaited<ReturnType<typeof adminListFacilitiesCategories>>>
+export type AdminListFacilitiesCategoriesQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List all Facilities categories and cards
+ */
+
+export function useAdminListFacilitiesCategories<TData = Awaited<ReturnType<typeof adminListFacilitiesCategories>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof adminListFacilitiesCategories>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getAdminListFacilitiesCategoriesQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getListFacilitiesAccessGrantsUrl = () => {
+
+
+
+
+  return `/api/admin/facilities/access`
+}
+
+/**
+ * @summary List explicit Facilities access grants
+ */
+export const listFacilitiesAccessGrants = async ( options?: Parameters<typeof customFetch>[1]): Promise<FacilitiesAccessGrant[]> => {
+
+  return customFetch<FacilitiesAccessGrant[]>(getListFacilitiesAccessGrantsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListFacilitiesAccessGrantsQueryKey = () => {
+    return [
+    `/api/admin/facilities/access`
+    ] as const;
+    }
+
+
+export const getListFacilitiesAccessGrantsQueryOptions = <TData = Awaited<ReturnType<typeof listFacilitiesAccessGrants>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listFacilitiesAccessGrants>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListFacilitiesAccessGrantsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listFacilitiesAccessGrants>>> = ({ signal }) => listFacilitiesAccessGrants({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listFacilitiesAccessGrants>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListFacilitiesAccessGrantsQueryResult = NonNullable<Awaited<ReturnType<typeof listFacilitiesAccessGrants>>>
+export type ListFacilitiesAccessGrantsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List explicit Facilities access grants
+ */
+
+export function useListFacilitiesAccessGrants<TData = Awaited<ReturnType<typeof listFacilitiesAccessGrants>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listFacilitiesAccessGrants>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListFacilitiesAccessGrantsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getUpdateFacilitiesAccessUrl = (userId: string,) => {
+
+
+
+
+  return `/api/admin/facilities/access/${userId}`
+}
+
+/**
+ * @summary Grant or revoke a user's Facilities access
+ */
+export const updateFacilitiesAccess = async (userId: string,
+    facilitiesAccessUpdate: FacilitiesAccessUpdate, options?: Parameters<typeof customFetch>[1]): Promise<FacilitiesAccessStatus> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
+return customFetch<FacilitiesAccessStatus>(getUpdateFacilitiesAccessUrl(userId),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(facilitiesAccessUpdate)
+  }
+);}
+
+
+
+
+
+export const getUpdateFacilitiesAccessMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateFacilitiesAccess>>, TError,UpdateFacilitiesAccessMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateFacilitiesAccess>>, TError,UpdateFacilitiesAccessMutationVariables, TContext> => {
+
+const mutationKey = ['updateFacilitiesAccess'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateFacilitiesAccess>>, UpdateFacilitiesAccessMutationVariables> = (props) => {
+          const {userId,data} = props ?? {};
+
+          return  updateFacilitiesAccess(userId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateFacilitiesAccessMutationResult = NonNullable<Awaited<ReturnType<typeof updateFacilitiesAccess>>>
+    export type UpdateFacilitiesAccessMutationBody = BodyType<FacilitiesAccessUpdate>
+    export type UpdateFacilitiesAccessMutationError = ErrorType<unknown>
+    export type UpdateFacilitiesAccessMutationVariables = {userId: string;data: BodyType<FacilitiesAccessUpdate>}
+
+    /**
+ * @summary Grant or revoke a user's Facilities access
+ */
+export const useUpdateFacilitiesAccess = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateFacilitiesAccess>>, TError,UpdateFacilitiesAccessMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateFacilitiesAccess>>,
+        TError,
+        UpdateFacilitiesAccessMutationVariables,
+        TContext
+      > => {
+      return useMutation(getUpdateFacilitiesAccessMutationOptions(options));
+    }
+
+export const getCreateFacilitiesCategoryUrl = () => {
+
+
+
+
+  return `/api/admin/facilities/categories`
+}
+
+/**
+ * @summary Create a request category
+ */
+export const createFacilitiesCategory = async (facilitiesCategoryInput: FacilitiesCategoryInput, options?: Parameters<typeof customFetch>[1]): Promise<FacilitiesCategory> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
+return customFetch<FacilitiesCategory>(getCreateFacilitiesCategoryUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(facilitiesCategoryInput)
+  }
+);}
+
+
+
+
+
+export const getCreateFacilitiesCategoryMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createFacilitiesCategory>>, TError,CreateFacilitiesCategoryMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createFacilitiesCategory>>, TError,CreateFacilitiesCategoryMutationVariables, TContext> => {
+
+const mutationKey = ['createFacilitiesCategory'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createFacilitiesCategory>>, CreateFacilitiesCategoryMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  createFacilitiesCategory(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateFacilitiesCategoryMutationResult = NonNullable<Awaited<ReturnType<typeof createFacilitiesCategory>>>
+    export type CreateFacilitiesCategoryMutationBody = BodyType<FacilitiesCategoryInput>
+    export type CreateFacilitiesCategoryMutationError = ErrorType<unknown>
+    export type CreateFacilitiesCategoryMutationVariables = {data: BodyType<FacilitiesCategoryInput>}
+
+    /**
+ * @summary Create a request category
+ */
+export const useCreateFacilitiesCategory = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createFacilitiesCategory>>, TError,CreateFacilitiesCategoryMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createFacilitiesCategory>>,
+        TError,
+        CreateFacilitiesCategoryMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreateFacilitiesCategoryMutationOptions(options));
+    }
+
+export const getUpdateFacilitiesCategoryUrl = (categoryId: number,) => {
+
+
+
+
+  return `/api/admin/facilities/categories/${categoryId}`
+}
+
+/**
+ * @summary Update a request category
+ */
+export const updateFacilitiesCategory = async (categoryId: number,
+    facilitiesCategoryUpdate: FacilitiesCategoryUpdate, options?: Parameters<typeof customFetch>[1]): Promise<FacilitiesCategory> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
+return customFetch<FacilitiesCategory>(getUpdateFacilitiesCategoryUrl(categoryId),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(facilitiesCategoryUpdate)
+  }
+);}
+
+
+
+
+
+export const getUpdateFacilitiesCategoryMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateFacilitiesCategory>>, TError,UpdateFacilitiesCategoryMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateFacilitiesCategory>>, TError,UpdateFacilitiesCategoryMutationVariables, TContext> => {
+
+const mutationKey = ['updateFacilitiesCategory'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateFacilitiesCategory>>, UpdateFacilitiesCategoryMutationVariables> = (props) => {
+          const {categoryId,data} = props ?? {};
+
+          return  updateFacilitiesCategory(categoryId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateFacilitiesCategoryMutationResult = NonNullable<Awaited<ReturnType<typeof updateFacilitiesCategory>>>
+    export type UpdateFacilitiesCategoryMutationBody = BodyType<FacilitiesCategoryUpdate>
+    export type UpdateFacilitiesCategoryMutationError = ErrorType<unknown>
+    export type UpdateFacilitiesCategoryMutationVariables = {categoryId: number;data: BodyType<FacilitiesCategoryUpdate>}
+
+    /**
+ * @summary Update a request category
+ */
+export const useUpdateFacilitiesCategory = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateFacilitiesCategory>>, TError,UpdateFacilitiesCategoryMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateFacilitiesCategory>>,
+        TError,
+        UpdateFacilitiesCategoryMutationVariables,
+        TContext
+      > => {
+      return useMutation(getUpdateFacilitiesCategoryMutationOptions(options));
+    }
+
+export const getDeleteFacilitiesCategoryUrl = (categoryId: number,) => {
+
+
+
+
+  return `/api/admin/facilities/categories/${categoryId}`
+}
+
+/**
+ * @summary Delete a category and its request cards
+ */
+export const deleteFacilitiesCategory = async (categoryId: number, options?: Parameters<typeof customFetch>[1]): Promise<void> => {
+
+  return customFetch<void>(getDeleteFacilitiesCategoryUrl(categoryId),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+
+export const getDeleteFacilitiesCategoryMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteFacilitiesCategory>>, TError,DeleteFacilitiesCategoryMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteFacilitiesCategory>>, TError,DeleteFacilitiesCategoryMutationVariables, TContext> => {
+
+const mutationKey = ['deleteFacilitiesCategory'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteFacilitiesCategory>>, DeleteFacilitiesCategoryMutationVariables> = (props) => {
+          const {categoryId} = props ?? {};
+
+          return  deleteFacilitiesCategory(categoryId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteFacilitiesCategoryMutationResult = NonNullable<Awaited<ReturnType<typeof deleteFacilitiesCategory>>>
+
+    export type DeleteFacilitiesCategoryMutationError = ErrorType<unknown>
+    export type DeleteFacilitiesCategoryMutationVariables = {categoryId: number}
+
+    /**
+ * @summary Delete a category and its request cards
+ */
+export const useDeleteFacilitiesCategory = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteFacilitiesCategory>>, TError,DeleteFacilitiesCategoryMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteFacilitiesCategory>>,
+        TError,
+        DeleteFacilitiesCategoryMutationVariables,
+        TContext
+      > => {
+      return useMutation(getDeleteFacilitiesCategoryMutationOptions(options));
+    }
+
+export const getCreateFacilitiesRequestUrl = () => {
+
+
+
+
+  return `/api/admin/facilities/requests`
+}
+
+/**
+ * @summary Create a request card
+ */
+export const createFacilitiesRequest = async (facilitiesRequestInput: FacilitiesRequestInput, options?: Parameters<typeof customFetch>[1]): Promise<FacilitiesRequest> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
+return customFetch<FacilitiesRequest>(getCreateFacilitiesRequestUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(facilitiesRequestInput)
+  }
+);}
+
+
+
+
+
+export const getCreateFacilitiesRequestMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createFacilitiesRequest>>, TError,CreateFacilitiesRequestMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createFacilitiesRequest>>, TError,CreateFacilitiesRequestMutationVariables, TContext> => {
+
+const mutationKey = ['createFacilitiesRequest'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createFacilitiesRequest>>, CreateFacilitiesRequestMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  createFacilitiesRequest(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateFacilitiesRequestMutationResult = NonNullable<Awaited<ReturnType<typeof createFacilitiesRequest>>>
+    export type CreateFacilitiesRequestMutationBody = BodyType<FacilitiesRequestInput>
+    export type CreateFacilitiesRequestMutationError = ErrorType<unknown>
+    export type CreateFacilitiesRequestMutationVariables = {data: BodyType<FacilitiesRequestInput>}
+
+    /**
+ * @summary Create a request card
+ */
+export const useCreateFacilitiesRequest = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createFacilitiesRequest>>, TError,CreateFacilitiesRequestMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createFacilitiesRequest>>,
+        TError,
+        CreateFacilitiesRequestMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreateFacilitiesRequestMutationOptions(options));
+    }
+
+export const getUpdateFacilitiesRequestUrl = (requestId: number,) => {
+
+
+
+
+  return `/api/admin/facilities/requests/${requestId}`
+}
+
+/**
+ * @summary Update a request card, link, or button
+ */
+export const updateFacilitiesRequest = async (requestId: number,
+    facilitiesRequestUpdate: FacilitiesRequestUpdate, options?: Parameters<typeof customFetch>[1]): Promise<FacilitiesRequest> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
+return customFetch<FacilitiesRequest>(getUpdateFacilitiesRequestUrl(requestId),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(facilitiesRequestUpdate)
+  }
+);}
+
+
+
+
+
+export const getUpdateFacilitiesRequestMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateFacilitiesRequest>>, TError,UpdateFacilitiesRequestMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateFacilitiesRequest>>, TError,UpdateFacilitiesRequestMutationVariables, TContext> => {
+
+const mutationKey = ['updateFacilitiesRequest'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateFacilitiesRequest>>, UpdateFacilitiesRequestMutationVariables> = (props) => {
+          const {requestId,data} = props ?? {};
+
+          return  updateFacilitiesRequest(requestId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateFacilitiesRequestMutationResult = NonNullable<Awaited<ReturnType<typeof updateFacilitiesRequest>>>
+    export type UpdateFacilitiesRequestMutationBody = BodyType<FacilitiesRequestUpdate>
+    export type UpdateFacilitiesRequestMutationError = ErrorType<unknown>
+    export type UpdateFacilitiesRequestMutationVariables = {requestId: number;data: BodyType<FacilitiesRequestUpdate>}
+
+    /**
+ * @summary Update a request card, link, or button
+ */
+export const useUpdateFacilitiesRequest = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateFacilitiesRequest>>, TError,UpdateFacilitiesRequestMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateFacilitiesRequest>>,
+        TError,
+        UpdateFacilitiesRequestMutationVariables,
+        TContext
+      > => {
+      return useMutation(getUpdateFacilitiesRequestMutationOptions(options));
+    }
+
+export const getDeleteFacilitiesRequestUrl = (requestId: number,) => {
+
+
+
+
+  return `/api/admin/facilities/requests/${requestId}`
+}
+
+/**
+ * @summary Delete a request card
+ */
+export const deleteFacilitiesRequest = async (requestId: number, options?: Parameters<typeof customFetch>[1]): Promise<void> => {
+
+  return customFetch<void>(getDeleteFacilitiesRequestUrl(requestId),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+
+export const getDeleteFacilitiesRequestMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteFacilitiesRequest>>, TError,DeleteFacilitiesRequestMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteFacilitiesRequest>>, TError,DeleteFacilitiesRequestMutationVariables, TContext> => {
+
+const mutationKey = ['deleteFacilitiesRequest'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteFacilitiesRequest>>, DeleteFacilitiesRequestMutationVariables> = (props) => {
+          const {requestId} = props ?? {};
+
+          return  deleteFacilitiesRequest(requestId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteFacilitiesRequestMutationResult = NonNullable<Awaited<ReturnType<typeof deleteFacilitiesRequest>>>
+
+    export type DeleteFacilitiesRequestMutationError = ErrorType<unknown>
+    export type DeleteFacilitiesRequestMutationVariables = {requestId: number}
+
+    /**
+ * @summary Delete a request card
+ */
+export const useDeleteFacilitiesRequest = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteFacilitiesRequest>>, TError,DeleteFacilitiesRequestMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteFacilitiesRequest>>,
+        TError,
+        DeleteFacilitiesRequestMutationVariables,
+        TContext
+      > => {
+      return useMutation(getDeleteFacilitiesRequestMutationOptions(options));
     }
 
 export const getGetDashboardSummaryUrl = () => {
