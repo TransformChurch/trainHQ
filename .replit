@@ -21,6 +21,7 @@ router = "application"
 deploymentTarget = "autoscale"
 
 [nix]
+channel = "stable-25_05"
 
 [userenv]
 
