@@ -75,7 +75,7 @@ export const PatchMeResponse = zod.object({
 
 
 /**
- * @summary Check whether the current user can access Facilities
+ * @summary Check whether the current user can access the Request Hub
  */
 export const GetFacilitiesAccessResponse = zod.object({
   "allowed": zod.boolean()
@@ -143,7 +143,7 @@ export const AdminListFacilitiesCategoriesResponse = zod.array(AdminListFaciliti
 
 
 /**
- * @summary List explicit Facilities access grants
+ * @summary List explicit user Request Hub access grants
  */
 export const ListFacilitiesAccessGrantsResponseItem = zod.object({
   "id": zod.number().int(),
@@ -155,7 +155,7 @@ export const ListFacilitiesAccessGrantsResponse = zod.array(ListFacilitiesAccess
 
 
 /**
- * @summary Grant or revoke a user's Facilities access
+ * @summary Grant or revoke a user's Request Hub access
  */
 export const UpdateFacilitiesAccessParams = zod.object({
   "userId": zod.coerce.string()
@@ -166,6 +166,37 @@ export const UpdateFacilitiesAccessBody = zod.object({
 })
 
 export const UpdateFacilitiesAccessResponse = zod.object({
+  "allowed": zod.boolean()
+})
+
+
+/**
+ * @summary List group Request Hub access grants
+ */
+export const ListFacilitiesGroupAccessGrantsResponseItem = zod.object({
+  "id": zod.number().int(),
+  "groupId": zod.number().int(),
+  "groupName": zod.string(),
+  "memberCount": zod.number().int(),
+  "grantedByExternalUserId": zod.string(),
+  "grantedAt": zod.string()
+})
+export const ListFacilitiesGroupAccessGrantsResponse = zod.array(ListFacilitiesGroupAccessGrantsResponseItem)
+
+
+/**
+ * @summary Grant or revoke a group's Request Hub access
+ */
+export const UpdateFacilitiesGroupAccessParams = zod.object({
+  "groupId": zod.coerce.number().int()
+})
+
+export const UpdateFacilitiesGroupAccessBody = zod.object({
+  "enabled": zod.boolean()
+})
+
+export const UpdateFacilitiesGroupAccessResponse = zod.object({
+  "groupId": zod.number().int(),
   "allowed": zod.boolean()
 })
 

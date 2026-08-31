@@ -103,10 +103,10 @@ paths:
     get:
       operationId: getFacilitiesAccess
       tags: [facilities]
-      summary: Check whether the current user can access Facilities
+      summary: Check whether the current user can access the Request Hub
       responses:
         "200":
-          description: Current user's Facilities access
+          description: Current user's Request Hub access
           content:
             application/json:
               schema:
@@ -127,7 +127,7 @@ paths:
                 items:
                   $ref: "#/components/schemas/FacilitiesCategory"
         "403":
-          description: Facilities access has not been granted
+          description: Request Hub access has not been granted
 
   /admin/facilities:
     get:
@@ -148,10 +148,10 @@ paths:
     get:
       operationId: listFacilitiesAccessGrants
       tags: [admin]
-      summary: List explicit Facilities access grants
+      summary: List explicit user Request Hub access grants
       responses:
         "200":
-          description: Facilities access grants
+          description: User Request Hub access grants
           content:
             application/json:
               schema:
@@ -163,7 +163,7 @@ paths:
     put:
       operationId: updateFacilitiesAccess
       tags: [admin]
-      summary: Grant or revoke a user's Facilities access
+      summary: Grant or revoke a user's Request Hub access
       parameters:
         - name: userId
           in: path
@@ -183,6 +183,46 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/FacilitiesAccessStatus"
+
+  /admin/facilities/access/groups:
+    get:
+      operationId: listFacilitiesGroupAccessGrants
+      tags: [admin]
+      summary: List group Request Hub access grants
+      responses:
+        "200":
+          description: Group Request Hub access grants
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/FacilitiesGroupAccessGrant"
+
+  /admin/facilities/access/groups/{groupId}:
+    put:
+      operationId: updateFacilitiesGroupAccess
+      tags: [admin]
+      summary: Grant or revoke a group's Request Hub access
+      parameters:
+        - name: groupId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FacilitiesAccessUpdate"
+      responses:
+        "200":
+          description: Updated group access status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FacilitiesGroupAccessStatus"
 
   /admin/facilities/categories:
     post:
@@ -1247,6 +1287,32 @@ components:
         grantedAt:
           type: string
       required: [id, userId, grantedByExternalUserId, grantedAt]
+
+    FacilitiesGroupAccessStatus:
+      type: object
+      properties:
+        groupId:
+          type: integer
+        allowed:
+          type: boolean
+      required: [groupId, allowed]
+
+    FacilitiesGroupAccessGrant:
+      type: object
+      properties:
+        id:
+          type: integer
+        groupId:
+          type: integer
+        groupName:
+          type: string
+        memberCount:
+          type: integer
+        grantedByExternalUserId:
+          type: string
+        grantedAt:
+          type: string
+      required: [id, groupId, groupName, memberCount, grantedByExternalUserId, grantedAt]
 
     FacilitiesRequest:
       type: object

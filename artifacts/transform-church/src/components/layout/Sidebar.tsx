@@ -2,10 +2,17 @@ import { Link, useLocation } from "wouter";
 import { useGetMe } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/App";
-import { BookOpen, LayoutDashboard, Settings, Video, ShieldCheck, LogOut, Menu, UserCircle, Users, TrendingUp, UsersRound, FileText, Wrench } from "lucide-react";
+import { BookOpen, LayoutDashboard, Settings, Video, ShieldCheck, LogOut, Menu, UserCircle, Users, TrendingUp, UsersRound, FileText, Wrench, type LucideIcon } from "lucide-react";
 import wordmark from "@assets/TC_Black_Wordmark_1782833324395.png";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { useEffect, useState } from "react";
+
+type NavigationItem = {
+  href: string;
+  label: string;
+  icon: LucideIcon;
+  badge?: string;
+};
 
 export function Sidebar() {
   const [location] = useLocation();
@@ -39,26 +46,29 @@ export function Sidebar() {
       .catch(() => setFacilitiesAllowed(false));
   }, [user?.id, user?.role, basePath]);
 
-  const navItems = [
+  const learningItems: NavigationItem[] = [
     { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
     { href: "/tracks", label: "Training Tracks", icon: BookOpen },
     { href: "/queue", label: "My Queue", icon: Video },
     { href: "/groups", label: "Groups", icon: UsersRound },
-    { href: "/documents", label: "Documents", icon: FileText },
-    ...(facilitiesAllowed ? [{ href: "/facilities", label: "Facilities", icon: Wrench }] : []),
     { href: "/profile", label: "My Profile", icon: UserCircle, badge: isProfileIncomplete ? "!" : undefined },
   ];
 
-  const managerItems = [
+  const informationItems: NavigationItem[] = [
+    { href: "/documents", label: "Documents", icon: FileText },
+    ...(facilitiesAllowed ? [{ href: "/facilities", label: "Request Hub", icon: Wrench }] : []),
+  ];
+
+  const managerItems: NavigationItem[] = [
     { href: "/admin/users", label: "Users & Progress", icon: Users },
     { href: "/admin/content", label: "Content Manager", icon: Settings },
     { href: "/admin/growth-tracks", label: "Growth Tracks", icon: TrendingUp },
   ];
 
-  const adminOnlyItems = [
+  const adminOnlyItems: NavigationItem[] = [
     { href: "/admin", label: "Admin Dashboard", icon: ShieldCheck },
     { href: "/admin/settings", label: "Admin Settings", icon: Settings },
-    { href: "/admin/facilities", label: "Facilities Manager", icon: Wrench },
+    { href: "/admin/facilities", label: "Request Hub", icon: Wrench },
   ];
 
   const handleSignOut = () => {
@@ -72,43 +82,27 @@ export function Sidebar() {
         <img src={wordmark} alt="Transform Church" className="w-full h-auto" />
       </div>
 
-      <nav className="flex-1 px-4 space-y-1">
-        <div className="text-xs font-semibold text-sidebar-foreground/50 uppercase tracking-wider mb-2 px-2">Learning</div>
-        {navItems.map((item) => {
-          const Icon = item.icon;
-          const isActive = location === item.href || location.startsWith(`${item.href}/`);
-          return (
-            <Link key={item.href} href={item.href} data-testid={`nav-${item.label.toLowerCase().replace(/\s+/g, "-")}`}>
-              <div
-                className={`flex items-center gap-3 px-3 py-2 rounded-md transition-colors cursor-pointer ${
-                  isActive
-                    ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
-                    : "text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
-                }`}
-              >
-                <Icon className={`w-5 h-5 ${isActive ? "text-primary" : ""}`} />
-                <span className="flex-1">{item.label}</span>
-                {item.badge && (
-                  <span className="text-[10px] font-bold bg-amber-400 text-amber-900 rounded-full w-4 h-4 flex items-center justify-center leading-none">
-                    {item.badge}
-                  </span>
-                )}
-              </div>
-            </Link>
-          );
-        })}
-
-        {isManagerOrAdmin && (
-          <>
-            <div className="text-xs font-semibold text-sidebar-foreground/50 uppercase tracking-wider mt-8 mb-2 px-2">
-              {isAdmin ? "Administration" : "Management"}
+      <nav className="flex-1 overflow-y-auto px-4 space-y-1">
+        {[
+          { label: "Learning", items: learningItems },
+          { label: "Information", items: informationItems },
+          ...(isManagerOrAdmin
+            ? [{ label: "Admin", items: [...(isAdmin ? adminOnlyItems : []), ...managerItems] }]
+            : []),
+        ].map((section) => (
+          <div key={section.label} className={section.label === "Learning" ? "" : "mt-8"}>
+            <div className="text-xs font-semibold text-sidebar-foreground/50 uppercase tracking-wider mb-2 px-2">
+              {section.label}
             </div>
-
-            {isAdmin && adminOnlyItems.map((item) => {
+            {section.items.map((item) => {
               const Icon = item.icon;
               const isActive = location === item.href || location.startsWith(`${item.href}/`);
               return (
-                <Link key={item.href} href={item.href} data-testid={`nav-admin-${item.label.toLowerCase().replace(/\s+/g, "-")}`}>
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  data-testid={`${section.label === "Admin" ? "nav-admin-" : "nav-"}${item.label.toLowerCase().replace(/\s+/g, "-")}`}
+                >
                   <div
                     className={`flex items-center gap-3 px-3 py-2 rounded-md transition-colors cursor-pointer ${
                       isActive
@@ -117,32 +111,19 @@ export function Sidebar() {
                     }`}
                   >
                     <Icon className={`w-5 h-5 ${isActive ? "text-primary" : ""}`} />
-                    {item.label}
+                    <span className="flex-1">{item.label}</span>
+                    {item.badge && (
+                      <span className="text-[10px] font-bold bg-amber-400 text-amber-900 rounded-full w-4 h-4 flex items-center justify-center leading-none">
+                        {item.badge}
+                      </span>
+                    )}
                   </div>
                 </Link>
               );
             })}
+          </div>
+        ))}
 
-            {managerItems.map((item) => {
-              const Icon = item.icon;
-              const isActive = location === item.href || location.startsWith(`${item.href}/`);
-              return (
-                <Link key={item.href} href={item.href} data-testid={`nav-admin-${item.label.toLowerCase().replace(/\s+/g, "-")}`}>
-                  <div
-                    className={`flex items-center gap-3 px-3 py-2 rounded-md transition-colors cursor-pointer ${
-                      isActive
-                        ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
-                        : "text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
-                    }`}
-                  >
-                    <Icon className={`w-5 h-5 ${isActive ? "text-primary" : ""}`} />
-                    {item.label}
-                  </div>
-                </Link>
-              );
-            })}
-          </>
-        )}
       </nav>
 
       <div className="px-4 mt-auto">

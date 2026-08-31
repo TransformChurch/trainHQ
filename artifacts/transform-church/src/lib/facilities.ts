@@ -32,6 +32,22 @@ export type FacilitiesAccessGrant = {
   grantedAt: string;
 };
 
+export type FacilitiesGroupAccessGrant = {
+  id: number;
+  groupId: number;
+  groupName: string;
+  memberCount: number;
+  grantedByExternalUserId: string;
+  grantedAt: string;
+};
+
+export type FacilitiesGroup = {
+  id: number;
+  name: string;
+  description: string | null;
+  memberCount: number;
+};
+
 const BASE = import.meta.env.VITE_API_URL?.replace(/\/$/, "") ?? import.meta.env.BASE_URL.replace(/\/$/, "");
 
 export async function facilitiesApi<T>(path: string, options?: RequestInit): Promise<T> {

@@ -42,7 +42,7 @@ export default function Facilities() {
   if (loading) {
     return (
       <div className="flex min-h-[60vh] items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" aria-label="Loading Facilities" />
+        <Loader2 className="h-8 w-8 animate-spin text-primary" aria-label="Loading Request Hub" />
       </div>
     );
   }
@@ -51,7 +51,7 @@ export default function Facilities() {
     return (
       <div className="mx-auto max-w-xl py-24 text-center">
         <AlertTriangle className="mx-auto mb-4 h-10 w-10 text-amber-500" />
-        <h1 className="text-2xl font-bold">Facilities is not available</h1>
+        <h1 className="text-2xl font-bold">Request Hub is not available</h1>
         <p className="mt-2 text-muted-foreground">{error}</p>
       </div>
     );
@@ -64,7 +64,7 @@ export default function Facilities() {
       <header className="bg-[#0c0c0c] px-6 py-10 text-white md:px-12 md:py-16 lg:px-16 lg:py-20">
         <div className="mx-auto max-w-5xl">
           <p className="text-sm font-bold uppercase tracking-[0.12em] md:text-base">
-            Transform Church <span className="font-normal text-white/55">Facilities</span>
+            Transform Church <span className="font-normal text-white/55">Request Hub</span>
           </p>
           <div className="mt-14 max-w-2xl md:mt-20">
             <h1 className="text-4xl font-black uppercase leading-[0.95] tracking-tight sm:text-5xl md:text-6xl">
@@ -154,7 +154,7 @@ export default function Facilities() {
         <aside className="mt-14 border-t border-black/20 pt-6 text-sm leading-6 text-black/65">
           <strong className="text-black">Not sure which one?</strong> Repairs vs. damage is the fuzziest
           call. If it wore out, it&apos;s Maintenance &amp; Repair; if something happened to it, it&apos;s
-          a Damage Report. When in doubt, pick Maintenance &amp; Repair. Facilities will re-route it if needed.
+          a Damage Report. When in doubt, pick Maintenance &amp; Repair. The Request Hub team will re-route it if needed.
         </aside>
       </main>
     </div>

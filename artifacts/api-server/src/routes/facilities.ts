@@ -2,10 +2,12 @@ import { Router } from "express";
 import {
   db,
   facilitiesAccessTable,
+  facilitiesGroupAccessTable,
   facilitiesCategoriesTable,
   facilitiesRequestsTable,
+  groupMembersTable,
 } from "@workspace/db";
-import { asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 import { getAuth } from "../middlewares/auth";
 import { getDbUser, requireAuth } from "../middlewares/requireAuth";
 
@@ -18,7 +20,18 @@ async function canAccessFacilities(user: { id: string; role: string }) {
     .from(facilitiesAccessTable)
     .where(eq(facilitiesAccessTable.userId, user.id))
     .limit(1);
-  return rows.length > 0;
+  if (rows.length > 0) return true;
+
+  const groupRows = await db
+    .select({ id: facilitiesGroupAccessTable.id })
+    .from(groupMembersTable)
+    .innerJoin(
+      facilitiesGroupAccessTable,
+      eq(groupMembersTable.groupId, facilitiesGroupAccessTable.groupId),
+    )
+    .where(eq(groupMembersTable.userId, user.id))
+    .limit(1);
+  return groupRows.length > 0;
 }
 
 async function currentUser(req: Parameters<typeof getAuth>[0]) {
@@ -47,7 +60,7 @@ router.get("/", requireAuth, async (req, res) => {
       return;
     }
     if (!(await canAccessFacilities(user))) {
-      res.status(403).json({ error: "You do not have access to Facilities." });
+      res.status(403).json({ error: "You do not have access to the Request Hub." });
       return;
     }
 

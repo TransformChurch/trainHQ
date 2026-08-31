@@ -1,5 +1,6 @@
 import { boolean, integer, pgTable, serial, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 import { usersTable } from "./users";
+import { groupsTable } from "./groups";
 
 export const facilitiesCategoriesTable = pgTable("facilities_categories", {
   id: serial("id").primaryKey(),
@@ -43,6 +44,18 @@ export const facilitiesAccessTable = pgTable(
   (table) => [uniqueIndex("facilities_access_user_id_unique").on(table.userId)],
 );
 
+export const facilitiesGroupAccessTable = pgTable(
+  "facilities_group_access",
+  {
+    id: serial("id").primaryKey(),
+    groupId: integer("group_id").notNull().references(() => groupsTable.id, { onDelete: "cascade" }),
+    grantedByExternalUserId: text("granted_by_external_user_id").notNull(),
+    grantedAt: timestamp("granted_at").notNull().defaultNow(),
+  },
+  (table) => [uniqueIndex("facilities_group_access_group_id_unique").on(table.groupId)],
+);
+
 export type FacilitiesCategory = typeof facilitiesCategoriesTable.$inferSelect;
 export type FacilitiesRequest = typeof facilitiesRequestsTable.$inferSelect;
 export type FacilitiesAccess = typeof facilitiesAccessTable.$inferSelect;
+export type FacilitiesGroupAccess = typeof facilitiesGroupAccessTable.$inferSelect;

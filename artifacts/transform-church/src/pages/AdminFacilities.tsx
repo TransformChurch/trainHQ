@@ -16,6 +16,7 @@ import {
   Trash2,
   Truck,
   Users,
+  UsersRound,
   Wrench,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -34,6 +35,8 @@ import {
   facilitiesIconOptions,
   type FacilitiesAccessGrant,
   type FacilitiesCategory,
+  type FacilitiesGroup,
+  type FacilitiesGroupAccessGrant,
   type FacilitiesRequest,
 } from "@/lib/facilities";
 
@@ -96,6 +99,8 @@ export default function AdminFacilities() {
   const { toast } = useToast();
   const [categories, setCategories] = useState<FacilitiesCategory[]>([]);
   const [grants, setGrants] = useState<FacilitiesAccessGrant[]>([]);
+  const [groupGrants, setGroupGrants] = useState<FacilitiesGroupAccessGrant[]>([]);
+  const [groups, setGroups] = useState<FacilitiesGroup[]>([]);
   const [loading, setLoading] = useState(true);
   const [categoryDialogOpen, setCategoryDialogOpen] = useState(false);
   const [requestDialogOpen, setRequestDialogOpen] = useState(false);
@@ -108,14 +113,18 @@ export default function AdminFacilities() {
   const load = async () => {
     setLoading(true);
     try {
-      const [catalog, access] = await Promise.all([
+      const [catalog, access, groupAccess, availableGroups] = await Promise.all([
         facilitiesApi<FacilitiesCategory[]>("/api/admin/facilities"),
         facilitiesApi<FacilitiesAccessGrant[]>("/api/admin/facilities/access"),
+        facilitiesApi<FacilitiesGroupAccessGrant[]>("/api/admin/facilities/access/groups"),
+        facilitiesApi<FacilitiesGroup[]>("/api/groups"),
       ]);
       setCategories(catalog);
       setGrants(access);
+      setGroupGrants(groupAccess);
+      setGroups(availableGroups);
     } catch (err) {
-      toast({ title: "Facilities settings could not be loaded", description: (err as Error).message, variant: "destructive" });
+      toast({ title: "Request Hub settings could not be loaded", description: (err as Error).message, variant: "destructive" });
     } finally {
       setLoading(false);
     }
@@ -234,13 +243,19 @@ export default function AdminFacilities() {
   };
 
   const grantedUserIds = useMemo(() => new Set(grants.map((grant) => grant.userId)), [grants]);
+  const grantedGroupIds = useMemo(() => new Set(groupGrants.map((grant) => grant.groupId)), [groupGrants]);
   const filteredUsers = (users ?? []).filter((user) => {
     const haystack = `${user.firstName} ${user.lastName} ${user.email}`.toLowerCase();
     return haystack.includes(search.trim().toLowerCase());
   });
+  const filteredGroups = groups.filter((group) => {
+    const haystack = `${group.name} ${group.description ?? ""}`.toLowerCase();
+    return haystack.includes(search.trim().toLowerCase());
+  });
 
   const setAccess = async (userId: string, enabled: boolean) => {
-    setSavingAccess((current) => new Set(current).add(userId));
+    const savingKey = `user:${userId}`;
+    setSavingAccess((current) => new Set(current).add(savingKey));
     try {
       await facilitiesApi(`/api/admin/facilities/access/${encodeURIComponent(userId)}`, {
         method: "PUT",
@@ -248,13 +263,35 @@ export default function AdminFacilities() {
       });
       const next = await facilitiesApi<FacilitiesAccessGrant[]>("/api/admin/facilities/access");
       setGrants(next);
-      toast({ title: enabled ? "Facilities access granted" : "Facilities access removed" });
+      toast({ title: enabled ? "Request Hub access granted" : "Request Hub access removed" });
     } catch (err) {
       toast({ title: "Access could not be updated", description: (err as Error).message, variant: "destructive" });
     } finally {
       setSavingAccess((current) => {
         const next = new Set(current);
-        next.delete(userId);
+        next.delete(savingKey);
+        return next;
+      });
+    }
+  };
+
+  const setGroupAccess = async (groupId: number, enabled: boolean) => {
+    const savingKey = `group:${groupId}`;
+    setSavingAccess((current) => new Set(current).add(savingKey));
+    try {
+      await facilitiesApi(`/api/admin/facilities/access/groups/${groupId}`, {
+        method: "PUT",
+        body: JSON.stringify({ enabled }),
+      });
+      const next = await facilitiesApi<FacilitiesGroupAccessGrant[]>("/api/admin/facilities/access/groups");
+      setGroupGrants(next);
+      toast({ title: enabled ? "Request Hub access granted to group" : "Request Hub group access removed" });
+    } catch (err) {
+      toast({ title: "Group access could not be updated", description: (err as Error).message, variant: "destructive" });
+    } finally {
+      setSavingAccess((current) => {
+        const next = new Set(current);
+        next.delete(savingKey);
         return next;
       });
     }
@@ -267,16 +304,16 @@ export default function AdminFacilities() {
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
       <div>
-        <h1 className="text-3xl font-bold font-serif">Facilities Manager</h1>
+        <h1 className="text-3xl font-bold font-serif">Request Hub</h1>
         <p className="mt-2 text-muted-foreground">
-          Manage request categories, links, button text, and who can access the Facilities hub.
+          Manage request categories, links, button text, and who can access the Request Hub.
         </p>
       </div>
 
       <Tabs defaultValue="directory">
         <TabsList>
           <TabsTrigger value="directory"><ClipboardList className="mr-2 h-4 w-4" />Request Directory</TabsTrigger>
-          <TabsTrigger value="access"><Users className="mr-2 h-4 w-4" />User Access</TabsTrigger>
+          <TabsTrigger value="access"><Users className="mr-2 h-4 w-4" />Access</TabsTrigger>
         </TabsList>
 
         <TabsContent value="directory" className="mt-6 space-y-6">
@@ -356,22 +393,23 @@ export default function AdminFacilities() {
           ))}
         </TabsContent>
 
-        <TabsContent value="access" className="mt-6">
+        <TabsContent value="access" className="mt-6 space-y-6">
           <Card>
             <CardHeader>
               <CardTitle>User Access</CardTitle>
               <p className="text-sm text-muted-foreground">
-                Admins always have access. Everyone else must be enabled here before Facilities appears in their navigation.
+                Admins always have access. Everyone else can be enabled individually or through a group.
               </p>
               <div className="relative max-w-md pt-2">
                 <Search className="absolute left-3 top-5 h-4 w-4 text-muted-foreground" />
-                <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search by name or email" className="pl-9" />
+                <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search users or groups" className="pl-9" />
               </div>
             </CardHeader>
             <CardContent className="divide-y p-0">
               {filteredUsers.map((user) => {
                 const inherited = user.role === "admin";
                 const checked = inherited || grantedUserIds.has(user.id);
+                const savingKey = `user:${user.id}`;
                 return (
                   <div key={user.id} className="flex items-center justify-between gap-4 px-6 py-4">
                     <div className="min-w-0">
@@ -383,18 +421,55 @@ export default function AdminFacilities() {
                     </div>
                     <div className="flex items-center gap-3">
                       <span className="hidden text-xs text-muted-foreground sm:inline">{inherited ? "Always allowed" : checked ? "Allowed" : "No access"}</span>
-                      {savingAccess.has(user.id) && <Loader2 className="h-4 w-4 animate-spin" />}
+                      {savingAccess.has(savingKey) && <Loader2 className="h-4 w-4 animate-spin" />}
                       <Switch
                         checked={checked}
-                        disabled={inherited || savingAccess.has(user.id)}
+                        disabled={inherited || savingAccess.has(savingKey)}
                         onCheckedChange={(enabled) => void setAccess(user.id, enabled)}
-                        aria-label={`Facilities access for ${user.firstName} ${user.lastName}`}
+                        aria-label={`Request Hub access for ${user.firstName} ${user.lastName}`}
                       />
                     </div>
                   </div>
                 );
               })}
               {filteredUsers.length === 0 && <p className="px-6 py-10 text-center text-sm text-muted-foreground">No users match your search.</p>}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2"><UsersRound className="h-5 w-5" />Group Access</CardTitle>
+              <p className="text-sm text-muted-foreground">
+                Members of an enabled group automatically receive Request Hub access.
+              </p>
+            </CardHeader>
+            <CardContent className="divide-y p-0">
+              {filteredGroups.map((group) => {
+                const checked = grantedGroupIds.has(group.id);
+                const savingKey = `group:${group.id}`;
+                return (
+                  <div key={group.id} className="flex items-center justify-between gap-4 px-6 py-4">
+                    <div className="min-w-0">
+                      <p className="truncate font-medium">{group.name}</p>
+                      <p className="truncate text-sm text-muted-foreground">
+                        {group.memberCount} {group.memberCount === 1 ? "member" : "members"}
+                        {group.description ? ` · ${group.description}` : ""}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className="hidden text-xs text-muted-foreground sm:inline">{checked ? "Allowed" : "No access"}</span>
+                      {savingAccess.has(savingKey) && <Loader2 className="h-4 w-4 animate-spin" />}
+                      <Switch
+                        checked={checked}
+                        disabled={savingAccess.has(savingKey)}
+                        onCheckedChange={(enabled) => void setGroupAccess(group.id, enabled)}
+                        aria-label={`Request Hub access for ${group.name}`}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+              {filteredGroups.length === 0 && <p className="px-6 py-10 text-center text-sm text-muted-foreground">No groups match your search.</p>}
             </CardContent>
           </Card>
         </TabsContent>

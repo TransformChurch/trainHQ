@@ -32,6 +32,8 @@ import type {
   FacilitiesCategory,
   FacilitiesCategoryInput,
   FacilitiesCategoryUpdate,
+  FacilitiesGroupAccessGrant,
+  FacilitiesGroupAccessStatus,
   FacilitiesRequest,
   FacilitiesRequestInput,
   FacilitiesRequestUpdate,
@@ -421,7 +423,7 @@ export const getGetFacilitiesAccessUrl = () => {
 }
 
 /**
- * @summary Check whether the current user can access Facilities
+ * @summary Check whether the current user can access the Request Hub
  */
 export const getFacilitiesAccess = async ( options?: Parameters<typeof customFetch>[1]): Promise<FacilitiesAccessStatus> => {
 
@@ -468,7 +470,7 @@ export type GetFacilitiesAccessQueryError = ErrorType<unknown>
 
 
 /**
- * @summary Check whether the current user can access Facilities
+ * @summary Check whether the current user can access the Request Hub
  */
 
 export function useGetFacilitiesAccess<TData = Awaited<ReturnType<typeof getFacilitiesAccess>>, TError = ErrorType<unknown>>(
@@ -652,7 +654,7 @@ export const getListFacilitiesAccessGrantsUrl = () => {
 }
 
 /**
- * @summary List explicit Facilities access grants
+ * @summary List explicit user Request Hub access grants
  */
 export const listFacilitiesAccessGrants = async ( options?: Parameters<typeof customFetch>[1]): Promise<FacilitiesAccessGrant[]> => {
 
@@ -699,7 +701,7 @@ export type ListFacilitiesAccessGrantsQueryError = ErrorType<unknown>
 
 
 /**
- * @summary List explicit Facilities access grants
+ * @summary List explicit user Request Hub access grants
  */
 
 export function useListFacilitiesAccessGrants<TData = Awaited<ReturnType<typeof listFacilitiesAccessGrants>>, TError = ErrorType<unknown>>(
@@ -729,7 +731,7 @@ export const getUpdateFacilitiesAccessUrl = (userId: string,) => {
 }
 
 /**
- * @summary Grant or revoke a user's Facilities access
+ * @summary Grant or revoke a user's Request Hub access
  */
 export const updateFacilitiesAccess = async (userId: string,
     facilitiesAccessUpdate: FacilitiesAccessUpdate, options?: Parameters<typeof customFetch>[1]): Promise<FacilitiesAccessStatus> => {
@@ -786,7 +788,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type UpdateFacilitiesAccessMutationVariables = {userId: string;data: BodyType<FacilitiesAccessUpdate>}
 
     /**
- * @summary Grant or revoke a user's Facilities access
+ * @summary Grant or revoke a user's Request Hub access
  */
 export const useUpdateFacilitiesAccess = <TError = ErrorType<unknown>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateFacilitiesAccess>>, TError,UpdateFacilitiesAccessMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
@@ -797,6 +799,162 @@ export const useUpdateFacilitiesAccess = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getUpdateFacilitiesAccessMutationOptions(options));
+    }
+
+export const getListFacilitiesGroupAccessGrantsUrl = () => {
+
+
+
+
+  return `/api/admin/facilities/access/groups`
+}
+
+/**
+ * @summary List group Request Hub access grants
+ */
+export const listFacilitiesGroupAccessGrants = async ( options?: Parameters<typeof customFetch>[1]): Promise<FacilitiesGroupAccessGrant[]> => {
+
+  return customFetch<FacilitiesGroupAccessGrant[]>(getListFacilitiesGroupAccessGrantsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListFacilitiesGroupAccessGrantsQueryKey = () => {
+    return [
+    `/api/admin/facilities/access/groups`
+    ] as const;
+    }
+
+
+export const getListFacilitiesGroupAccessGrantsQueryOptions = <TData = Awaited<ReturnType<typeof listFacilitiesGroupAccessGrants>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listFacilitiesGroupAccessGrants>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListFacilitiesGroupAccessGrantsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listFacilitiesGroupAccessGrants>>> = ({ signal }) => listFacilitiesGroupAccessGrants({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listFacilitiesGroupAccessGrants>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListFacilitiesGroupAccessGrantsQueryResult = NonNullable<Awaited<ReturnType<typeof listFacilitiesGroupAccessGrants>>>
+export type ListFacilitiesGroupAccessGrantsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List group Request Hub access grants
+ */
+
+export function useListFacilitiesGroupAccessGrants<TData = Awaited<ReturnType<typeof listFacilitiesGroupAccessGrants>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listFacilitiesGroupAccessGrants>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListFacilitiesGroupAccessGrantsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getUpdateFacilitiesGroupAccessUrl = (groupId: number,) => {
+
+
+
+
+  return `/api/admin/facilities/access/groups/${groupId}`
+}
+
+/**
+ * @summary Grant or revoke a group's Request Hub access
+ */
+export const updateFacilitiesGroupAccess = async (groupId: number,
+    facilitiesAccessUpdate: FacilitiesAccessUpdate, options?: Parameters<typeof customFetch>[1]): Promise<FacilitiesGroupAccessStatus> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
+return customFetch<FacilitiesGroupAccessStatus>(getUpdateFacilitiesGroupAccessUrl(groupId),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(facilitiesAccessUpdate)
+  }
+);}
+
+
+
+
+
+export const getUpdateFacilitiesGroupAccessMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateFacilitiesGroupAccess>>, TError,UpdateFacilitiesGroupAccessMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateFacilitiesGroupAccess>>, TError,UpdateFacilitiesGroupAccessMutationVariables, TContext> => {
+
+const mutationKey = ['updateFacilitiesGroupAccess'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateFacilitiesGroupAccess>>, UpdateFacilitiesGroupAccessMutationVariables> = (props) => {
+          const {groupId,data} = props ?? {};
+
+          return  updateFacilitiesGroupAccess(groupId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateFacilitiesGroupAccessMutationResult = NonNullable<Awaited<ReturnType<typeof updateFacilitiesGroupAccess>>>
+    export type UpdateFacilitiesGroupAccessMutationBody = BodyType<FacilitiesAccessUpdate>
+    export type UpdateFacilitiesGroupAccessMutationError = ErrorType<unknown>
+    export type UpdateFacilitiesGroupAccessMutationVariables = {groupId: number;data: BodyType<FacilitiesAccessUpdate>}
+
+    /**
+ * @summary Grant or revoke a group's Request Hub access
+ */
+export const useUpdateFacilitiesGroupAccess = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateFacilitiesGroupAccess>>, TError,UpdateFacilitiesGroupAccessMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateFacilitiesGroupAccess>>,
+        TError,
+        UpdateFacilitiesGroupAccessMutationVariables,
+        TContext
+      > => {
+      return useMutation(getUpdateFacilitiesGroupAccessMutationOptions(options));
     }
 
 export const getCreateFacilitiesCategoryUrl = () => {

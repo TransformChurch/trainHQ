@@ -2,8 +2,11 @@ import { Router } from "express";
 import {
   db,
   facilitiesAccessTable,
+  facilitiesGroupAccessTable,
   facilitiesCategoriesTable,
   facilitiesRequestsTable,
+  groupMembersTable,
+  groupsTable,
   usersTable,
 } from "@workspace/db";
 import { asc, eq, inArray } from "drizzle-orm";
@@ -90,6 +93,26 @@ router.get("/access", requireAdmin, async (_req, res) => {
   }
 });
 
+router.get("/access/groups", requireAdmin, async (_req, res) => {
+  try {
+    const grants = await db
+      .select({
+        id: facilitiesGroupAccessTable.id,
+        groupId: facilitiesGroupAccessTable.groupId,
+        groupName: groupsTable.name,
+        memberCount: db.$count(groupMembersTable, eq(groupMembersTable.groupId, groupsTable.id)),
+        grantedByExternalUserId: facilitiesGroupAccessTable.grantedByExternalUserId,
+        grantedAt: facilitiesGroupAccessTable.grantedAt,
+      })
+      .from(facilitiesGroupAccessTable)
+      .innerJoin(groupsTable, eq(facilitiesGroupAccessTable.groupId, groupsTable.id))
+      .orderBy(asc(groupsTable.name));
+    res.json(grants.map((grant) => ({ ...grant, grantedAt: grant.grantedAt.toISOString() })));
+  } catch {
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 router.put("/access/:userId", requireAdmin, async (req, res) => {
   try {
     const userId = req.params.userId as string;
@@ -122,6 +145,43 @@ router.put("/access/:userId", requireAdmin, async (req, res) => {
     }
     await db.delete(facilitiesAccessTable).where(eq(facilitiesAccessTable.userId, userId));
     res.json({ userId, allowed: false });
+  } catch {
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.put("/access/groups/:groupId", requireAdmin, async (req, res) => {
+  try {
+    const groupId = Number(req.params.groupId);
+    const enabled = req.body?.enabled;
+    if (!Number.isInteger(groupId) || groupId < 1) {
+      res.status(400).json({ error: "Invalid group" });
+      return;
+    }
+    if (typeof enabled !== "boolean") {
+      res.status(400).json({ error: "enabled must be a boolean" });
+      return;
+    }
+    const group = await db.select({ id: groupsTable.id }).from(groupsTable).where(eq(groupsTable.id, groupId)).limit(1);
+    if (!group[0]) {
+      res.status(404).json({ error: "Group not found" });
+      return;
+    }
+    if (enabled) {
+      const auth = getAuth(req);
+      const rows = await db
+        .insert(facilitiesGroupAccessTable)
+        .values({ groupId, grantedByExternalUserId: auth!.userId! })
+        .onConflictDoUpdate({
+          target: facilitiesGroupAccessTable.groupId,
+          set: { grantedByExternalUserId: auth!.userId!, grantedAt: new Date() },
+        })
+        .returning();
+      res.json({ ...rows[0], grantedAt: rows[0].grantedAt.toISOString(), groupId, allowed: true });
+      return;
+    }
+    await db.delete(facilitiesGroupAccessTable).where(eq(facilitiesGroupAccessTable.groupId, groupId));
+    res.json({ groupId, allowed: false });
   } catch {
     res.status(500).json({ error: "Internal server error" });
   }

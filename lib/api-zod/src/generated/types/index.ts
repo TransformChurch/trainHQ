@@ -20,6 +20,8 @@ export * from './facilitiesAccessUpdate';
 export * from './facilitiesCategory';
 export * from './facilitiesCategoryInput';
 export * from './facilitiesCategoryUpdate';
+export * from './facilitiesGroupAccessGrant';
+export * from './facilitiesGroupAccessStatus';
 export * from './facilitiesRequest';
 export * from './facilitiesRequestInput';
 export * from './facilitiesRequestUpdate';

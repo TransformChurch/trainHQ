@@ -45,6 +45,20 @@ export interface FacilitiesAccessGrant {
   grantedAt: string;
 }
 
+export interface FacilitiesGroupAccessStatus {
+  groupId: number;
+  allowed: boolean;
+}
+
+export interface FacilitiesGroupAccessGrant {
+  id: number;
+  groupId: number;
+  groupName: string;
+  memberCount: number;
+  grantedByExternalUserId: string;
+  grantedAt: string;
+}
+
 export interface FacilitiesRequest {
   id: number;
   categoryId: number;
