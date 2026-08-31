@@ -7,7 +7,6 @@ import {
   PlanningCenterError,
   savePlanningCenterTokens,
   upsertPlanningCenterUser,
-  type PlanningCenterPerson,
 } from "../lib/planningCenter";
 import { issueAppToken } from "../lib/appToken";
 
@@ -46,7 +45,6 @@ router.get("/planning-center/start", async (req, res) => {
 
 router.get("/planning-center/callback", async (req, res) => {
   let returnTo = "/sign-in";
-  let person: PlanningCenterPerson | null = null;
   try {
     const state = queryValue(req.query.state);
     if (!state) {
@@ -80,7 +78,7 @@ router.get("/planning-center/callback", async (req, res) => {
     }
 
     const tokens = await exchangeAuthorizationCode(code, authorizationState.codeVerifier);
-    person = await fetchCurrentPerson(tokens.accessToken);
+    const person = await fetchCurrentPerson(tokens.accessToken);
     const user = await upsertPlanningCenterUser(person);
     await savePlanningCenterTokens(user.id, tokens);
     const appToken = issueAppToken({
@@ -93,12 +91,6 @@ router.get("/planning-center/callback", async (req, res) => {
     redirectWithResult(res, returnTo, { token: appToken });
   } catch (err) {
     const error = err instanceof PlanningCenterError ? err : null;
-    if (error?.code === "planning_center_account_link_required" && person) {
-      req.log.warn(
-        { planningCenterPersonId: person.id },
-        "Planning Center identity needs administrator linking",
-      );
-    }
     req.log.error({ code: error?.code, err: error ? undefined : err }, "Planning Center OAuth callback failed");
     redirectWithResult(res, returnTo, {
       error: error?.code ?? "planning_center_callback_failed",
