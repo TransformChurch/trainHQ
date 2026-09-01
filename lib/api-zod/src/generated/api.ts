@@ -26,6 +26,8 @@ export const GetMeResponse = zod.object({
   "lastName": zod.string(),
   "email": zod.string(),
   "phone": zod.string().nullish(),
+  "address": zod.string().nullish(),
+  "planningCenterPersonId": zod.string().nullish(),
   "role": zod.enum(['student', 'manager', 'admin']),
   "createdAt": zod.string()
 })
@@ -48,13 +50,15 @@ export const UpsertMeResponse = zod.object({
   "lastName": zod.string(),
   "email": zod.string(),
   "phone": zod.string().nullish(),
+  "address": zod.string().nullish(),
+  "planningCenterPersonId": zod.string().nullish(),
   "role": zod.enum(['student', 'manager', 'admin']),
   "createdAt": zod.string()
 })
 
 
 /**
- * @summary Update current user profile fields (firstName, lastName, phone)
+ * @summary Update locally managed profile fields (firstName, lastName, phone)
  */
 export const PatchMeBody = zod.object({
   "firstName": zod.string().optional(),
@@ -69,6 +73,8 @@ export const PatchMeResponse = zod.object({
   "lastName": zod.string(),
   "email": zod.string(),
   "phone": zod.string().nullish(),
+  "address": zod.string().nullish(),
+  "planningCenterPersonId": zod.string().nullish(),
   "role": zod.enum(['student', 'manager', 'admin']),
   "createdAt": zod.string()
 })
@@ -1209,6 +1215,8 @@ export const UpdateUserRoleResponse = zod.object({
   "lastName": zod.string(),
   "email": zod.string(),
   "phone": zod.string().nullish(),
+  "address": zod.string().nullish(),
+  "planningCenterPersonId": zod.string().nullish(),
   "role": zod.enum(['student', 'manager', 'admin']),
   "createdAt": zod.string()
 })
@@ -1318,6 +1326,8 @@ export const GetProgressMatrixResponse = zod.object({
   "lastName": zod.string(),
   "email": zod.string(),
   "phone": zod.string().nullish(),
+  "address": zod.string().nullish(),
+  "planningCenterPersonId": zod.string().nullish(),
   "role": zod.enum(['student', 'manager', 'admin']),
   "createdAt": zod.string()
 }),

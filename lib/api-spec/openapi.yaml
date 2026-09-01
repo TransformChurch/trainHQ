@@ -83,7 +83,7 @@ paths:
     patch:
       operationId: patchMe
       tags: [users]
-      summary: Update current user profile fields (firstName, lastName, phone)
+      summary: Update locally managed profile fields (firstName, lastName, phone)
       requestBody:
         required: true
         content:
@@ -97,6 +97,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/User"
+        "403":
+          description: Planning Center-connected profile fields are managed through Church Center
 
   # ── Dashboard ───────────────────────────────────────────────────────────
   /facilities/access:
@@ -1253,6 +1255,10 @@ components:
         email:
           type: string
         phone:
+          type: ["string", "null"]
+        address:
+          type: ["string", "null"]
+        planningCenterPersonId:
           type: ["string", "null"]
         role:
           type: string

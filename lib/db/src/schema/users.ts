@@ -11,6 +11,7 @@ export const usersTable = pgTable("users", {
   lastName: text("last_name").notNull(),
   email: text("email").notNull().unique(),
   phone: text("phone"),
+  address: text("address"),
   planningCenterPersonId: text("planning_center_person_id").unique(),
   role: roleEnum("role").notNull().default("student"),
   createdAt: timestamp("created_at").notNull().defaultNow(),

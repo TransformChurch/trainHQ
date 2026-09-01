@@ -25,6 +25,8 @@ export type PlanningCenterPerson = {
   firstName: string;
   lastName: string;
   email: string;
+  phone: string | null;
+  address: string | null;
 };
 
 export class PlanningCenterError extends Error {
@@ -216,6 +218,26 @@ export function planningCenterPeopleUrl(path: string): URL {
   return requestUrl;
 }
 
+async function fetchPeopleCollection<T>(path: string, accessToken: string): Promise<T[]> {
+  const records: T[] = [];
+  const visited = new Set<string>();
+  let next: string | null = path;
+
+  while (next && !visited.has(next)) {
+    visited.add(next);
+    const response: {
+      data?: T[];
+      links?: { next?: unknown };
+    } = await peopleRequest(next, accessToken);
+    records.push(...(response.data ?? []));
+    next = typeof response.links?.next === "string" && response.links.next
+      ? response.links.next
+      : null;
+  }
+
+  return records;
+}
+
 export async function createAuthorizationRequest(returnToValue: unknown): Promise<string> {
   const settings = config();
   const state = randomBytes(32).toString("base64url");
@@ -297,16 +319,14 @@ export async function fetchCurrentPerson(accessToken: string): Promise<PlanningC
     ?.trim()
     .toLowerCase();
   if (!email) {
-    const emailsResponse = await peopleRequest<{
-      data?: Array<{
-        attributes?: {
-          address?: unknown;
-          primary?: unknown;
-          blocked?: unknown;
-        };
-      }>;
+    const emailRecords = await fetchPeopleCollection<{
+      attributes?: {
+        address?: unknown;
+        primary?: unknown;
+        blocked?: unknown;
+      };
     }>(`/people/${encodeURIComponent(id)}/emails`, accessToken);
-    const emails = (emailsResponse.data ?? [])
+    const emails = emailRecords
       .map((item) => ({
         address: typeof item.attributes?.address === "string"
           ? item.attributes.address.trim().toLowerCase()
@@ -328,7 +348,75 @@ export async function fetchCurrentPerson(accessToken: string): Promise<PlanningC
       422,
     );
   }
-  return { id, firstName, lastName, email };
+
+  const [phoneRecords, addressRecords] = await Promise.all([
+    fetchPeopleCollection<{ attributes?: Record<string, unknown> }>(
+      `/people/${encodeURIComponent(id)}/phone_numbers`,
+      accessToken,
+    ),
+    fetchPeopleCollection<{ attributes?: Record<string, unknown> }>(
+      `/people/${encodeURIComponent(id)}/addresses`,
+      accessToken,
+    ),
+  ]);
+
+  return {
+    id,
+    firstName,
+    lastName,
+    email,
+    phone: selectPrimaryPhone(phoneRecords),
+    address: selectPrimaryAddress(addressRecords),
+  };
+}
+
+function relationshipPriority(attributes: Record<string, unknown> | undefined): number {
+  return attributes?.primary === true ? 1 : 0;
+}
+
+export function selectPrimaryPhone(
+  records: Array<{ attributes?: Record<string, unknown> }>,
+): string | null {
+  const phones = records
+    .map((record) => {
+      const attributes = record.attributes ?? {};
+      const value = [attributes.number, attributes.phone_number, attributes.value]
+        .find((candidate): candidate is string => typeof candidate === "string" && candidate.trim().length > 0)
+        ?.trim() ?? "";
+      return { value, priority: relationshipPriority(attributes) };
+    })
+    .filter((phone) => phone.value.length > 0)
+    .sort((left, right) => right.priority - left.priority);
+  return phones[0]?.value ?? null;
+}
+
+export function selectPrimaryAddress(
+  records: Array<{ attributes?: Record<string, unknown> }>,
+): string | null {
+  const addresses = records
+    .map((record) => {
+      const attributes = record.attributes ?? {};
+      const lines = [
+        attributes.street_line_1,
+        attributes.street_line_2,
+        attributes.street,
+        attributes.city,
+        attributes.state,
+        attributes.zip,
+        attributes.postal_code,
+        attributes.country,
+        attributes.country_code,
+      ]
+        .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+        .map((value) => value.trim());
+      return {
+        value: [...new Set(lines)].join(", "),
+        priority: relationshipPriority(attributes),
+      };
+    })
+    .filter((address) => address.value.length > 0)
+    .sort((left, right) => right.priority - left.priority);
+  return addresses[0]?.value ?? null;
 }
 
 export async function upsertPlanningCenterUser(person: PlanningCenterPerson) {
@@ -360,6 +448,8 @@ export async function upsertPlanningCenterUser(person: PlanningCenterPerson) {
       firstName: person.firstName,
       lastName: person.lastName,
       email: person.email,
+      phone: person.phone,
+      address: person.address,
     }).where(eq(usersTable.id, subjectMatches[0].id)).returning();
     return updated[0];
   }
@@ -392,6 +482,8 @@ export async function upsertPlanningCenterUser(person: PlanningCenterPerson) {
     firstName: person.firstName,
     lastName: person.lastName,
     email: person.email,
+    phone: person.phone,
+    address: person.address,
     role: bootstrapAdmin && existingAdmin.length === 0 ? "admin" : "student",
   }).returning();
   return inserted[0];

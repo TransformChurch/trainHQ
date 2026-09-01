@@ -87,6 +87,8 @@ router.get("/planning-center/callback", async (req, res) => {
       given_name: user.firstName,
       family_name: user.lastName,
       ...(user.phone ? { phone_number: user.phone } : {}),
+      ...(user.address ? { address: user.address } : {}),
+      ...(user.planningCenterPersonId ? { planning_center_person_id: user.planningCenterPersonId } : {}),
     });
     redirectWithResult(res, returnTo, { token: appToken });
   } catch (err) {

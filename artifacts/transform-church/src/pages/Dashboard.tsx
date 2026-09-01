@@ -44,6 +44,7 @@ export default function Dashboard() {
     : 0;
 
   const isProfileIncomplete = user && (!user.phone || !user.firstName || !user.lastName);
+  const isPlanningCenterManaged = Boolean(user?.planningCenterPersonId);
   const newAssignmentsCount = assignedModules.filter((a: any) => a.isNew).length;
 
   return (
@@ -61,15 +62,19 @@ export default function Dashboard() {
             <div>
               <p className="font-semibold text-amber-800">Your profile is incomplete</p>
               <p className="text-sm text-amber-700 mt-0.5">
-                {!user?.firstName || !user?.lastName ? "Add your full name " : ""}
-                {!user?.phone ? "and phone number " : ""}
-                to complete your profile.
+                {isPlanningCenterManaged
+                  ? "Update the missing information in the Church Center app, then sign in again."
+                  : <>
+                      {!user?.firstName || !user?.lastName ? "Add your full name " : ""}
+                      {!user?.phone ? "and phone number " : ""}
+                      to complete your profile.
+                    </>}
               </p>
             </div>
           </div>
           <Link href="/profile">
             <Button size="sm" variant="outline" className="border-amber-300 text-amber-800 hover:bg-amber-100 shrink-0">
-              Complete Profile
+              {isPlanningCenterManaged ? "View Profile" : "Complete Profile"}
             </Button>
           </Link>
         </div>

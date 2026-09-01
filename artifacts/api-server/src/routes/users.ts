@@ -23,6 +23,8 @@ router.get("/me", requireAuth, async (req, res) => {
       lastName: user.lastName,
       email: user.email,
       phone: user.phone,
+      address: user.address,
+      planningCenterPersonId: user.planningCenterPersonId,
       role: user.role,
       createdAt: user.createdAt.toISOString(),
     });
@@ -48,11 +50,16 @@ router.put("/me", requireAuth, async (req, res) => {
     const serializeUser = (u: typeof usersTable.$inferSelect) => ({
       id: u.id, externalUserId: u.externalUserId, firstName: u.firstName, lastName: u.lastName,
       email: u.email, phone: u.phone, role: u.role, createdAt: u.createdAt.toISOString(),
+      address: u.address, planningCenterPersonId: u.planningCenterPersonId,
     });
 
     // 1. Found by external identity — normal update
     const existingByExternalUserId = await getDbUser(externalUserId);
     if (existingByExternalUserId) {
+      if (existingByExternalUserId.planningCenterPersonId) {
+        res.json(serializeUser(existingByExternalUserId));
+        return;
+      }
       const updated = await db
         .update(usersTable)
         .set({ firstName, lastName, email, phone: phone ?? null })
@@ -67,6 +74,10 @@ router.put("/me", requireAuth, async (req, res) => {
     //    their role and history are preserved.
     const byEmail = await db.select().from(usersTable).where(eq(usersTable.email, email)).limit(1);
     if (byEmail[0]) {
+      if (byEmail[0].planningCenterPersonId) {
+        res.json(serializeUser(byEmail[0]));
+        return;
+      }
       const updated = await db
         .update(usersTable)
         .set({
@@ -106,6 +117,17 @@ router.patch("/me", requireAuth, async (req, res) => {
   try {
     const auth = getAuth(req);
     const externalUserId = auth!.userId!;
+    const existing = await getDbUser(externalUserId);
+    if (!existing) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
+    if (existing.planningCenterPersonId) {
+      res.status(403).json({
+        error: "Planning Center profile information can only be updated through Church Center.",
+      });
+      return;
+    }
     const { firstName, lastName, phone } = req.body as { firstName?: string; lastName?: string; phone?: string | null };
     const updates: Partial<{ firstName: string; lastName: string; phone: string | null }> = {};
     if (firstName !== undefined && typeof firstName === "string" && firstName.trim()) updates.firstName = firstName.trim();
@@ -123,12 +145,20 @@ router.patch("/me", requireAuth, async (req, res) => {
       .where(eq(usersTable.externalUserId, externalUserId))
       .returning();
 
-    if (!updated[0]) {
-      res.status(404).json({ error: "User not found" });
-      return;
-    }
+    if (!updated[0]) return;
     const u = updated[0];
-    res.json({ id: u.id, externalUserId: u.externalUserId, firstName: u.firstName, lastName: u.lastName, email: u.email, phone: u.phone, role: u.role, createdAt: u.createdAt.toISOString() });
+    res.json({
+      id: u.id,
+      externalUserId: u.externalUserId,
+      firstName: u.firstName,
+      lastName: u.lastName,
+      email: u.email,
+      phone: u.phone,
+      address: u.address,
+      planningCenterPersonId: u.planningCenterPersonId,
+      role: u.role,
+      createdAt: u.createdAt.toISOString(),
+    });
   } catch {
     res.status(500).json({ error: "Internal server error" });
   }

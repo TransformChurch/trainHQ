@@ -48,8 +48,10 @@ test("authorization-code exchange sends PKCE and normalizes token expiry", async
 
 test("current-person lookup uses People v2 and extracts identity data", async () => {
   globalThis.fetch = async (input, init) => {
-    assert.equal(String(input), "https://api.planningcenteronline.com/people/v2/me");
     assert.equal(new Headers(init?.headers).get("authorization"), "Bearer access-token");
+    if (String(input) !== "https://api.planningcenteronline.com/people/v2/me") {
+      return new Response(JSON.stringify({ data: [] }), { status: 200 });
+    }
     return new Response(JSON.stringify({
       data: {
         id: "98765",
@@ -68,6 +70,8 @@ test("current-person lookup uses People v2 and extracts identity data", async ()
     firstName: "Jordan",
     lastName: "Rivera",
     email: "jordan@example.com",
+    phone: null,
+    address: null,
   });
 });
 
@@ -88,43 +92,148 @@ test("current-person lookup fetches the person's email relationship", async () =
         },
       }), { status: 200, headers: { "Content-Type": "application/json" } });
     }
-    assert.equal(
-      url,
-      "https://api.planningcenteronline.com/people/v2/people/98765/emails",
-    );
-    return new Response(JSON.stringify({
-      data: [
-        {
-          id: "email-1",
-          attributes: {
-            address: "alternate@example.com",
-            primary: false,
-            blocked: false,
+    if (url.endsWith("/emails")) {
+      return new Response(JSON.stringify({
+        data: [
+          {
+            id: "email-1",
+            attributes: {
+              address: "alternate@example.com",
+              primary: false,
+              blocked: false,
+            },
           },
-        },
-        {
-          id: "email-2",
-          attributes: {
-            address: "Jordan@example.com",
-            primary: true,
-            blocked: false,
+          {
+            id: "email-2",
+            attributes: {
+              address: "Jordan@example.com",
+              primary: true,
+              blocked: false,
+            },
           },
-        },
-      ],
-    }), { status: 200, headers: { "Content-Type": "application/json" } });
+        ],
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+    }
+    if (url.endsWith("/phone_numbers") || url.endsWith("/addresses")) {
+      return new Response(JSON.stringify({ data: [] }), { status: 200 });
+    }
+    throw new Error(`Unexpected URL: ${url}`);
   };
 
   const person = await fetchCurrentPerson("access-token");
-  assert.deepEqual(requested, [
+  assert.deepEqual(requested.sort(), [
     "https://api.planningcenteronline.com/people/v2/me",
     "https://api.planningcenteronline.com/people/v2/people/98765/emails",
-  ]);
+    "https://api.planningcenteronline.com/people/v2/people/98765/phone_numbers",
+    "https://api.planningcenteronline.com/people/v2/people/98765/addresses",
+  ].sort());
   assert.deepEqual(person, {
     id: "98765",
     firstName: "Jordan",
     lastName: "Rivera",
     email: "jordan@example.com",
+    phone: null,
+    address: null,
   });
+});
+
+test("current-person lookup refreshes the primary phone and address relationships", async () => {
+  globalThis.fetch = async (input) => {
+    const url = String(input);
+    if (url.endsWith("/me")) {
+      return new Response(JSON.stringify({
+        data: {
+          id: "98765",
+          attributes: {
+            first_name: "Jordan",
+            last_name: "Rivera",
+            primary_email: "jordan@example.com",
+          },
+        },
+      }), { status: 200 });
+    }
+    if (url.endsWith("/phone_numbers")) {
+      return new Response(JSON.stringify({
+        data: [
+          { attributes: { number: "555-0100", primary: false } },
+          { attributes: { number: "(555) 0199", primary: true } },
+        ],
+      }), { status: 200 });
+    }
+    assert.equal(url, "https://api.planningcenteronline.com/people/v2/people/98765/addresses");
+    return new Response(JSON.stringify({
+      data: [
+        {
+          attributes: {
+            street_line_1: "123 Main Street",
+            city: "Brooklyn",
+            state: "NY",
+            zip: "11201",
+            primary: false,
+          },
+        },
+        {
+          attributes: {
+            street_line_1: "456 Church Avenue",
+            street_line_2: "Apt 2",
+            city: "Queens",
+            state: "NY",
+            postal_code: "11375",
+            primary: true,
+          },
+        },
+      ],
+    }), { status: 200 });
+  };
+
+  const person = await fetchCurrentPerson("access-token");
+  assert.equal(person.phone, "(555) 0199");
+  assert.equal(person.address, "456 Church Avenue, Apt 2, Queens, NY, 11375");
+});
+
+test("current-person lookup follows relationship pagination before selecting primary data", async () => {
+  const requested: string[] = [];
+  globalThis.fetch = async (input) => {
+    const url = String(input);
+    requested.push(url);
+    if (url.endsWith("/me")) {
+      return new Response(JSON.stringify({
+        data: {
+          id: "98765",
+          attributes: {
+            first_name: "Jordan",
+            last_name: "Rivera",
+            primary_email: "jordan@example.com",
+          },
+        },
+      }), { status: 200 });
+    }
+    if (url.endsWith("/phone_numbers")) {
+      return new Response(JSON.stringify({
+        data: [{ attributes: { number: "555-0100", primary: false } }],
+        links: {
+          next: "https://api.planningcenteronline.com/people/v2/people/98765/phone_numbers?offset=25",
+        },
+      }), { status: 200 });
+    }
+    if (url.includes("/phone_numbers?offset=25")) {
+      return new Response(JSON.stringify({
+        data: [{ attributes: { number: "555-0199", primary: true } }],
+        links: { next: null },
+      }), { status: 200 });
+    }
+    if (url.endsWith("/addresses")) {
+      return new Response(JSON.stringify({
+        data: [],
+        links: { next: null },
+      }), { status: 200 });
+    }
+    throw new Error(`Unexpected URL: ${url}`);
+  };
+
+  const person = await fetchCurrentPerson("access-token");
+  assert.equal(person.phone, "555-0199");
+  assert.ok(requested.some((url) => url.includes("/phone_numbers?offset=25")));
 });
 
 test("People URL construction keeps relative paths in v2 and accepts only trusted next links", () => {

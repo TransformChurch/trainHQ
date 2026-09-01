@@ -345,7 +345,7 @@ export const getPatchMeUrl = () => {
 }
 
 /**
- * @summary Update current user profile fields (firstName, lastName, phone)
+ * @summary Update locally managed profile fields (firstName, lastName, phone)
  */
 export const patchMe = async (patchMeInput: PatchMeInput, options?: Parameters<typeof customFetch>[1]): Promise<User> => {
 
@@ -368,7 +368,7 @@ return customFetch<User>(getPatchMeUrl(),
 
 
 
-export const getPatchMeMutationOptions = <TError = ErrorType<unknown>,
+export const getPatchMeMutationOptions = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof patchMe>>, TError,PatchMeMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof patchMe>>, TError,PatchMeMutationVariables, TContext> => {
 
@@ -397,13 +397,13 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type PatchMeMutationResult = NonNullable<Awaited<ReturnType<typeof patchMe>>>
     export type PatchMeMutationBody = BodyType<PatchMeInput>
-    export type PatchMeMutationError = ErrorType<unknown>
+    export type PatchMeMutationError = ErrorType<void>
     export type PatchMeMutationVariables = {data: BodyType<PatchMeInput>}
 
     /**
- * @summary Update current user profile fields (firstName, lastName, phone)
+ * @summary Update locally managed profile fields (firstName, lastName, phone)
  */
-export const usePatchMe = <TError = ErrorType<unknown>,
+export const usePatchMe = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof patchMe>>, TError,PatchMeMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
         Awaited<ReturnType<typeof patchMe>>,

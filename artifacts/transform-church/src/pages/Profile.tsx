@@ -1,6 +1,6 @@
 import { useGetMe } from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { UserCircle, Mail, Phone, Calendar, Pencil, Check, X } from "lucide-react";
+import { UserCircle, Mail, Phone, MapPin, Calendar, Hash, Pencil, Check, X } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -57,20 +57,26 @@ export default function Profile() {
   if (isLoading) return <div className="p-8 text-center">Loading profile...</div>;
   if (!user) return <div className="p-8 text-center text-destructive">Failed to load profile.</div>;
 
+  const isPlanningCenterManaged = Boolean(user.planningCenterPersonId);
   const isProfileComplete = !!(user.firstName && user.lastName && user.email && user.phone);
 
   return (
     <div className="space-y-8 max-w-2xl mx-auto animate-in fade-in duration-500">
+      {isPlanningCenterManaged && (
+        <div className="rounded-lg border border-primary/20 bg-primary/5 px-4 py-3 text-sm text-primary">
+          Information can be updated via Church Center app
+        </div>
+      )}
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold font-serif">Profile</h1>
-        {tab === "view" && (
+        {tab === "view" && !isPlanningCenterManaged && (
           <Button variant="outline" size="sm" onClick={openEdit}>
             <Pencil className="w-4 h-4 mr-2" /> Edit Profile
           </Button>
         )}
       </div>
 
-      {!isProfileComplete && tab === "view" && (
+      {!isProfileComplete && tab === "view" && !isPlanningCenterManaged && (
         <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 flex items-start gap-3">
           <div className="mt-0.5 text-amber-500">⚠️</div>
           <div>
@@ -88,7 +94,7 @@ export default function Profile() {
         </div>
       )}
 
-      {tab === "view" ? (
+      {tab === "view" || isPlanningCenterManaged ? (
         <Card>
           <CardHeader className="pb-4">
             <CardTitle className="text-xl flex items-center gap-2">
@@ -120,6 +126,22 @@ export default function Profile() {
               <div>
                 <p className="text-sm font-medium text-muted-foreground">Phone Number</p>
                 <p>{user.phone || <span className="text-muted-foreground italic">Not provided</span>}</p>
+              </div>
+            </div>
+
+            <div className="flex items-start gap-3 py-3 border-b border-border">
+              <MapPin className="w-5 h-5 text-muted-foreground mt-0.5" />
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">Address</p>
+                <p>{user.address || <span className="text-muted-foreground italic">Not provided</span>}</p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3 py-3 border-b border-border">
+              <Hash className="w-5 h-5 text-muted-foreground" />
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">Planning Center ID</p>
+                <p>{user.planningCenterPersonId || <span className="text-muted-foreground italic">Not connected</span>}</p>
               </div>
             </div>
 

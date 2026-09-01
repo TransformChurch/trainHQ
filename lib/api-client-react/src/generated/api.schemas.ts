@@ -26,6 +26,10 @@ export interface User {
   email: string;
   /** @nullable */
   phone?: string | null;
+  /** @nullable */
+  address?: string | null;
+  /** @nullable */
+  planningCenterPersonId?: string | null;
   role: UserRole;
   createdAt: string;
 }
