@@ -8,3 +8,4 @@
 - [Planning Center identity linking](planning-center-identity-linking.md) — never auto-link Church Center users by email alone; require a stable person-ID match or an explicit administrator link.
 - [Runtime secret refresh](runtime-secret-refresh.md) — server workflows retain their loaded secrets until restarted after a Replit secret change.
 - [Request Hub access layers](request-hub-access.md) — whole-hub grants include every category; category grants can independently expose only selected sections.
+- [Document file handling](document-file-handling.md) — the repository accepts any file type, but only PDFs embed; other files remain listed and open externally.

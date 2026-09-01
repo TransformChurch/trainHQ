@@ -307,6 +307,8 @@ export interface ModuleDocument {
   /** @nullable */
   description?: string | null;
   driveUrl: string;
+  /** @nullable */
+  mimeType: string | null;
 }
 
 export interface ModuleDetail {

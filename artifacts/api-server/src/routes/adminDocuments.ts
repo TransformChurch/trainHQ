@@ -14,6 +14,32 @@ import { canEditContent } from "../lib/canEditContent";
 
 const router = Router();
 
+function inferMimeType(title: string): string | null {
+  const extension = title.trim().toLowerCase().match(/\.([a-z0-9]{1,12})$/)?.[1];
+  if (!extension) return null;
+  const mimeTypes: Record<string, string> = {
+    pdf: "application/pdf",
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    png: "image/png",
+    gif: "image/gif",
+    webp: "image/webp",
+    txt: "text/plain",
+    csv: "text/csv",
+    doc: "application/msword",
+    docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    xls: "application/vnd.ms-excel",
+    xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ppt: "application/vnd.ms-powerpoint",
+    pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    zip: "application/zip",
+    mp3: "audio/mpeg",
+    mp4: "video/mp4",
+    mov: "video/quicktime",
+  };
+  return mimeTypes[extension] ?? null;
+}
+
 // ── GET /api/admin/documents — tree structure ─────────────────────────────────
 
 router.get("/", requireManagerOrAdmin, async (req, res) => {
@@ -130,6 +156,7 @@ router.post("/import-folder", requireManagerOrAdmin, async (req, res) => {
       title: f.name,
       description: null as string | null,
       driveUrl: f.webViewLink,
+      mimeType: f.mimeType || inferMimeType(f.name),
       resourceType: "file" as const,
       parentId: parentId ?? null,
       createdByExternalUserId: auth!.userId!,
@@ -149,10 +176,11 @@ router.post("/import-folder", requireManagerOrAdmin, async (req, res) => {
 router.post("/", requireManagerOrAdmin, async (req, res) => {
   try {
     const auth = getAuth(req);
-    const { title, description, driveUrl, resourceType, parentId } = req.body as {
+    const { title, description, driveUrl, mimeType, resourceType, parentId } = req.body as {
       title?: string;
       description?: string | null;
       driveUrl?: string | null;
+      mimeType?: string | null;
       resourceType?: "file" | "folder";
       parentId?: number | null;
     };
@@ -165,6 +193,7 @@ router.post("/", requireManagerOrAdmin, async (req, res) => {
       title: title.trim(),
       description: description ?? null,
       driveUrl: driveUrl?.trim() || null,
+      mimeType: mimeType ?? inferMimeType(title),
       resourceType: type,
       parentId: parentId ?? null,
       createdByExternalUserId: auth!.userId!,
@@ -189,10 +218,11 @@ router.patch("/:id", requireManagerOrAdmin, async (req, res) => {
       return;
     }
 
-    const { title, description, driveUrl, parentId, sortOrder } = req.body as {
+    const { title, description, driveUrl, mimeType, parentId, sortOrder } = req.body as {
       title?: string;
       description?: string | null;
       driveUrl?: string | null;
+      mimeType?: string | null;
       parentId?: number | null;
       sortOrder?: number;
     };
@@ -200,6 +230,12 @@ router.patch("/:id", requireManagerOrAdmin, async (req, res) => {
     if (title !== undefined && title.trim()) updates.title = title.trim();
     if (description !== undefined) updates.description = description ?? null;
     if (driveUrl !== undefined) updates.driveUrl = driveUrl?.trim() || null;
+    if (mimeType !== undefined) {
+      updates.mimeType = mimeType ?? inferMimeType(title ?? existing[0].title);
+    } else if (title !== undefined) {
+      const inferredMimeType = inferMimeType(title);
+      if (inferredMimeType) updates.mimeType = inferredMimeType;
+    }
     if (parentId !== undefined) updates.parentId = parentId ?? null;
     if (sortOrder !== undefined) updates.sortOrder = sortOrder;
     if (Object.keys(updates).length === 0) {

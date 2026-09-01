@@ -1358,12 +1358,41 @@ type RepoDoc = {
   title: string;
   description: string | null;
   driveUrl: string | null;
+  mimeType: string | null;
   resourceType: "file" | "folder";
   parentId: number | null;
   sortOrder: number;
   createdAt: string;
   accessCount: number;
 };
+
+function fileExtension(doc: Pick<RepoDoc, "title" | "mimeType">): string | null {
+  const titleExtension = doc.title.trim().match(/\.([a-z0-9]{1,12})$/i)?.[1];
+  if (titleExtension) return titleExtension.toUpperCase();
+  const mimeExtension: Record<string, string> = {
+    "application/pdf": "PDF",
+    "image/jpeg": "JPG",
+    "image/png": "PNG",
+    "image/gif": "GIF",
+    "image/webp": "WEBP",
+    "text/plain": "TXT",
+    "text/csv": "CSV",
+    "application/msword": "DOC",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "DOCX",
+    "application/vnd.ms-excel": "XLS",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "XLSX",
+    "application/vnd.ms-powerpoint": "PPT",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation": "PPTX",
+    "application/zip": "ZIP",
+  };
+  return doc.mimeType ? mimeExtension[doc.mimeType] ?? null : null;
+}
+
+function displayFileName(doc: RepoDoc): string {
+  if (doc.resourceType === "folder" || /\.[a-z0-9]{1,12}$/i.test(doc.title.trim())) return doc.title;
+  const extension = fileExtension(doc);
+  return extension ? `${doc.title}.${extension.toLowerCase()}` : doc.title;
+}
 
 type AccessGrant = {
   id: number;
@@ -1692,7 +1721,12 @@ function DocumentsTab() {
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
-                      <p className="text-sm font-medium truncate">{doc.title}</p>
+                      <p className="text-sm font-medium truncate">{displayFileName(doc)}</p>
+                      {!isFolder && fileExtension(doc) && (
+                        <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground border rounded px-1.5 py-0.5 shrink-0">
+                          {fileExtension(doc)}
+                        </span>
+                      )}
                       {isFolder && <Badge variant="outline" className="text-xs h-4 px-1.5 shrink-0">Folder</Badge>}
                       {!isFolder && doc.driveUrl && !/\/file\/d\//.test(doc.driveUrl) && (
                         <span title="URL doesn't look like a direct Google Drive file link — students may not be able to preview it" className="flex items-center gap-1 text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5 shrink-0">
@@ -1780,7 +1814,8 @@ function DocumentsTab() {
         <DialogContent>
           <DialogHeader><DialogTitle>Add Document</DialogTitle></DialogHeader>
           <form onSubmit={handleCreateFile} className="space-y-4">
-            <FormField label="Title"><Input value={newTitle} onChange={e => setNewTitle(e.target.value)} required placeholder="e.g. Onboarding Guide" /></FormField>
+            <FormField label="File name"><Input value={newTitle} onChange={e => setNewTitle(e.target.value)} required placeholder="e.g. Onboarding Guide.pdf or Flyer.png" /></FormField>
+            <p className="text-xs text-muted-foreground -mt-2">Any file type is allowed. Include the file extension in the name. Only PDF files can be previewed.</p>
             <FormField label="Description (optional)"><Textarea value={newDesc} onChange={e => setNewDesc(e.target.value)} rows={2} /></FormField>
             <div className="space-y-1.5">
               <Label>Google Drive URL</Label>
@@ -1826,7 +1861,8 @@ function DocumentsTab() {
           <DialogHeader><DialogTitle>Edit {editDoc?.resourceType === "folder" ? "Folder" : "Document"}</DialogTitle></DialogHeader>
           {editDoc && (
             <form onSubmit={handleEdit} className="space-y-4">
-              <FormField label="Title"><Input value={editTitle} onChange={e => setEditTitle(e.target.value)} required /></FormField>
+              <FormField label={editDoc.resourceType === "file" ? "File name" : "Title"}><Input value={editTitle} onChange={e => setEditTitle(e.target.value)} required /></FormField>
+              {editDoc.resourceType === "file" && <p className="text-xs text-muted-foreground -mt-2">Any file type is allowed. Only PDF files can be previewed.</p>}
               <FormField label="Description (optional)"><Textarea value={editDesc} onChange={e => setEditDesc(e.target.value)} rows={2} /></FormField>
               {editDoc.resourceType === "file" && (
                 <>

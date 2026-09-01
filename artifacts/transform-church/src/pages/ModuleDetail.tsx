@@ -149,7 +149,7 @@ export default function ModuleDetail() {
 
       {moduleData.contentType === "document" ? (
         moduleData.document ? (
-          <DocumentViewer title={moduleData.document.title} url={moduleData.document.driveUrl} />
+          <DocumentViewer title={moduleData.document.title} url={moduleData.document.driveUrl} mimeType={moduleData.document.mimeType} />
         ) : (
           <Card className="border-amber-200 bg-amber-50/50">
             <CardContent className="flex items-center gap-3 p-6 text-amber-800">

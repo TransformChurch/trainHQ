@@ -11,10 +11,43 @@ type RepoDoc = {
   title: string;
   description: string | null;
   driveUrl: string | null;
+  mimeType: string | null;
   resourceType: "file" | "folder";
   parentId: number | null;
   createdAt: string;
 };
+
+function fileExtension(doc: Pick<RepoDoc, "title" | "mimeType">): string | null {
+  const titleExtension = doc.title.trim().match(/\.([a-z0-9]{1,12})$/i)?.[1];
+  if (titleExtension) return titleExtension.toUpperCase();
+  const mimeExtension: Record<string, string> = {
+    "application/pdf": "PDF",
+    "image/jpeg": "JPG",
+    "image/png": "PNG",
+    "image/gif": "GIF",
+    "image/webp": "WEBP",
+    "text/plain": "TXT",
+    "text/csv": "CSV",
+    "application/msword": "DOC",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "DOCX",
+    "application/vnd.ms-excel": "XLS",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "XLSX",
+    "application/vnd.ms-powerpoint": "PPT",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation": "PPTX",
+    "application/zip": "ZIP",
+  };
+  return doc.mimeType ? mimeExtension[doc.mimeType] ?? null : null;
+}
+
+function displayFileName(doc: RepoDoc): string {
+  if (/\.[a-z0-9]{1,12}$/i.test(doc.title.trim())) return doc.title;
+  const extension = fileExtension(doc);
+  return extension ? `${doc.title}.${extension.toLowerCase()}` : doc.title;
+}
+
+function isPdf(doc: RepoDoc): boolean {
+  return doc.mimeType === "application/pdf" || fileExtension(doc) === "PDF";
+}
 
 function extractFileId(url: string): string | null {
   const m = url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
@@ -96,7 +129,7 @@ function PreviewModal({ doc, onClose }: { doc: RepoDoc; onClose: () => void }) {
 
 function DocumentCard({ doc, onPreview }: { doc: RepoDoc; onPreview: (d: RepoDoc) => void }) {
   const fileId = doc.driveUrl ? extractFileId(doc.driveUrl) : null;
-  const canPreview = !!fileId;
+  const canPreview = isPdf(doc) && !!fileId;
 
   return (
     <Card className="hover:shadow-md transition-shadow">
@@ -106,7 +139,14 @@ function DocumentCard({ doc, onPreview }: { doc: RepoDoc; onPreview: (d: RepoDoc
             <FileText className="w-5 h-5" />
           </div>
           <div className="flex-1 min-w-0">
-            <p className="font-medium leading-snug line-clamp-2">{doc.title}</p>
+            <div className="flex items-center gap-2 min-w-0">
+              <p className="font-medium leading-snug line-clamp-2">{displayFileName(doc)}</p>
+              {fileExtension(doc) && (
+                <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground border rounded px-1.5 py-0.5 shrink-0">
+                  {fileExtension(doc)}
+                </span>
+              )}
+            </div>
             {doc.description && (
               <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{doc.description}</p>
             )}

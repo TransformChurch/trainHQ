@@ -643,7 +643,8 @@ export const GetModuleResponse = zod.object({
   "id": zod.number().int(),
   "title": zod.string(),
   "description": zod.string().nullish(),
-  "driveUrl": zod.string()
+  "driveUrl": zod.string(),
+  "mimeType": zod.string().nullable()
 }).nullable(),
   "quizUnlocked": zod.boolean()
 })

@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 type DocumentViewerProps = {
   title: string;
   url: string;
+  mimeType?: string | null;
 };
 
 function getDriveFileId(url: string): string | null {
@@ -32,9 +33,30 @@ function getViewerUrl(url: string): string | null {
   return null;
 }
 
-export function DocumentViewer({ title, url }: DocumentViewerProps) {
+export function DocumentViewer({ title, url, mimeType }: DocumentViewerProps) {
   const [showError, setShowError] = useState(false);
   const viewerUrl = getViewerUrl(url);
+  const isPdf = mimeType === "application/pdf" || /\.pdf$/i.test(title.trim());
+
+  if (!isPdf) {
+    return (
+      <div className="flex min-h-[320px] flex-col items-center justify-center gap-4 rounded-xl border bg-muted/20 px-6 text-center">
+        <FileText className="h-12 w-12 text-muted-foreground/50" />
+        <div className="space-y-1">
+          <h2 className="font-semibold">{title}</h2>
+          <p className="max-w-md text-sm text-muted-foreground">
+            Preview is available for PDF files only. Open this file in Google Drive to view or download it.
+          </p>
+        </div>
+        <Button variant="outline" asChild>
+          <a href={url} target="_blank" rel="noopener noreferrer">
+            <ExternalLink className="mr-2 h-4 w-4" />
+            Open file
+          </a>
+        </Button>
+      </div>
+    );
+  }
 
   if (!viewerUrl || showError) {
     return (

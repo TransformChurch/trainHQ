@@ -57,6 +57,13 @@
       "when": 1788204000000,
       "tag": "0007_facilities_category_access",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1788205000000,
+      "tag": "0008_document_mime_type",
+      "breakpoints": true
     }
   ]
 }

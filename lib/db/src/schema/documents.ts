@@ -8,6 +8,7 @@ export const documentsTable = pgTable("documents", {
   title: text("title").notNull(),
   description: text("description"),
   driveUrl: text("drive_url"),
+  mimeType: text("mime_type"),
   resourceType: docResourceTypeEnum("resource_type").notNull().default("file"),
   parentId: integer("parent_id").references((): any => documentsTable.id, { onDelete: "cascade" }),
   sortOrder: smallint("sort_order").notNull().default(0),

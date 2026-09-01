@@ -19,6 +19,7 @@ async function getModuleDocument(documentId: number | null | undefined) {
       title: documentsTable.title,
       description: documentsTable.description,
       driveUrl: documentsTable.driveUrl,
+      mimeType: documentsTable.mimeType,
       resourceType: documentsTable.resourceType,
     })
     .from(documentsTable)
@@ -31,6 +32,7 @@ async function getModuleDocument(documentId: number | null | undefined) {
     title: document.title,
     description: document.description,
     driveUrl: document.driveUrl,
+    mimeType: document.mimeType,
   };
 }
 

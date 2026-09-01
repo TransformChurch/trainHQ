@@ -1646,7 +1646,9 @@ components:
           type: ["string", "null"]
         driveUrl:
           type: string
-      required: [id, title, driveUrl]
+        mimeType:
+          type: ["string", "null"]
+      required: [id, title, driveUrl, mimeType]
 
     CompleteModuleInput:
       type: object
