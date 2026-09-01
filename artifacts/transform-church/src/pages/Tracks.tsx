@@ -4,8 +4,10 @@ import { Button } from "@/components/ui/button";
 import { BookOpen, Layers } from "lucide-react";
 import { Link } from "wouter";
 import { StorageImage } from "@/lib/storageUrl";
+import { useSiteCopy } from "@/lib/siteCopy";
 
 export default function Tracks() {
+  const { copy } = useSiteCopy();
   const { data: tracks, isLoading } = useListTracks();
 
   if (isLoading) {
@@ -27,7 +29,7 @@ export default function Tracks() {
   return (
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
       <div>
-        <h1 className="text-3xl font-bold font-serif text-foreground">Training Tracks</h1>
+        <h1 className="text-3xl font-bold font-serif text-foreground">{copy("page.trainingTracksTitle")}</h1>
         <p className="text-muted-foreground mt-2 text-lg">Curated paths to equip you for ministry.</p>
       </div>
 

@@ -32,6 +32,19 @@ router.post("/", requireManagerOrAdmin, async (req, res) => {
       res.status(400).json({ error: "Invalid input" });
       return;
     }
+    const moduleRows = await db
+      .select({ id: modulesTable.id, contentType: modulesTable.contentType })
+      .from(modulesTable)
+      .where(eq(modulesTable.id, parsed.data.moduleId))
+      .limit(1);
+    if (!moduleRows[0]) {
+      res.status(404).json({ error: "Module not found" });
+      return;
+    }
+    if (moduleRows[0].contentType !== "video") {
+      res.status(409).json({ error: "Videos can only be added to video modules" });
+      return;
+    }
     const inserted = await db.insert(videosTable).values({
       ...parsed.data,
       createdByExternalUserId: auth!.userId!,

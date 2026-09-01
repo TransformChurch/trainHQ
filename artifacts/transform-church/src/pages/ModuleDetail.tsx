@@ -3,12 +3,13 @@ import { useParams, Link } from "wouter";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { ArrowLeft, CheckCircle2, PlayCircle, Lock, Trophy, XCircle, AlertTriangle, RefreshCw } from "lucide-react";
+import { ArrowLeft, CheckCircle2, PlayCircle, Lock, Trophy, XCircle, AlertTriangle, RefreshCw, FileText } from "lucide-react";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
+import { DocumentViewer } from "@/components/DocumentViewer";
 
 export default function ModuleDetail() {
   const { moduleId: moduleIdStr } = useParams();
@@ -88,7 +89,9 @@ export default function ModuleDetail() {
         } else {
           toast({
             title: "Knowledge Check Failed",
-            description: "Re-watch the videos marked 'Needs Review', then try again.",
+            description: moduleData?.contentType === "document"
+              ? "Review the document, then try again."
+              : "Re-watch the videos marked 'Needs Review', then try again.",
             variant: "destructive"
           });
         }
@@ -117,6 +120,12 @@ export default function ModuleDetail() {
         </Link>
         <h1 className="text-3xl md:text-4xl font-bold font-serif text-foreground">{moduleData.title}</h1>
         <p className="text-lg text-muted-foreground mt-2">{moduleData.description}</p>
+        <Badge variant="outline" className="mt-3 gap-1.5 capitalize">
+          {moduleData.contentType === "document"
+            ? <FileText className="h-3.5 w-3.5" />
+            : <PlayCircle className="h-3.5 w-3.5" />}
+          {moduleData.contentType} module
+        </Badge>
         <div className="mt-5 flex flex-col items-start gap-2 sm:flex-row sm:items-center">
           {moduleData.moduleCompletedAt ? (
             <div className="flex items-center gap-2 rounded-lg border border-green-200 bg-green-50 px-4 py-2 text-sm font-medium text-green-700">
@@ -138,49 +147,61 @@ export default function ModuleDetail() {
         )}
       </div>
 
-      {/* Video list */}
-      <div className="grid grid-cols-1 gap-4">
-        {moduleData.videos?.sort((a: any, b: any) => a.order - b.order).map((video: any, idx: number) => (
-          <Card key={video.id} className={`p-4 transition-colors ${video.needsReview ? "border-amber-300 bg-amber-50/30" : "hover:border-primary/50"}`}>
-            <div className="flex flex-col md:flex-row gap-4 items-start md:items-center justify-between">
-              <div className="flex gap-4 items-center">
-                <div className="w-12 h-12 rounded bg-muted flex items-center justify-center shrink-0">
-                  <PlayCircle className="w-6 h-6 text-muted-foreground" />
-                </div>
-                <div>
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <h3 className="font-bold">Part {idx + 1}: {video.title}</h3>
-                    {video.needsReview && (
-                      <Badge variant="outline" className="border-amber-400 text-amber-700 bg-amber-50 gap-1 text-xs">
-                        <RefreshCw className="w-2.5 h-2.5" /> Needs Review
-                      </Badge>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2 mt-1">
-                    {video.completed && !video.needsReview ? (
-                      <span className="text-xs text-green-600 font-medium flex items-center gap-1">
-                        <CheckCircle2 className="w-3 h-3" /> Completed
-                      </span>
-                    ) : video.progressPercent ? (
-                      <span className="text-xs text-primary font-medium">
-                        {Math.round(video.progressPercent)}% Watched
-                      </span>
-                    ) : null}
-                  </div>
-                </div>
-              </div>
-              <Link href={`/watch/${video.id}`} className="w-full md:w-auto mt-4 md:mt-0">
-                <Button
-                  variant={video.needsReview ? "default" : video.completed ? "outline" : "default"}
-                  className={`w-full md:w-auto ${video.needsReview ? "bg-amber-500 hover:bg-amber-600 text-white" : ""}`}
-                >
-                  {video.needsReview ? "Re-watch" : video.completed ? "Watch Again" : video.progressPercent ? "Resume" : "Start Video"}
-                </Button>
-              </Link>
-            </div>
+      {moduleData.contentType === "document" ? (
+        moduleData.document ? (
+          <DocumentViewer title={moduleData.document.title} url={moduleData.document.driveUrl} />
+        ) : (
+          <Card className="border-amber-200 bg-amber-50/50">
+            <CardContent className="flex items-center gap-3 p-6 text-amber-800">
+              <AlertTriangle className="h-5 w-5 shrink-0" />
+              This module&apos;s document is unavailable. Please contact a manager.
+            </CardContent>
           </Card>
-        ))}
-      </div>
+        )
+      ) : (
+        <div className="grid grid-cols-1 gap-4">
+          {moduleData.videos?.sort((a: any, b: any) => a.order - b.order).map((video: any, idx: number) => (
+            <Card key={video.id} className={`p-4 transition-colors ${video.needsReview ? "border-amber-300 bg-amber-50/30" : "hover:border-primary/50"}`}>
+              <div className="flex flex-col md:flex-row gap-4 items-start md:items-center justify-between">
+                <div className="flex gap-4 items-center">
+                  <div className="w-12 h-12 rounded bg-muted flex items-center justify-center shrink-0">
+                    <PlayCircle className="w-6 h-6 text-muted-foreground" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h3 className="font-bold">Part {idx + 1}: {video.title}</h3>
+                      {video.needsReview && (
+                        <Badge variant="outline" className="border-amber-400 text-amber-700 bg-amber-50 gap-1 text-xs">
+                          <RefreshCw className="w-2.5 h-2.5" /> Needs Review
+                        </Badge>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 mt-1">
+                      {video.completed && !video.needsReview ? (
+                        <span className="text-xs text-green-600 font-medium flex items-center gap-1">
+                          <CheckCircle2 className="w-3 h-3" /> Completed
+                        </span>
+                      ) : video.progressPercent ? (
+                        <span className="text-xs text-primary font-medium">
+                          {Math.round(video.progressPercent)}% Watched
+                        </span>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
+                <Link href={`/watch/${video.id}`} className="w-full md:w-auto mt-4 md:mt-0">
+                  <Button
+                    variant={video.needsReview ? "default" : video.completed ? "outline" : "default"}
+                    className={`w-full md:w-auto ${video.needsReview ? "bg-amber-500 hover:bg-amber-600 text-white" : ""}`}
+                  >
+                    {video.needsReview ? "Re-watch" : video.completed ? "Watch Again" : video.progressPercent ? "Resume" : "Start Video"}
+                  </Button>
+                </Link>
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
 
       {/* Knowledge check */}
       <div className="pt-8 border-t border-border">

@@ -4,6 +4,7 @@ import {
   db,
   documentsTable,
   documentAccessTable,
+  modulesTable,
   groupsTable,
   usersTable,
 } from "@workspace/db";
@@ -225,6 +226,18 @@ router.delete("/:id", requireManagerOrAdmin, async (req, res) => {
     if (!existing[0]) { res.status(404).json({ error: "Not found" }); return; }
     if (!(await canEditContent(actor, "document", id, existing[0].createdByExternalUserId))) {
       res.status(403).json({ error: "You don't have permission to delete this document." });
+      return;
+    }
+
+    const linkedModule = await db
+      .select({ title: modulesTable.title })
+      .from(modulesTable)
+      .where(eq(modulesTable.documentId, id))
+      .limit(1);
+    if (linkedModule[0]) {
+      res.status(409).json({
+        error: `This document is used by the training module "${linkedModule[0].title}". Change that module before deleting the document.`,
+      });
       return;
     }
 

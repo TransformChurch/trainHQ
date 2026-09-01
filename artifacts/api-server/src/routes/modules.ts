@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { getAuth } from "../middlewares/auth";
-import { db, modulesTable, videosTable, watchHistoryTable, quizResultsTable, queueTable, quizQuestionsTable, assignmentsTable, moduleCompletionsTable } from "@workspace/db";
+import { db, modulesTable, videosTable, watchHistoryTable, quizResultsTable, queueTable, quizQuestionsTable, assignmentsTable, moduleCompletionsTable, documentsTable } from "@workspace/db";
 import { eq, and, sql, inArray } from "drizzle-orm";
 import { requireAuth, requireManagerOrAdmin, getDbUser } from "../middlewares/requireAuth";
 import { CreateModuleBody, UpdateModuleBody, CreateQuizQuestionBody, SubmitQuizBody, CompleteModuleBody } from "@workspace/api-zod";
@@ -10,6 +10,29 @@ import { canEditContent } from "../lib/canEditContent";
 import { PlanningCenterError, updatePlanningCenterModuleCompletion } from "../lib/planningCenter";
 
 const router = Router();
+
+async function getModuleDocument(documentId: number | null | undefined) {
+  if (!documentId) return null;
+  const documents = await db
+    .select({
+      id: documentsTable.id,
+      title: documentsTable.title,
+      description: documentsTable.description,
+      driveUrl: documentsTable.driveUrl,
+      resourceType: documentsTable.resourceType,
+    })
+    .from(documentsTable)
+    .where(eq(documentsTable.id, documentId))
+    .limit(1);
+  const document = documents[0];
+  if (!document || document.resourceType !== "file" || !document.driveUrl) return null;
+  return {
+    id: document.id,
+    title: document.title,
+    description: document.description,
+    driveUrl: document.driveUrl,
+  };
+}
 
 // GET /modules
 // Admins/Managers: see all; Students: see public modules + any private modules they're assigned to
@@ -57,7 +80,22 @@ router.post("/", requireManagerOrAdmin, async (req, res) => {
       res.status(400).json({ error: "Invalid input" });
       return;
     }
-    const inserted = await db.insert(modulesTable).values({ ...parsed.data, createdByExternalUserId: auth!.userId! }).returning();
+    const contentType = parsed.data.contentType ?? "video";
+    const documentId = contentType === "document" ? parsed.data.documentId : null;
+    if (contentType === "document" && !(await getModuleDocument(documentId))) {
+      res.status(400).json({ error: "Document modules require a valid file from the document repository" });
+      return;
+    }
+    if (contentType === "video" && parsed.data.documentId != null) {
+      res.status(400).json({ error: "Video modules cannot have a document" });
+      return;
+    }
+    const inserted = await db.insert(modulesTable).values({
+      ...parsed.data,
+      contentType,
+      documentId,
+      createdByExternalUserId: auth!.userId!,
+    }).returning();
     const m = inserted[0];
     logContentChange({
       actorId: actor.id,
@@ -197,6 +235,9 @@ router.get("/:moduleId", requireAuth, async (req, res) => {
     const mod = modules[0];
 
     const videos = await db.select().from(videosTable).where(eq(videosTable.moduleId, moduleId)).orderBy(videosTable.order);
+    const moduleDocument = mod.contentType === "document"
+      ? await getModuleDocument(mod.documentId)
+      : null;
 
     const dbUser = await getDbUser(auth!.userId!);
     const userId = dbUser?.id ?? "";
@@ -250,6 +291,7 @@ router.get("/:moduleId", requireAuth, async (req, res) => {
       quizResult: quizResult
         ? { ...quizResult, takenAt: quizResult.takenAt.toISOString() }
         : null,
+      document: moduleDocument,
       quizUnlocked,
       lockedReason,
     });
@@ -276,7 +318,36 @@ router.patch("/:moduleId", requireManagerOrAdmin, async (req, res) => {
       res.status(400).json({ error: "Invalid input" });
       return;
     }
-    const updated = await db.update(modulesTable).set(parsed.data).where(eq(modulesTable.id, moduleId)).returning();
+    const contentType = parsed.data.contentType ?? existing[0].contentType;
+    const documentId = contentType === "document"
+      ? parsed.data.documentId === undefined
+        ? existing[0].documentId
+        : parsed.data.documentId
+      : null;
+    if (contentType === "document" && !(await getModuleDocument(documentId))) {
+      res.status(400).json({ error: "Document modules require a valid file from the document repository" });
+      return;
+    }
+    if (contentType === "video" && parsed.data.documentId != null) {
+      res.status(400).json({ error: "Video modules cannot have a document" });
+      return;
+    }
+    if (contentType === "document" && existing[0].contentType !== "document") {
+      const existingVideos = await db
+        .select({ id: videosTable.id })
+        .from(videosTable)
+        .where(eq(videosTable.moduleId, moduleId))
+        .limit(1);
+      if (existingVideos[0]) {
+        res.status(409).json({ error: "Remove this module's videos before changing it to a document module" });
+        return;
+      }
+    }
+    const updated = await db.update(modulesTable).set({
+      ...parsed.data,
+      contentType,
+      documentId,
+    }).where(eq(modulesTable.id, moduleId)).returning();
     if (!updated[0]) {
       res.status(404).json({ error: "Not found" });
       return;

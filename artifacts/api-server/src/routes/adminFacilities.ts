@@ -3,13 +3,15 @@ import {
   db,
   facilitiesAccessTable,
   facilitiesGroupAccessTable,
+  facilitiesCategoryAccessTable,
+  facilitiesCategoryGroupAccessTable,
   facilitiesCategoriesTable,
   facilitiesRequestsTable,
   groupMembersTable,
   groupsTable,
   usersTable,
 } from "@workspace/db";
-import { asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 import { getAuth } from "../middlewares/auth";
 import { requireAdmin } from "../middlewares/requireAuth";
 
@@ -113,6 +115,32 @@ router.get("/access/groups", requireAdmin, async (_req, res) => {
   }
 });
 
+router.get("/category-access", requireAdmin, async (_req, res) => {
+  try {
+    const [users, groups] = await Promise.all([
+      db.select().from(facilitiesCategoryAccessTable).orderBy(asc(facilitiesCategoryAccessTable.grantedAt)),
+      db
+        .select({
+          id: facilitiesCategoryGroupAccessTable.id,
+          categoryId: facilitiesCategoryGroupAccessTable.categoryId,
+          groupId: facilitiesCategoryGroupAccessTable.groupId,
+          groupName: groupsTable.name,
+          grantedByExternalUserId: facilitiesCategoryGroupAccessTable.grantedByExternalUserId,
+          grantedAt: facilitiesCategoryGroupAccessTable.grantedAt,
+        })
+        .from(facilitiesCategoryGroupAccessTable)
+        .innerJoin(groupsTable, eq(facilitiesCategoryGroupAccessTable.groupId, groupsTable.id))
+        .orderBy(asc(groupsTable.name)),
+    ]);
+    res.json({
+      users: users.map((grant) => ({ ...grant, grantedAt: grant.grantedAt.toISOString() })),
+      groups: groups.map((grant) => ({ ...grant, grantedAt: grant.grantedAt.toISOString() })),
+    });
+  } catch {
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 router.put("/access/:userId", requireAdmin, async (req, res) => {
   try {
     const userId = req.params.userId as string;
@@ -182,6 +210,112 @@ router.put("/access/groups/:groupId", requireAdmin, async (req, res) => {
     }
     await db.delete(facilitiesGroupAccessTable).where(eq(facilitiesGroupAccessTable.groupId, groupId));
     res.json({ groupId, allowed: false });
+  } catch {
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.put("/categories/:categoryId/access/users/:userId", requireAdmin, async (req, res) => {
+  try {
+    const categoryId = Number(req.params.categoryId);
+    const userId = req.params.userId as string;
+    const enabled = req.body?.enabled;
+    if (!Number.isInteger(categoryId) || categoryId < 1 || typeof enabled !== "boolean") {
+      res.status(400).json({ error: "Valid category and enabled value are required" });
+      return;
+    }
+    const [category, user] = await Promise.all([
+      db.select({ id: facilitiesCategoriesTable.id }).from(facilitiesCategoriesTable).where(eq(facilitiesCategoriesTable.id, categoryId)).limit(1),
+      db.select({ id: usersTable.id }).from(usersTable).where(eq(usersTable.id, userId)).limit(1),
+    ]);
+    if (!category[0] || !user[0]) {
+      res.status(404).json({ error: !category[0] ? "Category not found" : "User not found" });
+      return;
+    }
+    if (enabled) {
+      const actorId = getAuth(req)!.userId!;
+      const rows = await db.insert(facilitiesCategoryAccessTable).values({
+        categoryId,
+        userId,
+        grantedByExternalUserId: actorId,
+      }).onConflictDoUpdate({
+        target: [facilitiesCategoryAccessTable.categoryId, facilitiesCategoryAccessTable.userId],
+        set: { grantedByExternalUserId: actorId, grantedAt: new Date() },
+      }).returning();
+      res.json({ ...rows[0], grantedAt: rows[0].grantedAt.toISOString(), allowed: true });
+      return;
+    }
+    await db.delete(facilitiesCategoryAccessTable).where(and(
+      eq(facilitiesCategoryAccessTable.categoryId, categoryId),
+      eq(facilitiesCategoryAccessTable.userId, userId),
+    ));
+    res.json({ categoryId, userId, allowed: false });
+  } catch {
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.put("/categories/:categoryId/access/groups/:groupId", requireAdmin, async (req, res) => {
+  try {
+    const categoryId = Number(req.params.categoryId);
+    const groupId = Number(req.params.groupId);
+    const enabled = req.body?.enabled;
+    if (!Number.isInteger(categoryId) || categoryId < 1 || !Number.isInteger(groupId) || groupId < 1 || typeof enabled !== "boolean") {
+      res.status(400).json({ error: "Valid category, group, and enabled value are required" });
+      return;
+    }
+    const [category, group] = await Promise.all([
+      db.select({ id: facilitiesCategoriesTable.id }).from(facilitiesCategoriesTable).where(eq(facilitiesCategoriesTable.id, categoryId)).limit(1),
+      db.select({ id: groupsTable.id }).from(groupsTable).where(eq(groupsTable.id, groupId)).limit(1),
+    ]);
+    if (!category[0] || !group[0]) {
+      res.status(404).json({ error: !category[0] ? "Category not found" : "Group not found" });
+      return;
+    }
+    if (enabled) {
+      const actorId = getAuth(req)!.userId!;
+      const rows = await db.insert(facilitiesCategoryGroupAccessTable).values({
+        categoryId,
+        groupId,
+        grantedByExternalUserId: actorId,
+      }).onConflictDoUpdate({
+        target: [facilitiesCategoryGroupAccessTable.categoryId, facilitiesCategoryGroupAccessTable.groupId],
+        set: { grantedByExternalUserId: actorId, grantedAt: new Date() },
+      }).returning();
+      res.json({ ...rows[0], grantedAt: rows[0].grantedAt.toISOString(), allowed: true });
+      return;
+    }
+    await db.delete(facilitiesCategoryGroupAccessTable).where(and(
+      eq(facilitiesCategoryGroupAccessTable.categoryId, categoryId),
+      eq(facilitiesCategoryGroupAccessTable.groupId, groupId),
+    ));
+    res.json({ categoryId, groupId, allowed: false });
+  } catch {
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.put("/categories/reorder", requireAdmin, async (req, res) => {
+  try {
+    const categoryIds = Array.isArray(req.body?.categoryIds) ? req.body.categoryIds.map(Number) : [];
+    if (categoryIds.length === 0 || categoryIds.some((id: number) => !Number.isInteger(id) || id < 1) || new Set(categoryIds).size !== categoryIds.length) {
+      res.status(400).json({ error: "categoryIds must contain unique category IDs" });
+      return;
+    }
+    const existing = await db.select({ id: facilitiesCategoriesTable.id }).from(facilitiesCategoriesTable);
+    if (existing.length !== categoryIds.length || existing.some((row) => !categoryIds.includes(row.id))) {
+      res.status(400).json({ error: "categoryIds must include every category exactly once" });
+      return;
+    }
+    await db.transaction(async (tx) => {
+      for (const [sortOrder, id] of categoryIds.entries()) {
+        await tx
+          .update(facilitiesCategoriesTable)
+          .set({ sortOrder, updatedAt: new Date() })
+          .where(eq(facilitiesCategoriesTable.id, id));
+      }
+    });
+    res.json(await listCategories());
   } catch {
     res.status(500).json({ error: "Internal server error" });
   }

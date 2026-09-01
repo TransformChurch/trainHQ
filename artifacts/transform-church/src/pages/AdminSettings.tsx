@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { Settings, Upload, HardDrive } from "lucide-react";
+import { useSiteCopy, SITE_COPY_DEFAULTS, type SiteCopyKey } from "@/lib/siteCopy";
 
 const BASE = import.meta.env.VITE_API_URL?.replace(/\/$/, "") ?? import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -26,8 +27,31 @@ async function saveSetting(key: string, value: string) {
   });
 }
 
+const editableCopyKeys: { key: SiteCopyKey; label: string; group: string }[] = [
+  { key: "nav.dashboard", label: "Dashboard", group: "Learning" },
+  { key: "nav.trainingTracks", label: "Training Tracks", group: "Learning" },
+  { key: "nav.myQueue", label: "My Queue", group: "Learning" },
+  { key: "nav.groups", label: "Groups", group: "Learning" },
+  { key: "nav.myProfile", label: "My Profile", group: "Learning" },
+  { key: "nav.documents", label: "Documents", group: "Navigation" },
+  { key: "nav.requestHub", label: "Request Hub", group: "Navigation" },
+  { key: "nav.usersProgress", label: "Users & Progress", group: "Admin navigation" },
+  { key: "nav.moduleManager", label: "Module Manager", group: "Admin navigation" },
+  { key: "nav.documentManager", label: "Document Manager", group: "Admin navigation" },
+  { key: "nav.growthTracks", label: "Growth Tracks", group: "Admin navigation" },
+  { key: "nav.adminDashboard", label: "Admin Dashboard", group: "Admin navigation" },
+  { key: "nav.adminSettings", label: "Admin Settings", group: "Admin navigation" },
+  { key: "nav.signOut", label: "Sign out", group: "Navigation" },
+  { key: "page.moduleManagerTitle", label: "Module Manager page title", group: "Page titles" },
+  { key: "page.documentManagerTitle", label: "Document Manager page title", group: "Page titles" },
+  { key: "page.trainingTracksTitle", label: "Training Tracks page title", group: "Page titles" },
+  { key: "page.documentsTitle", label: "Documents page title", group: "Page titles" },
+  { key: "page.adminSettingsTitle", label: "Admin Settings page title", group: "Page titles" },
+];
+
 export default function AdminSettings() {
   const { toast } = useToast();
+  const { copy, refresh } = useSiteCopy();
   const [maxSizeMb, setMaxSizeMb] = useState("500");
   const [uploadEnabled, setUploadEnabled] = useState(true);
   const [driveFolderUrl, setDriveFolderUrl] = useState("");
@@ -35,6 +59,10 @@ export default function AdminSettings() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [savingToggle, setSavingToggle] = useState(false);
+  const [copyValues, setCopyValues] = useState<Record<SiteCopyKey, string>>(
+    () => Object.fromEntries(Object.keys(SITE_COPY_DEFAULTS).map((key) => [key, ""])) as Record<SiteCopyKey, string>,
+  );
+  const [savingCopy, setSavingCopy] = useState(false);
 
   useEffect(() => {
     apiFetch("/api/admin/settings")
@@ -46,6 +74,14 @@ export default function AdminSettings() {
         if (enabledSetting) setUploadEnabled(enabledSetting.value !== "false");
         const folderSetting = settings?.find(s => s.key === "drive_upload_folder_url");
         if (folderSetting) setDriveFolderUrl(folderSetting.value);
+        setCopyValues((current) => {
+          const next = { ...current };
+          for (const item of editableCopyKeys) {
+            const setting = settings?.find((s) => s.key === `copy.${item.key}`);
+            if (setting) next[item.key] = setting.value;
+          }
+          return next;
+        });
       })
       .catch(() => {})
       .finally(() => setLoading(false));
@@ -96,12 +132,26 @@ export default function AdminSettings() {
     }
   };
 
+  const handleSaveCopy = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSavingCopy(true);
+    try {
+      await Promise.all(editableCopyKeys.map(({ key }) => saveSetting(`copy.${key}`, copyValues[key] ?? "")));
+      refresh();
+      toast({ title: "Site text saved" });
+    } catch {
+      toast({ title: "Failed to save site text", variant: "destructive" });
+    } finally {
+      setSavingCopy(false);
+    }
+  };
+
   if (loading) return <div className="p-8 text-center text-muted-foreground">Loading settings...</div>;
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500 max-w-2xl">
       <div>
-        <h1 className="text-3xl font-bold font-serif">Admin Settings</h1>
+        <h1 className="text-3xl font-bold font-serif">{copy("page.adminSettingsTitle")}</h1>
         <p className="text-muted-foreground mt-2">Configure platform-wide settings for the training portal.</p>
       </div>
 
@@ -192,6 +242,43 @@ export default function AdminSettings() {
             </div>
             <Button type="submit" disabled={savingDriveFolder}>
               {savingDriveFolder ? "Saving..." : "Save"}
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Settings className="w-5 h-5" />
+            Site Text
+          </CardTitle>
+          <p className="text-sm text-muted-foreground">
+            Customize sidebar labels and key page titles. Leave a field blank to use the default text.
+          </p>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={handleSaveCopy} className="space-y-6">
+            {Array.from(new Set(editableCopyKeys.map((item) => item.group))).map((group) => (
+              <div key={group} className="space-y-3">
+                <h3 className="text-sm font-semibold">{group}</h3>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  {editableCopyKeys.filter((item) => item.group === group).map(({ key, label }) => (
+                    <div key={key} className="space-y-1.5">
+                      <Label htmlFor={`copy-${key}`}>{label}</Label>
+                      <Input
+                        id={`copy-${key}`}
+                        value={copyValues[key] ?? ""}
+                        onChange={(e) => setCopyValues((current) => ({ ...current, [key]: e.target.value }))}
+                        placeholder={SITE_COPY_DEFAULTS[key]}
+                        maxLength={120}
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+            <Button type="submit" disabled={savingCopy}>
+              {savingCopy ? "Saving..." : "Save Site Text"}
             </Button>
           </form>
         </CardContent>

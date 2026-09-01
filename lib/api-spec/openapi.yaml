@@ -1544,9 +1544,14 @@ components:
           type: integer
         isPublic:
           type: boolean
+        contentType:
+          type: string
+          enum: [video, document]
+        documentId:
+          type: ["integer", "null"]
         createdAt:
           type: string
-      required: [id, trackId, title, order, isPublic, createdAt]
+      required: [id, trackId, title, order, isPublic, contentType, documentId, createdAt]
 
     ModuleInput:
       type: object
@@ -1563,6 +1568,12 @@ components:
           type: integer
         isPublic:
           type: boolean
+        contentType:
+          type: string
+          enum: [video, document]
+          default: video
+        documentId:
+          type: ["integer", "null"]
       required: [trackId, title, order]
 
     ModuleUpdate:
@@ -1578,6 +1589,11 @@ components:
           type: integer
         isPublic:
           type: boolean
+        contentType:
+          type: string
+          enum: [video, document]
+        documentId:
+          type: ["integer", "null"]
 
     ModuleDetail:
       type: object
@@ -1596,6 +1612,11 @@ components:
           type: integer
         isPublic:
           type: boolean
+        contentType:
+          type: string
+          enum: [video, document]
+        documentId:
+          type: ["integer", "null"]
         createdAt:
           type: string
         moduleCompletedAt:
@@ -1606,9 +1627,26 @@ components:
             $ref: "#/components/schemas/VideoWithProgress"
         quizResult:
           $ref: "#/components/schemas/QuizResult"
+        document:
+          allOf:
+            - $ref: "#/components/schemas/ModuleDocument"
+          nullable: true
         quizUnlocked:
           type: boolean
-      required: [id, trackId, title, order, isPublic, createdAt, videos, quizUnlocked]
+      required: [id, trackId, title, order, isPublic, contentType, documentId, createdAt, videos, document, quizUnlocked]
+
+    ModuleDocument:
+      type: object
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+        description:
+          type: ["string", "null"]
+        driveUrl:
+          type: string
+      required: [id, title, driveUrl]
 
     CompleteModuleInput:
       type: object

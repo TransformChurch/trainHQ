@@ -6,6 +6,7 @@ import { BookOpen, LayoutDashboard, Settings, Video, ShieldCheck, LogOut, Menu, 
 import wordmark from "@assets/TC_Black_Wordmark_1782833324395.png";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { useEffect, useState } from "react";
+import { useSiteCopy } from "@/lib/siteCopy";
 
 type NavigationItem = {
   href: string;
@@ -18,6 +19,7 @@ export function Sidebar() {
   const [location] = useLocation();
   const { data: user } = useGetMe();
   const { signOut } = useAuth();
+  const { copy } = useSiteCopy();
   const basePath = import.meta.env.BASE_URL.replace(/\/$/, "");
 
   const isAdmin = user?.role === "admin";
@@ -47,28 +49,29 @@ export function Sidebar() {
   }, [user?.id, user?.role, basePath]);
 
   const learningItems: NavigationItem[] = [
-    { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-    { href: "/tracks", label: "Training Tracks", icon: BookOpen },
-    { href: "/queue", label: "My Queue", icon: Video },
-    { href: "/groups", label: "Groups", icon: UsersRound },
-    { href: "/profile", label: "My Profile", icon: UserCircle, badge: isProfileIncomplete ? "!" : undefined },
+    { href: "/dashboard", label: copy("nav.dashboard"), icon: LayoutDashboard },
+    { href: "/tracks", label: copy("nav.trainingTracks"), icon: BookOpen },
+    { href: "/queue", label: copy("nav.myQueue"), icon: Video },
+    { href: "/groups", label: copy("nav.groups"), icon: UsersRound },
+    { href: "/profile", label: copy("nav.myProfile"), icon: UserCircle, badge: isProfileIncomplete ? "!" : undefined },
   ];
 
   const informationItems: NavigationItem[] = [
-    { href: "/documents", label: "Documents", icon: FileText },
-    ...(facilitiesAllowed ? [{ href: "/facilities", label: "Request Hub", icon: Wrench }] : []),
+    { href: "/documents", label: copy("nav.documents"), icon: FileText },
+    ...(facilitiesAllowed ? [{ href: "/facilities", label: copy("nav.requestHub"), icon: Wrench }] : []),
   ];
 
   const managerItems: NavigationItem[] = [
-    { href: "/admin/users", label: "Users & Progress", icon: Users },
-    { href: "/admin/content", label: "Content Manager", icon: Settings },
-    { href: "/admin/growth-tracks", label: "Growth Tracks", icon: TrendingUp },
+    { href: "/admin/users", label: copy("nav.usersProgress"), icon: Users },
+    { href: "/admin/modules", label: copy("nav.moduleManager"), icon: BookOpen },
+    { href: "/admin/documents", label: copy("nav.documentManager"), icon: FileText },
+    { href: "/admin/growth-tracks", label: copy("nav.growthTracks"), icon: TrendingUp },
   ];
 
   const adminOnlyItems: NavigationItem[] = [
-    { href: "/admin", label: "Admin Dashboard", icon: ShieldCheck },
-    { href: "/admin/settings", label: "Admin Settings", icon: Settings },
-    { href: "/admin/facilities", label: "Request Hub", icon: Wrench },
+    { href: "/admin", label: copy("nav.adminDashboard"), icon: ShieldCheck },
+    { href: "/admin/settings", label: copy("nav.adminSettings"), icon: Settings },
+    { href: "/admin/facilities", label: copy("nav.requestHub"), icon: Wrench },
   ];
 
   const handleSignOut = () => {
@@ -139,8 +142,8 @@ export function Sidebar() {
             </div>
           </div>
           <Button variant="ghost" className="w-full justify-start text-sidebar-foreground/70 hover:text-destructive hover:bg-destructive/10" onClick={handleSignOut} data-testid="nav-logout">
-            <LogOut className="w-4 h-4 mr-2" />
-            Sign out
+             <LogOut className="w-4 h-4 mr-2" />
+             {copy("nav.signOut")}
           </Button>
         </div>
       </div>

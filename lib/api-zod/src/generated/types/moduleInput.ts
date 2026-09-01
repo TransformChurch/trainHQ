@@ -5,6 +5,7 @@
  * Transform Church Leadership Training Platform API
  * OpenAPI spec version: 0.1.0
  */
+import type { ModuleInputContentType } from './moduleInputContentType';
 
 export interface ModuleInput {
   trackId: number;
@@ -15,4 +16,7 @@ export interface ModuleInput {
   imageUrl?: string | null;
   order: number;
   isPublic?: boolean;
+  contentType?: ModuleInputContentType;
+  /** @nullable */
+  documentId?: number | null;
 }

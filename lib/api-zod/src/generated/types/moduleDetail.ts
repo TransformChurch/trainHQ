@@ -5,6 +5,8 @@
  * Transform Church Leadership Training Platform API
  * OpenAPI spec version: 0.1.0
  */
+import type { ModuleDetailContentType } from './moduleDetailContentType';
+import type { ModuleDocument } from './moduleDocument';
 import type { QuizResult } from './quizResult';
 import type { VideoWithProgress } from './videoWithProgress';
 
@@ -18,10 +20,14 @@ export interface ModuleDetail {
   imageUrl?: string | null;
   order: number;
   isPublic: boolean;
+  contentType: ModuleDetailContentType;
+  /** @nullable */
+  documentId: number | null;
   createdAt: string;
   /** @nullable */
   moduleCompletedAt?: string | null;
   videos: VideoWithProgress[];
   quizResult?: QuizResult;
+  document: ModuleDocument | null;
   quizUnlocked: boolean;
 }

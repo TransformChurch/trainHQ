@@ -5,6 +5,8 @@ import {
   Building2,
   ClipboardList,
   Coffee,
+  ChevronDown,
+  ChevronUp,
   ExternalLink,
   Headphones,
   Loader2,
@@ -35,6 +37,9 @@ import {
   facilitiesIconOptions,
   type FacilitiesAccessGrant,
   type FacilitiesCategory,
+  type FacilitiesCategoryAccessResponse,
+  type FacilitiesCategoryAccessGrant,
+  type FacilitiesCategoryGroupAccessGrant,
   type FacilitiesGroup,
   type FacilitiesGroupAccessGrant,
   type FacilitiesRequest,
@@ -101,6 +106,9 @@ export default function AdminFacilities() {
   const [grants, setGrants] = useState<FacilitiesAccessGrant[]>([]);
   const [groupGrants, setGroupGrants] = useState<FacilitiesGroupAccessGrant[]>([]);
   const [groups, setGroups] = useState<FacilitiesGroup[]>([]);
+  const [categoryGrants, setCategoryGrants] = useState<FacilitiesCategoryAccessGrant[]>([]);
+  const [categoryGroupGrants, setCategoryGroupGrants] = useState<FacilitiesCategoryGroupAccessGrant[]>([]);
+  const [selectedAccessCategoryId, setSelectedAccessCategoryId] = useState<number>(0);
   const [loading, setLoading] = useState(true);
   const [categoryDialogOpen, setCategoryDialogOpen] = useState(false);
   const [requestDialogOpen, setRequestDialogOpen] = useState(false);
@@ -113,16 +121,20 @@ export default function AdminFacilities() {
   const load = async () => {
     setLoading(true);
     try {
-      const [catalog, access, groupAccess, availableGroups] = await Promise.all([
+      const [catalog, access, groupAccess, availableGroups, sectionAccess] = await Promise.all([
         facilitiesApi<FacilitiesCategory[]>("/api/admin/facilities"),
         facilitiesApi<FacilitiesAccessGrant[]>("/api/admin/facilities/access"),
         facilitiesApi<FacilitiesGroupAccessGrant[]>("/api/admin/facilities/access/groups"),
         facilitiesApi<FacilitiesGroup[]>("/api/groups"),
+        facilitiesApi<FacilitiesCategoryAccessResponse>("/api/admin/facilities/category-access"),
       ]);
       setCategories(catalog);
       setGrants(access);
       setGroupGrants(groupAccess);
       setGroups(availableGroups);
+      setCategoryGrants(sectionAccess.users);
+      setCategoryGroupGrants(sectionAccess.groups);
+      setSelectedAccessCategoryId((current) => current || catalog[0]?.id || 0);
     } catch (err) {
       toast({ title: "Request Hub settings could not be loaded", description: (err as Error).message, variant: "destructive" });
     } finally {
@@ -242,8 +254,35 @@ export default function AdminFacilities() {
     }
   };
 
+  const moveCategory = async (categoryIndex: number, direction: -1 | 1) => {
+    const targetIndex = categoryIndex + direction;
+    if (targetIndex < 0 || targetIndex >= categories.length) return;
+    const reordered = [...categories];
+    [reordered[categoryIndex], reordered[targetIndex]] = [reordered[targetIndex], reordered[categoryIndex]];
+    setCategories(reordered.map((category, sortOrder) => ({ ...category, sortOrder })));
+    try {
+      const next = await facilitiesApi<FacilitiesCategory[]>("/api/admin/facilities/categories/reorder", {
+        method: "PUT",
+        body: JSON.stringify({ categoryIds: reordered.map((category) => category.id) }),
+      });
+      setCategories(next);
+      toast({ title: "Category order updated" });
+    } catch (err) {
+      toast({ title: "Category order could not be updated", description: (err as Error).message, variant: "destructive" });
+      await load();
+    }
+  };
+
   const grantedUserIds = useMemo(() => new Set(grants.map((grant) => grant.userId)), [grants]);
   const grantedGroupIds = useMemo(() => new Set(groupGrants.map((grant) => grant.groupId)), [groupGrants]);
+  const selectedCategoryUserIds = useMemo(
+    () => new Set(categoryGrants.filter((grant) => grant.categoryId === selectedAccessCategoryId).map((grant) => grant.userId)),
+    [categoryGrants, selectedAccessCategoryId],
+  );
+  const selectedCategoryGroupIds = useMemo(
+    () => new Set(categoryGroupGrants.filter((grant) => grant.categoryId === selectedAccessCategoryId).map((grant) => grant.groupId)),
+    [categoryGroupGrants, selectedAccessCategoryId],
+  );
   const filteredUsers = (users ?? []).filter((user) => {
     const haystack = `${user.firstName} ${user.lastName} ${user.email}`.toLowerCase();
     return haystack.includes(search.trim().toLowerCase());
@@ -297,6 +336,54 @@ export default function AdminFacilities() {
     }
   };
 
+  const setCategoryUserAccess = async (userId: string, enabled: boolean) => {
+    if (!selectedAccessCategoryId) return;
+    const savingKey = `category:${selectedAccessCategoryId}:user:${userId}`;
+    setSavingAccess((current) => new Set(current).add(savingKey));
+    try {
+      await facilitiesApi(`/api/admin/facilities/categories/${selectedAccessCategoryId}/access/users/${encodeURIComponent(userId)}`, {
+        method: "PUT",
+        body: JSON.stringify({ enabled }),
+      });
+      const next = await facilitiesApi<FacilitiesCategoryAccessResponse>("/api/admin/facilities/category-access");
+      setCategoryGrants(next.users);
+      setCategoryGroupGrants(next.groups);
+      toast({ title: enabled ? "Section access granted" : "Section access removed" });
+    } catch (err) {
+      toast({ title: "Section access could not be updated", description: (err as Error).message, variant: "destructive" });
+    } finally {
+      setSavingAccess((current) => {
+        const next = new Set(current);
+        next.delete(savingKey);
+        return next;
+      });
+    }
+  };
+
+  const setCategoryGroupAccess = async (groupId: number, enabled: boolean) => {
+    if (!selectedAccessCategoryId) return;
+    const savingKey = `category:${selectedAccessCategoryId}:group:${groupId}`;
+    setSavingAccess((current) => new Set(current).add(savingKey));
+    try {
+      await facilitiesApi(`/api/admin/facilities/categories/${selectedAccessCategoryId}/access/groups/${groupId}`, {
+        method: "PUT",
+        body: JSON.stringify({ enabled }),
+      });
+      const next = await facilitiesApi<FacilitiesCategoryAccessResponse>("/api/admin/facilities/category-access");
+      setCategoryGrants(next.users);
+      setCategoryGroupGrants(next.groups);
+      toast({ title: enabled ? "Section access granted to group" : "Section group access removed" });
+    } catch (err) {
+      toast({ title: "Section group access could not be updated", description: (err as Error).message, variant: "destructive" });
+    } finally {
+      setSavingAccess((current) => {
+        const next = new Set(current);
+        next.delete(savingKey);
+        return next;
+      });
+    }
+  };
+
   if (loading) {
     return <div className="flex min-h-[50vh] items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>;
   }
@@ -313,7 +400,8 @@ export default function AdminFacilities() {
       <Tabs defaultValue="directory">
         <TabsList>
           <TabsTrigger value="directory"><ClipboardList className="mr-2 h-4 w-4" />Request Directory</TabsTrigger>
-          <TabsTrigger value="access"><Users className="mr-2 h-4 w-4" />Access</TabsTrigger>
+          <TabsTrigger value="section-access"><UsersRound className="mr-2 h-4 w-4" />Section Access</TabsTrigger>
+          <TabsTrigger value="access"><Users className="mr-2 h-4 w-4" />Whole Hub Access</TabsTrigger>
         </TabsList>
 
         <TabsContent value="directory" className="mt-6 space-y-6">
@@ -328,7 +416,7 @@ export default function AdminFacilities() {
 
           {categories.length === 0 ? (
             <Card><CardContent className="py-12 text-center text-muted-foreground">Add a category to begin building the directory.</CardContent></Card>
-          ) : categories.map((category) => (
+          ) : categories.map((category, categoryIndex) => (
             <Card key={category.id} className={!category.isActive ? "opacity-70" : ""}>
               <CardHeader className="gap-4 border-b sm:flex-row sm:items-start sm:justify-between">
                 <div>
@@ -340,6 +428,24 @@ export default function AdminFacilities() {
                   {category.description && <p className="mt-2 text-sm text-muted-foreground">{category.description}</p>}
                 </div>
                 <div className="flex shrink-0 gap-2">
+                  <Button
+                    size="icon"
+                    variant="outline"
+                    aria-label={`Move ${category.name} up`}
+                    disabled={categoryIndex === 0}
+                    onClick={() => void moveCategory(categoryIndex, -1)}
+                  >
+                    <ChevronUp className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    size="icon"
+                    variant="outline"
+                    aria-label={`Move ${category.name} down`}
+                    disabled={categoryIndex === categories.length - 1}
+                    onClick={() => void moveCategory(categoryIndex, 1)}
+                  >
+                    <ChevronDown className="h-4 w-4" />
+                  </Button>
                   <Button size="sm" variant="outline" onClick={() => openNewRequest(category.id)}>
                     <Plus className="mr-1 h-4 w-4" />Request
                   </Button>
@@ -393,12 +499,118 @@ export default function AdminFacilities() {
           ))}
         </TabsContent>
 
+        <TabsContent value="section-access" className="mt-6 space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Section Access</CardTitle>
+              <p className="text-sm text-muted-foreground">
+                Choose a Request Hub section, then grant access to specific people or groups. Whole Hub access still includes every section.
+              </p>
+              <div className="max-w-md pt-2">
+                <Label htmlFor="section-access-category">Request section</Label>
+                <Select value={String(selectedAccessCategoryId || "")} onValueChange={(value) => setSelectedAccessCategoryId(Number(value))}>
+                  <SelectTrigger id="section-access-category" className="mt-2">
+                    <SelectValue placeholder="Choose a section" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {categories.map((category) => (
+                      <SelectItem key={category.id} value={String(category.id)}>{category.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="relative max-w-md pt-2">
+                <Search className="absolute left-3 top-5 h-4 w-4 text-muted-foreground" />
+                <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search users or groups" className="pl-9" />
+              </div>
+            </CardHeader>
+          </Card>
+
+          {selectedAccessCategoryId ? (
+            <>
+              <Card>
+                <CardHeader>
+                  <CardTitle>User Access</CardTitle>
+                  <p className="text-sm text-muted-foreground">Admins and people with Whole Hub access already see this section.</p>
+                </CardHeader>
+                <CardContent className="divide-y p-0">
+                  {filteredUsers.map((user) => {
+                    const inherited = user.role === "admin" || grantedUserIds.has(user.id);
+                    const checked = inherited || selectedCategoryUserIds.has(user.id);
+                    const savingKey = `category:${selectedAccessCategoryId}:user:${user.id}`;
+                    return (
+                      <div key={user.id} className="flex items-center justify-between gap-4 px-6 py-4">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <p className="truncate font-medium">{user.firstName} {user.lastName}</p>
+                            <Badge variant="outline" className="capitalize">{user.role}</Badge>
+                          </div>
+                          <p className="truncate text-sm text-muted-foreground">{user.email}</p>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <span className="hidden text-xs text-muted-foreground sm:inline">{inherited ? "Whole Hub access" : checked ? "Allowed" : "No access"}</span>
+                          {savingAccess.has(savingKey) && <Loader2 className="h-4 w-4 animate-spin" />}
+                          <Switch
+                            checked={checked}
+                            disabled={inherited || savingAccess.has(savingKey)}
+                            onCheckedChange={(enabled) => void setCategoryUserAccess(user.id, enabled)}
+                            aria-label={`Section access for ${user.firstName} ${user.lastName}`}
+                          />
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {filteredUsers.length === 0 && <p className="px-6 py-10 text-center text-sm text-muted-foreground">No users match your search.</p>}
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2"><UsersRound className="h-5 w-5" />Group Access</CardTitle>
+                  <p className="text-sm text-muted-foreground">Every member of an enabled group can see this section.</p>
+                </CardHeader>
+                <CardContent className="divide-y p-0">
+                  {filteredGroups.map((group) => {
+                    const inherited = grantedGroupIds.has(group.id);
+                    const checked = inherited || selectedCategoryGroupIds.has(group.id);
+                    const savingKey = `category:${selectedAccessCategoryId}:group:${group.id}`;
+                    return (
+                      <div key={group.id} className="flex items-center justify-between gap-4 px-6 py-4">
+                        <div className="min-w-0">
+                          <p className="truncate font-medium">{group.name}</p>
+                          <p className="truncate text-sm text-muted-foreground">
+                            {group.memberCount} {group.memberCount === 1 ? "member" : "members"}
+                            {group.description ? ` · ${group.description}` : ""}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <span className="hidden text-xs text-muted-foreground sm:inline">{inherited ? "Whole Hub access" : checked ? "Allowed" : "No access"}</span>
+                          {savingAccess.has(savingKey) && <Loader2 className="h-4 w-4 animate-spin" />}
+                          <Switch
+                            checked={checked}
+                            disabled={inherited || savingAccess.has(savingKey)}
+                            onCheckedChange={(enabled) => void setCategoryGroupAccess(group.id, enabled)}
+                            aria-label={`Section access for ${group.name}`}
+                          />
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {filteredGroups.length === 0 && <p className="px-6 py-10 text-center text-sm text-muted-foreground">No groups match your search.</p>}
+                </CardContent>
+              </Card>
+            </>
+          ) : (
+            <Card><CardContent className="py-12 text-center text-muted-foreground">Add a category before assigning section access.</CardContent></Card>
+          )}
+        </TabsContent>
+
         <TabsContent value="access" className="mt-6 space-y-6">
           <Card>
             <CardHeader>
               <CardTitle>User Access</CardTitle>
               <p className="text-sm text-muted-foreground">
-                Admins always have access. Everyone else can be enabled individually or through a group.
+                Admins always have access. These grants allow every Request Hub section; use Section Access for narrower permissions.
               </p>
               <div className="relative max-w-md pt-2">
                 <Search className="absolute left-3 top-5 h-4 w-4 text-muted-foreground" />

@@ -76,7 +76,7 @@ export default function AdminDashboard() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <Link href="/admin/content">
+            <Link href="/admin/modules">
               <Button variant="outline" className="w-full mt-2">Manage Content</Button>
             </Link>
           </CardContent>

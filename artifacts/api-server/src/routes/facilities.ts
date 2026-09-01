@@ -3,6 +3,8 @@ import {
   db,
   facilitiesAccessTable,
   facilitiesGroupAccessTable,
+  facilitiesCategoryAccessTable,
+  facilitiesCategoryGroupAccessTable,
   facilitiesCategoriesTable,
   facilitiesRequestsTable,
   groupMembersTable,
@@ -34,6 +36,27 @@ async function canAccessFacilities(user: { id: string; role: string }) {
   return groupRows.length > 0;
 }
 
+async function accessibleCategoryIds(user: { id: string; role: string }) {
+  if (user.role === "admin" || await canAccessFacilities(user)) return null;
+
+  const [userGrants, groupGrants] = await Promise.all([
+    db
+      .select({ categoryId: facilitiesCategoryAccessTable.categoryId })
+      .from(facilitiesCategoryAccessTable)
+      .where(eq(facilitiesCategoryAccessTable.userId, user.id)),
+    db
+      .select({ categoryId: facilitiesCategoryGroupAccessTable.categoryId })
+      .from(groupMembersTable)
+      .innerJoin(
+        facilitiesCategoryGroupAccessTable,
+        eq(groupMembersTable.groupId, facilitiesCategoryGroupAccessTable.groupId),
+      )
+      .where(eq(groupMembersTable.userId, user.id)),
+  ]);
+
+  return new Set([...userGrants, ...groupGrants].map((grant) => grant.categoryId));
+}
+
 async function currentUser(req: Parameters<typeof getAuth>[0]) {
   const auth = getAuth(req);
   return auth?.userId ? getDbUser(auth.userId) : null;
@@ -46,7 +69,8 @@ router.get("/access", requireAuth, async (req, res) => {
       res.status(404).json({ error: "User not found" });
       return;
     }
-    res.json({ allowed: await canAccessFacilities(user) });
+    const categoryIds = await accessibleCategoryIds(user);
+    res.json({ allowed: categoryIds === null || categoryIds.size > 0 });
   } catch {
     res.status(500).json({ error: "Internal server error" });
   }
@@ -59,16 +83,20 @@ router.get("/", requireAuth, async (req, res) => {
       res.status(404).json({ error: "User not found" });
       return;
     }
-    if (!(await canAccessFacilities(user))) {
+    const allowedCategoryIds = await accessibleCategoryIds(user);
+    if (allowedCategoryIds !== null && allowedCategoryIds.size === 0) {
       res.status(403).json({ error: "You do not have access to the Request Hub." });
       return;
     }
 
-    const categories = await db
+    const allCategories = await db
       .select()
       .from(facilitiesCategoriesTable)
       .where(eq(facilitiesCategoriesTable.isActive, true))
       .orderBy(asc(facilitiesCategoriesTable.sortOrder), asc(facilitiesCategoriesTable.id));
+    const categories = allowedCategoryIds === null
+      ? allCategories
+      : allCategories.filter((category) => allowedCategoryIds.has(category.id));
     const categoryIds = categories.map((category) => category.id);
     const requests = categoryIds.length
       ? await db

@@ -15,6 +15,7 @@ import storageRouter from "./storage";
 import growthTracksRouter from "./growthTracks";
 import documentsRouter from "./documents";
 import facilitiesRouter from "./facilities";
+import siteCopyRouter from "./siteCopy";
 
 const router: IRouter = Router();
 
@@ -34,5 +35,6 @@ router.use("/groups", groupsRouter);
 router.use("/growth-tracks", growthTracksRouter);
 router.use("/documents", documentsRouter);
 router.use("/facilities", facilitiesRouter);
+router.use(siteCopyRouter);
 
 export default router;

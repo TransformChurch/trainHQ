@@ -41,6 +41,28 @@ export type FacilitiesGroupAccessGrant = {
   grantedAt: string;
 };
 
+export type FacilitiesCategoryAccessGrant = {
+  id: number;
+  categoryId: number;
+  userId: string;
+  grantedByExternalUserId: string;
+  grantedAt: string;
+};
+
+export type FacilitiesCategoryGroupAccessGrant = {
+  id: number;
+  categoryId: number;
+  groupId: number;
+  groupName: string;
+  grantedByExternalUserId: string;
+  grantedAt: string;
+};
+
+export type FacilitiesCategoryAccessResponse = {
+  users: FacilitiesCategoryAccessGrant[];
+  groups: FacilitiesCategoryGroupAccessGrant[];
+};
+
 export type FacilitiesGroup = {
   id: number;
   name: string;

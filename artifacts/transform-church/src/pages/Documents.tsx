@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { FileText, FolderOpen, ExternalLink, X, Lock, AlertTriangle } from "lucide-react";
+import { useSiteCopy } from "@/lib/siteCopy";
 
 const BASE = import.meta.env.VITE_API_URL?.replace(/\/$/, "") ?? import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -128,6 +129,7 @@ function DocumentCard({ doc, onPreview }: { doc: RepoDoc; onPreview: (d: RepoDoc
 }
 
 export default function Documents() {
+  const { copy } = useSiteCopy();
   const [allDocs, setAllDocs] = useState<RepoDoc[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -176,7 +178,7 @@ export default function Documents() {
       {preview && <PreviewModal doc={preview} onClose={() => setPreview(null)} />}
 
       <div>
-        <h1 className="text-3xl font-bold font-serif">Training Documents</h1>
+        <h1 className="text-3xl font-bold font-serif">{copy("page.documentsTitle")}</h1>
         <p className="text-muted-foreground mt-2">Resources and documents shared with you.</p>
       </div>
 

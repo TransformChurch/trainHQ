@@ -186,6 +186,14 @@ export interface TrackUpdate {
   imageUrl?: string | null;
 }
 
+export type ModuleContentType = typeof ModuleContentType[keyof typeof ModuleContentType];
+
+
+export const ModuleContentType = {
+  video: 'video',
+  document: 'document',
+} as const;
+
 export interface Module {
   id: number;
   trackId: number;
@@ -196,6 +204,9 @@ export interface Module {
   imageUrl?: string | null;
   order: number;
   isPublic: boolean;
+  contentType: ModuleContentType;
+  /** @nullable */
+  documentId: number | null;
   createdAt: string;
 }
 
@@ -210,6 +221,14 @@ export interface TrackWithModules {
   modules: Module[];
 }
 
+export type ModuleInputContentType = typeof ModuleInputContentType[keyof typeof ModuleInputContentType];
+
+
+export const ModuleInputContentType = {
+  video: 'video',
+  document: 'document',
+} as const;
+
 export interface ModuleInput {
   trackId: number;
   title: string;
@@ -219,7 +238,18 @@ export interface ModuleInput {
   imageUrl?: string | null;
   order: number;
   isPublic?: boolean;
+  contentType?: ModuleInputContentType;
+  /** @nullable */
+  documentId?: number | null;
 }
+
+export type ModuleUpdateContentType = typeof ModuleUpdateContentType[keyof typeof ModuleUpdateContentType];
+
+
+export const ModuleUpdateContentType = {
+  video: 'video',
+  document: 'document',
+} as const;
 
 export interface ModuleUpdate {
   title?: string;
@@ -229,7 +259,18 @@ export interface ModuleUpdate {
   imageUrl?: string | null;
   order?: number;
   isPublic?: boolean;
+  contentType?: ModuleUpdateContentType;
+  /** @nullable */
+  documentId?: number | null;
 }
+
+export type ModuleDetailContentType = typeof ModuleDetailContentType[keyof typeof ModuleDetailContentType];
+
+
+export const ModuleDetailContentType = {
+  video: 'video',
+  document: 'document',
+} as const;
 
 export interface VideoWithProgress {
   id: number;
@@ -260,6 +301,14 @@ export interface QuizResult {
   takenAt: string;
 }
 
+export interface ModuleDocument {
+  id: number;
+  title: string;
+  /** @nullable */
+  description?: string | null;
+  driveUrl: string;
+}
+
 export interface ModuleDetail {
   id: number;
   trackId: number;
@@ -270,11 +319,15 @@ export interface ModuleDetail {
   imageUrl?: string | null;
   order: number;
   isPublic: boolean;
+  contentType: ModuleDetailContentType;
+  /** @nullable */
+  documentId: number | null;
   createdAt: string;
   /** @nullable */
   moduleCompletedAt?: string | null;
   videos: VideoWithProgress[];
   quizResult?: QuizResult;
+  document: ModuleDocument | null;
   quizUnlocked: boolean;
 }
 

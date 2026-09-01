@@ -27,6 +27,7 @@ import { useUpsertMe, useGetMe } from "@workspace/api-client-react";
 import { setAuthTokenGetter, setBaseUrl } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
 import { AlertCircle } from "lucide-react";
+import { SiteCopyProvider } from "@/lib/siteCopy";
 
 const queryClient = new QueryClient();
 const TOKEN_STORAGE_KEY = "auth_bearer_token";
@@ -241,6 +242,7 @@ function AppRoutes() {
   return <QueryClientProvider client={queryClient}>
     <AuthProvider>
       <QueryCacheInvalidator />
+      <SiteCopyProvider>
       <UserSyncProvider>
         <Switch>
           <Route path="/" component={HomeRedirect} />
@@ -259,13 +261,16 @@ function AppRoutes() {
           <Route path="/facilities"><ProtectedRoute component={Facilities} /></Route>
           <Route path="/admin"><ProtectedRoute component={AdminDashboard} adminOnly /></Route>
           <Route path="/admin/users"><ProtectedRoute component={AdminUsers} managerOrAdmin /></Route>
-          <Route path="/admin/content"><ProtectedRoute component={AdminContent} managerOrAdmin /></Route>
+          <Route path="/admin/content"><Redirect to="/admin/modules" /></Route>
+          <Route path="/admin/modules"><ProtectedRoute component={() => <AdminContent section="modules" />} managerOrAdmin /></Route>
+          <Route path="/admin/documents"><ProtectedRoute component={() => <AdminContent section="documents" />} managerOrAdmin /></Route>
           <Route path="/admin/growth-tracks"><ProtectedRoute component={AdminGrowthTracks} managerOrAdmin /></Route>
           <Route path="/admin/settings"><ProtectedRoute component={AdminSettings} adminOnly /></Route>
           <Route path="/admin/facilities"><ProtectedRoute component={AdminFacilities} adminOnly /></Route>
           <Route component={NotFound} />
         </Switch>
       </UserSyncProvider>
+      </SiteCopyProvider>
     </AuthProvider>
   </QueryClientProvider>;
 }

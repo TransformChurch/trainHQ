@@ -13,7 +13,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useState, useEffect, useRef, createContext, useContext } from "react";
 import { useAuth } from "@/App";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger,
@@ -24,13 +24,13 @@ import {
 import {
   Accordion, AccordionContent, AccordionItem, AccordionTrigger,
 } from "@/components/ui/accordion";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Plus, Trash2, Video, BookOpen, HelpCircle, Users, Pencil, Globe, Lock, Mail, Upload, Link, HardDrive, Image as ImageIcon, FileText, FolderOpen, Shield, X, AlertTriangle } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { useUpload } from "@workspace/object-storage-web";
 import type { Video as VideoType, QuizQuestion } from "@workspace/api-client-react";
 import { StorageImage } from "@/lib/storageUrl";
+import { useSiteCopy } from "@/lib/siteCopy";
 
 type VideoSourceType = "embed" | "drive" | "upload";
 
@@ -635,6 +635,16 @@ function ModuleManager({ trackId }: { trackId: number }) {
   const { mutate: createModule } = useCreateModule();
   const { mutate: updateModule } = useUpdateModule();
   const { mutate: deleteModule } = useDeleteModule();
+  const { data: moduleDocuments = [] } = useQuery<RepoDoc[]>({
+    queryKey: ["admin", "module-documents"],
+    queryFn: async () => {
+      const tree = await repoFetch("/api/admin/documents");
+      return [
+        ...tree.folders.flatMap((folder: any) => folder.documents ?? []),
+        ...(tree.unfiled ?? []),
+      ].filter((document: RepoDoc) => document.resourceType === "file" && document.driveUrl);
+    },
+  });
 
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState("");
@@ -642,6 +652,8 @@ function ModuleManager({ trackId }: { trackId: number }) {
   const [order, setOrder] = useState("1");
   const [isPublic, setIsPublic] = useState(true);
   const [moduleImageUrl, setModuleImageUrl] = useState("");
+  const [contentType, setContentType] = useState<"video" | "document">("video");
+  const [documentId, setDocumentId] = useState("");
   const [togglingId, setTogglingId] = useState<number | null>(null);
 
   const [editingModule, setEditingModule] = useState<any | null>(null);
@@ -650,6 +662,8 @@ function ModuleManager({ trackId }: { trackId: number }) {
   const [editOrder, setEditOrder] = useState("1");
   const [editIsPublic, setEditIsPublic] = useState(true);
   const [editImageUrl, setEditImageUrl] = useState("");
+  const [editContentType, setEditContentType] = useState<"video" | "document">("video");
+  const [editDocumentId, setEditDocumentId] = useState("");
 
   const openEditDialog = (mod: any) => {
     setEditingModule(mod);
@@ -658,14 +672,29 @@ function ModuleManager({ trackId }: { trackId: number }) {
     setEditOrder(String(mod.order));
     setEditIsPublic(mod.isPublic);
     setEditImageUrl(mod.imageUrl ?? "");
+    setEditContentType(mod.contentType ?? "video");
+    setEditDocumentId(mod.documentId ? String(mod.documentId) : "");
   };
 
   const handleCreate = (e: React.FormEvent) => {
     e.preventDefault();
-    createModule({ data: { trackId, title, description: desc || null, imageUrl: moduleImageUrl || null, order: parseInt(order), isPublic } }, {
+    if (contentType === "document" && !documentId) {
+      toast({ title: "Select a document for this module", variant: "destructive" });
+      return;
+    }
+    createModule({ data: {
+      trackId,
+      title,
+      description: desc || null,
+      imageUrl: moduleImageUrl || null,
+      order: parseInt(order),
+      isPublic,
+      contentType,
+      documentId: contentType === "document" ? Number(documentId) : null,
+    } }, {
       onSuccess: () => {
         toast({ title: "Module created" });
-        setOpen(false); setTitle(""); setDesc(""); setOrder("1"); setIsPublic(true); setModuleImageUrl("");
+        setOpen(false); setTitle(""); setDesc(""); setOrder("1"); setIsPublic(true); setModuleImageUrl(""); setContentType("video"); setDocumentId("");
         queryClient.invalidateQueries({ queryKey: getListModulesQueryKey({ trackId }) });
       },
     });
@@ -674,11 +703,30 @@ function ModuleManager({ trackId }: { trackId: number }) {
   const handleEdit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingModule) return;
-    updateModule({ moduleId: editingModule.id, data: { title: editTitle, description: editDesc || null, imageUrl: editImageUrl || null, order: parseInt(editOrder), isPublic: editIsPublic } }, {
+    if (editContentType === "document" && !editDocumentId) {
+      toast({ title: "Select a document for this module", variant: "destructive" });
+      return;
+    }
+    updateModule({ moduleId: editingModule.id, data: {
+      title: editTitle,
+      description: editDesc || null,
+      imageUrl: editImageUrl || null,
+      order: parseInt(editOrder),
+      isPublic: editIsPublic,
+      contentType: editContentType,
+      documentId: editContentType === "document" ? Number(editDocumentId) : null,
+    } }, {
       onSuccess: () => {
         toast({ title: "Module updated" });
         setEditingModule(null);
         queryClient.invalidateQueries({ queryKey: getListModulesQueryKey({ trackId }) });
+      },
+      onError: (error) => {
+        toast({
+          title: "Could not update module",
+          description: error instanceof Error ? error.message : "Please try again.",
+          variant: "destructive",
+        });
       },
     });
   };
@@ -714,6 +762,32 @@ function ModuleManager({ trackId }: { trackId: number }) {
             <form onSubmit={handleCreate} className="space-y-4">
               <FormField label="Title"><Input value={title} onChange={e => setTitle(e.target.value)} required /></FormField>
               <FormField label="Description"><Textarea value={desc} onChange={e => setDesc(e.target.value)} rows={2} /></FormField>
+              <FormField label="Module Type">
+                <Select value={contentType} onValueChange={value => {
+                  setContentType(value as "video" | "document");
+                  if (value === "video") setDocumentId("");
+                }}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="video">Video based</SelectItem>
+                    <SelectItem value="document">Document based</SelectItem>
+                  </SelectContent>
+                </Select>
+              </FormField>
+              {contentType === "document" && (
+                <FormField label="Training PDF">
+                  <Select value={documentId} onValueChange={setDocumentId}>
+                    <SelectTrigger>
+                      <SelectValue placeholder={moduleDocuments.length ? "Select a document" : "Add a document to the repository first"} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {moduleDocuments.map(document => (
+                        <SelectItem key={document.id} value={String(document.id)}>{document.title}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </FormField>
+              )}
               <ImageUploadPicker value={moduleImageUrl} onChange={setModuleImageUrl} />
               <FormField label="Order"><Input type="number" value={order} onChange={e => setOrder(e.target.value)} min="1" /></FormField>
               <div className="flex items-center gap-3">
@@ -742,6 +816,30 @@ function ModuleManager({ trackId }: { trackId: number }) {
           <form onSubmit={handleEdit} className="space-y-4">
             <FormField label="Title"><Input value={editTitle} onChange={e => setEditTitle(e.target.value)} required /></FormField>
             <FormField label="Description"><Textarea value={editDesc} onChange={e => setEditDesc(e.target.value)} rows={2} /></FormField>
+            <FormField label="Module Type">
+              <Select value={editContentType} onValueChange={value => {
+                setEditContentType(value as "video" | "document");
+                if (value === "video") setEditDocumentId("");
+              }}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="video">Video based</SelectItem>
+                  <SelectItem value="document">Document based</SelectItem>
+                </SelectContent>
+              </Select>
+            </FormField>
+            {editContentType === "document" && (
+              <FormField label="Training PDF">
+                <Select value={editDocumentId} onValueChange={setEditDocumentId}>
+                  <SelectTrigger><SelectValue placeholder="Select a document" /></SelectTrigger>
+                  <SelectContent>
+                    {moduleDocuments.map(document => (
+                      <SelectItem key={document.id} value={String(document.id)}>{document.title}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </FormField>
+            )}
             <ImageUploadPicker value={editImageUrl} onChange={setEditImageUrl} />
             <FormField label="Order"><Input type="number" value={editOrder} onChange={e => setEditOrder(e.target.value)} min="1" /></FormField>
             <div className="flex items-center gap-3">
@@ -774,6 +872,10 @@ function ModuleManager({ trackId }: { trackId: number }) {
                     <Badge variant="outline" className="text-xs shrink-0">{mod.order}</Badge>
                   )}
                   <span className="font-medium truncate">{mod.title}</span>
+                  <Badge variant="secondary" className="hidden gap-1 text-xs sm:flex">
+                    {mod.contentType === "document" ? <FileText className="h-3 w-3" /> : <Video className="h-3 w-3" />}
+                    {mod.contentType === "document" ? "Document" : "Video"}
+                  </Badge>
                   <button
                     type="button"
                     onClick={e => { e.stopPropagation(); handleToggleVisibility(mod); }}
@@ -793,7 +895,17 @@ function ModuleManager({ trackId }: { trackId: number }) {
                 </div>
               </AccordionTrigger>
               <AccordionContent className="px-4 pb-3 space-y-3">
-                <VideoManager moduleId={mod.id} />
+                {mod.contentType === "document" ? (
+                  <div className="flex items-center gap-2 rounded-md border bg-muted/20 px-3 py-2 text-sm">
+                    <FileText className="h-4 w-4 text-primary" />
+                    <span className="text-muted-foreground">Document:</span>
+                    <span className="font-medium">
+                      {moduleDocuments.find(document => document.id === mod.documentId)?.title ?? "Unavailable"}
+                    </span>
+                  </div>
+                ) : (
+                  <VideoManager moduleId={mod.id} />
+                )}
                 <QuizManager moduleId={mod.id} />
                 <div className="flex gap-2 pt-1 flex-wrap">
                   {isAdmin && (
@@ -1812,7 +1924,10 @@ function DocumentsTab() {
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 
-export default function AdminContent() {
+export type AdminContentSection = "modules" | "documents";
+
+export default function AdminContent({ section = "modules" }: { section?: AdminContentSection }) {
+  const { copy } = useSiteCopy();
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const { data: tracks, isLoading } = useListTracks();
@@ -1898,26 +2013,34 @@ export default function AdminContent() {
     <div className="space-y-8 animate-in fade-in duration-500">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold font-serif">Content Manager</h1>
-          <p className="text-muted-foreground mt-2">Manage tracks, modules, videos, quiz questions, assignments, and documents.</p>
+          <h1 className="text-3xl font-bold font-serif">
+            {section === "documents" ? copy("page.documentManagerTitle") : copy("page.moduleManagerTitle")}
+          </h1>
+          <p className="text-muted-foreground mt-2">
+            {section === "documents"
+              ? "Organize training PDFs and control who can access them."
+              : "Manage training tracks, modules, videos, quizzes, and assignments."}
+          </p>
         </div>
-        <div className="flex items-center gap-2" id="content-header-actions">
-          <AssignmentManager />
-          <Dialog open={addTrackOpen} onOpenChange={setAddTrackOpen}>
-            <DialogTrigger asChild>
-              <Button><Plus className="w-4 h-4 mr-2" /> New Track</Button>
-            </DialogTrigger>
-            <DialogContent className="max-h-[90vh] overflow-y-auto">
-              <DialogHeader><DialogTitle>Create Training Track</DialogTitle></DialogHeader>
-              <form onSubmit={handleCreateTrack} className="space-y-4">
-                <FormField label="Track Name"><Input value={trackName} onChange={e => setTrackName(e.target.value)} required /></FormField>
-                <FormField label="Description"><Textarea value={trackDesc} onChange={e => setTrackDesc(e.target.value)} rows={3} /></FormField>
-                <ImageUploadPicker value={trackImageUrl} onChange={setTrackImageUrl} />
-                <Button type="submit" className="w-full">Create Track</Button>
-              </form>
-            </DialogContent>
-          </Dialog>
-        </div>
+        {section === "modules" && (
+          <div className="flex items-center gap-2" id="content-header-actions">
+            <AssignmentManager />
+            <Dialog open={addTrackOpen} onOpenChange={setAddTrackOpen}>
+              <DialogTrigger asChild>
+                <Button><Plus className="w-4 h-4 mr-2" /> New Track</Button>
+              </DialogTrigger>
+              <DialogContent className="max-h-[90vh] overflow-y-auto">
+                <DialogHeader><DialogTitle>Create Training Track</DialogTitle></DialogHeader>
+                <form onSubmit={handleCreateTrack} className="space-y-4">
+                  <FormField label="Track Name"><Input value={trackName} onChange={e => setTrackName(e.target.value)} required /></FormField>
+                  <FormField label="Description"><Textarea value={trackDesc} onChange={e => setTrackDesc(e.target.value)} rows={3} /></FormField>
+                  <ImageUploadPicker value={trackImageUrl} onChange={setTrackImageUrl} />
+                  <Button type="submit" className="w-full">Create Track</Button>
+                </form>
+              </DialogContent>
+            </Dialog>
+          </div>
+        )}
       </div>
 
       {/* Edit Track Dialog */}
@@ -1933,17 +2056,7 @@ export default function AdminContent() {
         </DialogContent>
       </Dialog>
 
-      <Tabs defaultValue="tracks">
-        <TabsList className="mb-6">
-          <TabsTrigger value="tracks">
-            <BookOpen className="w-4 h-4 mr-2" /> Training Tracks
-          </TabsTrigger>
-          <TabsTrigger value="documents">
-            <FileText className="w-4 h-4 mr-2" /> Documents
-          </TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="tracks">
+      {section === "modules" ? (
           <div className="space-y-4">
             {tracks?.map(track => (
               <Card key={track.id}>
@@ -2007,12 +2120,9 @@ export default function AdminContent() {
               </Card>
             )}
           </div>
-        </TabsContent>
-
-        <TabsContent value="documents">
-          <DocumentsTab />
-        </TabsContent>
-      </Tabs>
+      ) : (
+        <DocumentsTab />
+      )}
     </div>
     </ContentPermissionsCtx.Provider>
   );

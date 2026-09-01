@@ -389,6 +389,8 @@ export const GetDashboardSummaryResponse = zod.object({
   "imageUrl": zod.string().nullish(),
   "order": zod.number().int(),
   "isPublic": zod.boolean(),
+  "contentType": zod.enum(['video', 'document']),
+  "documentId": zod.number().int().nullable(),
   "createdAt": zod.string()
 }),
   "assignedBy": zod.string(),
@@ -490,6 +492,8 @@ export const GetTrackResponse = zod.object({
   "imageUrl": zod.string().nullish(),
   "order": zod.number().int(),
   "isPublic": zod.boolean(),
+  "contentType": zod.enum(['video', 'document']),
+  "documentId": zod.number().int().nullable(),
   "createdAt": zod.string()
 }))
 })
@@ -542,6 +546,8 @@ export const ListModulesResponseItem = zod.object({
   "imageUrl": zod.string().nullish(),
   "order": zod.number().int(),
   "isPublic": zod.boolean(),
+  "contentType": zod.enum(['video', 'document']),
+  "documentId": zod.number().int().nullable(),
   "createdAt": zod.string()
 })
 export const ListModulesResponse = zod.array(ListModulesResponseItem)
@@ -550,13 +556,17 @@ export const ListModulesResponse = zod.array(ListModulesResponseItem)
 /**
  * @summary Create a new module (admin only)
  */
+export const createModuleBodyContentTypeDefault = `video`;
+
 export const CreateModuleBody = zod.object({
   "trackId": zod.number().int(),
   "title": zod.string(),
   "description": zod.string().nullish(),
   "imageUrl": zod.string().nullish(),
   "order": zod.number().int(),
-  "isPublic": zod.boolean().optional()
+  "isPublic": zod.boolean().optional(),
+  "contentType": zod.enum(['video', 'document']).default(createModuleBodyContentTypeDefault),
+  "documentId": zod.number().int().nullish()
 })
 
 export const CreateModuleResponse = zod.object({
@@ -567,6 +577,8 @@ export const CreateModuleResponse = zod.object({
   "imageUrl": zod.string().nullish(),
   "order": zod.number().int(),
   "isPublic": zod.boolean(),
+  "contentType": zod.enum(['video', 'document']),
+  "documentId": zod.number().int().nullable(),
   "createdAt": zod.string()
 })
 
@@ -600,6 +612,8 @@ export const GetModuleResponse = zod.object({
   "imageUrl": zod.string().nullish(),
   "order": zod.number().int(),
   "isPublic": zod.boolean(),
+  "contentType": zod.enum(['video', 'document']),
+  "documentId": zod.number().int().nullable(),
   "createdAt": zod.string(),
   "moduleCompletedAt": zod.string().nullish(),
   "videos": zod.array(zod.object({
@@ -625,6 +639,12 @@ export const GetModuleResponse = zod.object({
   "passed": zod.boolean(),
   "takenAt": zod.string()
 }).optional(),
+  "document": zod.object({
+  "id": zod.number().int(),
+  "title": zod.string(),
+  "description": zod.string().nullish(),
+  "driveUrl": zod.string()
+}).nullable(),
   "quizUnlocked": zod.boolean()
 })
 
@@ -641,7 +661,9 @@ export const UpdateModuleBody = zod.object({
   "description": zod.string().nullish(),
   "imageUrl": zod.string().nullish(),
   "order": zod.number().int().optional(),
-  "isPublic": zod.boolean().optional()
+  "isPublic": zod.boolean().optional(),
+  "contentType": zod.enum(['video', 'document']).optional(),
+  "documentId": zod.number().int().nullish()
 })
 
 export const UpdateModuleResponse = zod.object({
@@ -652,6 +674,8 @@ export const UpdateModuleResponse = zod.object({
   "imageUrl": zod.string().nullish(),
   "order": zod.number().int(),
   "isPublic": zod.boolean(),
+  "contentType": zod.enum(['video', 'document']),
+  "documentId": zod.number().int().nullable(),
   "createdAt": zod.string()
 })
 
@@ -1146,6 +1170,8 @@ export const ListMyAssignmentsResponseItem = zod.object({
   "imageUrl": zod.string().nullish(),
   "order": zod.number().int(),
   "isPublic": zod.boolean(),
+  "contentType": zod.enum(['video', 'document']),
+  "documentId": zod.number().int().nullable(),
   "createdAt": zod.string()
 }),
   "assignedBy": zod.string(),
@@ -1246,6 +1272,8 @@ export const CreateAssignmentResponseItem = zod.object({
   "imageUrl": zod.string().nullish(),
   "order": zod.number().int(),
   "isPublic": zod.boolean(),
+  "contentType": zod.enum(['video', 'document']),
+  "documentId": zod.number().int().nullable(),
   "createdAt": zod.string()
 }),
   "assignedBy": zod.string(),
@@ -1300,6 +1328,8 @@ export const UpdateModuleVisibilityResponse = zod.object({
   "imageUrl": zod.string().nullish(),
   "order": zod.number().int(),
   "isPublic": zod.boolean(),
+  "contentType": zod.enum(['video', 'document']),
+  "documentId": zod.number().int().nullable(),
   "createdAt": zod.string()
 })
 
@@ -1316,6 +1346,8 @@ export const GetProgressMatrixResponse = zod.object({
   "imageUrl": zod.string().nullish(),
   "order": zod.number().int(),
   "isPublic": zod.boolean(),
+  "contentType": zod.enum(['video', 'document']),
+  "documentId": zod.number().int().nullable(),
   "createdAt": zod.string()
 })),
   "rows": zod.array(zod.object({
