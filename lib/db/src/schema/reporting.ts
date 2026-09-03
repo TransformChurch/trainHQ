@@ -7,6 +7,7 @@ export const reportTemplatesTable = pgTable("report_templates", {
   originalFileName: text("original_file_name").notNull(),
   objectPath: text("object_path").notNull(),
   pullFields: text("pull_fields").notNull(),
+  sessionCount: integer("session_count").notNull().default(5),
   uploadedByUserId: text("uploaded_by_user_id").notNull().references(() => usersTable.id),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });

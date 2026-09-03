@@ -78,6 +78,13 @@
       "when": 1788453000000,
       "tag": "0010_report_template_fields",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1788467000000,
+      "tag": "0011_report_template_session_count",
+      "breakpoints": true
     }
   ]
 }

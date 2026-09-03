@@ -21,6 +21,8 @@ const CHECK_INS_BASE = "https://api.planningcenteronline.com/check-ins/v2";
 const PEOPLE_BASE = "https://api.planningcenteronline.com/people/v2";
 const XLSX_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 const REPORT_TTL_MS = 24 * 60 * 60 * 1000;
+const DEFAULT_SESSION_COUNT = 5;
+const MAX_SESSION_COUNT = 52;
 const REPORT_FIELDS = [
   { key: "planning_center_id", label: "Planning Center ID" },
   { key: "first_name", label: "First Name" },
@@ -81,6 +83,13 @@ function normalizePullFields(raw: unknown): ReportFieldKey[] {
     )
     : [];
   return ["planning_center_id", ...selected.filter((field) => field !== "planning_center_id")];
+}
+
+function normalizeSessionCount(raw: unknown): number {
+  const value = Number(raw);
+  return Number.isInteger(value) && value >= 1 && value <= MAX_SESSION_COUNT
+    ? value
+    : DEFAULT_SESSION_COUNT;
 }
 
 function isCustomFieldKey(key: ReportFieldKey): key is `custom:${string}` {
@@ -427,6 +436,7 @@ router.post("/templates", requireAdmin, async (req, res) => {
       originalFileName,
       objectPath,
       pullFields: JSON.stringify(DEFAULT_PULL_FIELDS),
+      sessionCount: DEFAULT_SESSION_COUNT,
       uploadedByUserId: res.locals.dbUser.id,
     }).returning();
     res.status(201).json({
@@ -447,8 +457,13 @@ router.patch("/templates/:templateId/settings", requireAdmin, async (req, res) =
       return;
     }
     const pullFields = normalizePullFields(req.body?.pullFields);
+    const sessionCount = Number(req.body?.sessionCount);
+    if (!Number.isInteger(sessionCount) || sessionCount < 1 || sessionCount > MAX_SESSION_COUNT) {
+      res.status(400).json({ error: `Session count must be between 1 and ${MAX_SESSION_COUNT}.` });
+      return;
+    }
     const rows = await db.update(reportTemplatesTable)
-      .set({ pullFields: JSON.stringify(pullFields) })
+      .set({ pullFields: JSON.stringify(pullFields), sessionCount })
       .where(eq(reportTemplatesTable.id, templateId))
       .returning();
     if (!rows[0]) {
@@ -484,16 +499,10 @@ router.post("/prepare", requireManagerOrAdmin, async (req, res) => {
   try {
     await cleanExpiredRuns();
     const eventId = text(req.body?.eventId);
-    const startDate = dateOnly(req.body?.startDate);
     const endDate = dateOnly(req.body?.endDate);
     const templateId = Number(req.body?.templateId);
-    if (!eventId || !startDate || !endDate || startDate > endDate || !Number.isInteger(templateId)) {
-      res.status(400).json({ error: "Select an event, template, and valid date range." });
-      return;
-    }
-    const rangeDays = (Date.parse(`${endDate}T00:00:00Z`) - Date.parse(`${startDate}T00:00:00Z`)) / 86_400_000;
-    if (!Number.isFinite(rangeDays) || rangeDays > 366) {
-      res.status(400).json({ error: "Date ranges must be 366 days or shorter." });
+    if (!eventId || !endDate || !Number.isInteger(templateId)) {
+      res.status(400).json({ error: "Select an event, template, and valid end date." });
       return;
     }
 
@@ -506,13 +515,18 @@ router.post("/prepare", requireManagerOrAdmin, async (req, res) => {
       return;
     }
     const pullFields = normalizePullFields(template.pullFields);
+    const sessionCount = normalizeSessionCount(template.sessionCount);
     const accessToken = await getValidPlanningCenterAccessToken(res.locals.dbUser.id);
     const customFieldDefinitions = await fetchReportFieldDefinitions(accessToken);
     const customLabels = new Map(customFieldDefinitions.map((field) => [field.key, field.label]));
     const selectedCustomFields = pullFields.filter(isCustomFieldKey);
     const eventPage = await planningCenterRequest(`${CHECK_INS_BASE}/events/${encodeURIComponent(eventId)}`, accessToken);
     const eventName = firstValue(eventPage.data?.attributes ?? {}, "name") || `Event ${eventId}`;
-    const [collection, firstTimeCollection] = await Promise.all([
+    const [periodCollection, collection, firstTimeCollection] = await Promise.all([
+      fetchCollection(
+        `${CHECK_INS_BASE}/events/${encodeURIComponent(eventId)}/event_periods?order=-starts_at&per_page=100`,
+        accessToken,
+      ),
       fetchCollection(
         `${CHECK_INS_BASE}/events/${encodeURIComponent(eventId)}/check_ins?filter=attendee&include=person&per_page=100`,
         accessToken,
@@ -522,13 +536,27 @@ router.post("/prepare", requireManagerOrAdmin, async (req, res) => {
         accessToken,
       ),
     ]);
+    const sessions = periodCollection.data
+      .map((period) => ({
+        id: period.id,
+        date: dateOnly(period.attributes?.starts_at),
+      }))
+      .filter((period) => period.id && period.date && period.date <= endDate)
+      .sort((a, b) => b.date.localeCompare(a.date))
+      .slice(0, sessionCount)
+      .reverse();
+    if (!sessions.length) {
+      res.status(404).json({ error: "No Planning Center sessions were found on or before that end date." });
+      return;
+    }
+    const selectedSessionIds = new Set(sessions.map((session) => session.id));
+    const sessionDateById = new Map(sessions.map((session) => [session.id, session.date]));
     const firstTimeIds = new Set(firstTimeCollection.data.map((checkIn) => checkIn.id));
-    const inRange = collection.data.filter((checkIn) => {
-      const date = dateOnly(checkIn.attributes?.created_at);
-      return date && date >= startDate && date <= endDate;
-    });
+    const inRange = collection.data.filter((checkIn) =>
+      selectedSessionIds.has(relationshipId(checkIn, "event_period")),
+    );
     if (!inRange.length) {
-      res.status(404).json({ error: "No attendee check-ins were found in that date range." });
+      res.status(404).json({ error: "No attendee check-ins were found in the selected sessions." });
       return;
     }
 
@@ -537,7 +565,8 @@ router.post("/prepare", requireManagerOrAdmin, async (req, res) => {
     );
     const personIds = [...new Set(inRange.map((checkIn) => relationshipId(checkIn, "person")).filter(Boolean))];
     const peopleDetails = await fetchPeopleDetails(personIds, accessToken);
-    const serviceDates = [...new Set(inRange.map((checkIn) => dateOnly(checkIn.attributes?.created_at)).filter(Boolean))].sort();
+    const serviceDates = sessions.map((session) => session.date);
+    const startDate = serviceDates[0];
     const records = new Map<string, Record<string, string | boolean>>();
 
     for (const checkIn of inRange) {
@@ -569,7 +598,8 @@ router.post("/prepare", requireManagerOrAdmin, async (req, res) => {
       }
       const firstTimer = firstTimeIds.has(checkIn.id) || attrs.first_time === true || attrs.first_time_in_event === true;
       if (firstTimer) current["First Timers"] = "First-timer";
-      current[dateOnly(attrs.created_at)] = true;
+      const sessionDate = sessionDateById.get(relationshipId(checkIn, "event_period"));
+      if (sessionDate) current[sessionDate] = true;
       records.set(key, current);
     }
 
@@ -614,6 +644,7 @@ router.post("/prepare", requireManagerOrAdmin, async (req, res) => {
       rawRows: inRange.length,
       peopleCount: records.size,
       serviceDates,
+      sessionCount: sessions.length,
       pullFields,
       pullFieldLabels: pullFields.map((field) => fieldLabel(field, customLabels)),
       reviewCount,

@@ -14,13 +14,14 @@ const XLSX_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.s
 type EventOption = { id: string; name: string; frequency: string };
 type ReportFieldKey = string;
 type AvailableField = { key: ReportFieldKey; label: string };
-type ReportTemplate = { id: number; name: string; originalFileName: string; createdAt: string; pullFields: ReportFieldKey[] };
+type ReportTemplate = { id: number; name: string; originalFileName: string; createdAt: string; pullFields: ReportFieldKey[]; sessionCount: number };
 type PreparedRun = {
   runId: string;
   eventName: string;
   rawRows: number;
   peopleCount: number;
   serviceDates: string[];
+  sessionCount: number;
   pullFields: ReportFieldKey[];
   pullFieldLabels: string[];
   reviewCount: number;
@@ -87,7 +88,6 @@ export default function Reporting() {
   const [events, setEvents] = useState<EventOption[]>([]);
   const [templates, setTemplates] = useState<ReportTemplate[]>([]);
   const [eventId, setEventId] = useState("");
-  const [startDate, setStartDate] = useState(defaultDate(-30));
   const [endDate, setEndDate] = useState(defaultDate(0));
   const [selectedTemplate, setSelectedTemplate] = useState("");
   const [prepared, setPrepared] = useState<PreparedRun | null>(null);
@@ -100,6 +100,7 @@ export default function Reporting() {
   const [savingTemplate, setSavingTemplate] = useState(false);
   const [editingTemplateId, setEditingTemplateId] = useState<number | null>(null);
   const [draftFields, setDraftFields] = useState<ReportFieldKey[]>(["planning_center_id"]);
+  const [draftSessionCount, setDraftSessionCount] = useState(5);
   const [savingSettings, setSavingSettings] = useState(false);
   const [planningCenterFields, setPlanningCenterFields] = useState<AvailableField[]>([]);
   const [fieldsLoading, setFieldsLoading] = useState(false);
@@ -177,13 +178,13 @@ export default function Reporting() {
   });
 
   const prepare = async () => {
-    if (!eventId || !startDate || !endDate || !selectedTemplate) return;
+    if (!eventId || !endDate || !selectedTemplate) return;
     setPreparing(true);
     setPrepared(null);
     try {
       const response = await api("/api/reports/prepare", {
         method: "POST",
-        body: JSON.stringify({ eventId, startDate, endDate, templateId: Number(selectedTemplate) }),
+        body: JSON.stringify({ eventId, endDate, templateId: Number(selectedTemplate) }),
       });
       const result = await response.json() as PreparedRun;
       setPrepared(result);
@@ -285,6 +286,7 @@ export default function Reporting() {
       "planning_center_id",
       ...template.pullFields.filter((field) => field !== "planning_center_id"),
     ]);
+    setDraftSessionCount(template.sessionCount);
   };
 
   const toggleField = (key: ReportFieldKey, enabled: boolean) => {
@@ -315,12 +317,12 @@ export default function Reporting() {
     try {
       await api(`/api/reports/templates/${templateId}/settings`, {
         method: "PATCH",
-        body: JSON.stringify({ pullFields: draftFields }),
+        body: JSON.stringify({ pullFields: draftFields, sessionCount: draftSessionCount }),
       });
       await loadTemplates();
       setPrepared(null);
       setEditingTemplateId(null);
-      toast({ title: "Template pull fields saved" });
+      toast({ title: "Template settings saved" });
     } catch (error) {
       toast({ title: "Could not save template settings", description: error instanceof Error ? error.message : "Request failed.", variant: "destructive" });
     } finally {
@@ -343,10 +345,10 @@ export default function Reporting() {
         <CardHeader>
           <CardTitle className="flex items-center gap-3">
             <StepNumber number={1} active={!prepared} complete={!!prepared} />
-            Select attendance
+            Select attendance cutoff
           </CardTitle>
         </CardHeader>
-        <CardContent className="grid gap-4 md:grid-cols-3">
+        <CardContent className="grid gap-4 md:grid-cols-2">
           <div className="space-y-2">
             <Label htmlFor="report-event">Active event</Label>
             <select
@@ -360,12 +362,11 @@ export default function Reporting() {
             </select>
           </div>
           <div className="space-y-2">
-            <Label htmlFor="report-start">Start date</Label>
-            <Input id="report-start" type="date" value={startDate} onChange={(event) => { setStartDate(event.target.value); setPrepared(null); }} />
-          </div>
-          <div className="space-y-2">
             <Label htmlFor="report-end">End date</Label>
             <Input id="report-end" type="date" value={endDate} onChange={(event) => { setEndDate(event.target.value); setPrepared(null); }} />
+            <p className="text-xs text-muted-foreground">
+              The selected template determines how many previous Planning Center sessions are included.
+            </p>
           </div>
           {eventsLoading && <p className="flex items-center gap-2 text-sm text-muted-foreground md:col-span-3"><Loader2 className="h-4 w-4 animate-spin" /> Loading Planning Center events…</p>}
           {eventsError && (
@@ -408,6 +409,9 @@ export default function Reporting() {
                 .map((key) => fieldByKey.get(key)?.label ?? key)
                 .filter(Boolean)
                 .join(" → ")}
+              <span className="mt-1 block text-muted-foreground">
+                Sessions: {templates.find((template) => String(template.id) === selectedTemplate)?.sessionCount ?? 5}
+              </span>
             </div>
           )}
         </CardContent>
@@ -437,7 +441,9 @@ export default function Reporting() {
                 <div><span className="block text-muted-foreground">Review flags</span><strong>{prepared.reviewCount}</strong></div>
               </div>
               <p className="text-xs text-muted-foreground">Fields: {prepared.pullFieldLabels.join(" → ")}</p>
-              <p className="text-xs text-muted-foreground">Service dates: {prepared.serviceDates.join(", ")}</p>
+              <p className="text-xs text-muted-foreground">
+                Sessions ({prepared.sessionCount}): {prepared.serviceDates.join(", ")}
+              </p>
               {prepared.reviewCount > 0 && (
                 <details>
                   <summary className="cursor-pointer text-sm font-medium">Review cleanup flags</summary>
@@ -487,11 +493,13 @@ export default function Reporting() {
                     <div>
                       <p className="font-medium">{template.name}</p>
                       <p className="text-xs text-muted-foreground">{template.originalFileName}</p>
-                      <p className="mt-1 text-xs text-muted-foreground">{template.pullFields.length} profile fields configured</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {template.pullFields.length} profile fields · {template.sessionCount} sessions
+                      </p>
                     </div>
                     <div className="flex gap-1">
                       <Button size="sm" variant="outline" onClick={() => editTemplateSettings(template)}>
-                        <Settings2 className="mr-2 h-4 w-4" /> Fields
+                        <Settings2 className="mr-2 h-4 w-4" /> Settings
                       </Button>
                       <Button size="icon" variant="ghost" onClick={() => removeTemplate(template)} aria-label={`Delete ${template.name}`}><Trash2 className="h-4 w-4" /></Button>
                     </div>
@@ -499,9 +507,23 @@ export default function Reporting() {
                   {editingTemplateId === template.id && (
                     <div className="mt-4 space-y-4 rounded-lg border bg-muted/20 p-4">
                       <div>
-                        <p className="font-medium">Profile fields and CSV order</p>
+                        <p className="font-medium">Template report settings</p>
                         <p className="text-xs text-muted-foreground">
                           Checked fields are exported in the order shown. Planning Center ID is always the first column.
+                        </p>
+                      </div>
+                      <div className="max-w-xs space-y-2">
+                        <Label htmlFor={`session-count-${template.id}`}>Previous sessions to include</Label>
+                        <Input
+                          id={`session-count-${template.id}`}
+                          type="number"
+                          min={1}
+                          max={52}
+                          value={draftSessionCount}
+                          onChange={(event) => setDraftSessionCount(Number(event.target.value))}
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          Counts backward from the report end date. New templates default to 5 sessions.
                         </p>
                       </div>
                       <div className="space-y-2">
@@ -583,8 +605,11 @@ export default function Reporting() {
                         })}
                       </div>
                       <div className="flex gap-2">
-                        <Button onClick={() => saveTemplateSettings(template.id)} disabled={savingSettings}>
-                          {savingSettings && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} Save field settings
+                        <Button
+                          onClick={() => saveTemplateSettings(template.id)}
+                          disabled={savingSettings || !Number.isInteger(draftSessionCount) || draftSessionCount < 1 || draftSessionCount > 52}
+                        >
+                          {savingSettings && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} Save settings
                         </Button>
                         <Button variant="ghost" onClick={() => setEditingTemplateId(null)}>Cancel</Button>
                       </div>
