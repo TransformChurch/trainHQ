@@ -120,8 +120,12 @@ globalThis.__dirname = __bannerPath.dirname(globalThis.__filename);
   });
   await Promise.all([
     copyFile(
-      path.resolve(artifactDir, "../../attached_assets/cleanup_attendance_1788449493804.py"),
-      path.resolve(distDir, "cleanup_attendance.py"),
+      path.resolve(artifactDir, "../../attached_assets/cleanup_attendance_MonthQuarter_1788469555267.py"),
+      path.resolve(distDir, "cleanup_attendance_month_quarter.py"),
+    ),
+    copyFile(
+      path.resolve(artifactDir, "../../attached_assets/cleanup_attendance_AllDates_1788469555268.py"),
+      path.resolve(distDir, "cleanup_attendance_all_dates.py"),
     ),
     copyFile(
       path.resolve(artifactDir, "../../attached_assets/paste_to_template_1788451691917.py"),

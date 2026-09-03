@@ -23,6 +23,7 @@ const XLSX_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.s
 const REPORT_TTL_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_SESSION_COUNT = 5;
 const MAX_SESSION_COUNT = 52;
+type CleanupMode = "month_quarter" | "all_dates";
 const REPORT_FIELDS = [
   { key: "planning_center_id", label: "Planning Center ID" },
   { key: "first_name", label: "First Name" },
@@ -90,6 +91,10 @@ function normalizeSessionCount(raw: unknown): number {
   return Number.isInteger(value) && value >= 1 && value <= MAX_SESSION_COUNT
     ? value
     : DEFAULT_SESSION_COUNT;
+}
+
+function normalizeCleanupMode(raw: unknown): CleanupMode {
+  return raw === "all_dates" ? "all_dates" : "month_quarter";
 }
 
 function isCustomFieldKey(key: ReportFieldKey): key is `custom:${string}` {
@@ -342,13 +347,23 @@ async function fetchPeopleDetails(
   return result;
 }
 
-function pythonScript(name: "cleanup" | "template"): string {
-  const built = join(dirname(fileURLToPath(import.meta.url)), name === "cleanup" ? "cleanup_attendance.py" : "paste_to_template.py");
+function pythonScript(name: CleanupMode | "template"): string {
+  const fileName = name === "month_quarter"
+    ? "cleanup_attendance_month_quarter.py"
+    : name === "all_dates"
+      ? "cleanup_attendance_all_dates.py"
+      : "paste_to_template.py";
+  const sourceFileName = name === "month_quarter"
+    ? "cleanup_attendance_MonthQuarter_1788469555267.py"
+    : name === "all_dates"
+      ? "cleanup_attendance_AllDates_1788469555268.py"
+      : "paste_to_template_1788451691917.py";
+  const built = join(dirname(fileURLToPath(import.meta.url)), fileName);
   const source = join(
     dirname(fileURLToPath(import.meta.url)),
     "../../../..",
     "attached_assets",
-    name === "cleanup" ? "cleanup_attendance_1788449493804.py" : "paste_to_template_1788451691917.py",
+    sourceFileName,
   );
   return process.env.NODE_ENV === "production" ? built : source;
 }
@@ -441,6 +456,7 @@ router.post("/templates", requireAdmin, async (req, res) => {
       objectPath,
       pullFields: JSON.stringify(DEFAULT_PULL_FIELDS),
       sessionCount: DEFAULT_SESSION_COUNT,
+      cleanupMode: "month_quarter",
       uploadedByUserId: res.locals.dbUser.id,
     }).returning();
     res.status(201).json({
@@ -462,12 +478,18 @@ router.patch("/templates/:templateId/settings", requireAdmin, async (req, res) =
     }
     const pullFields = normalizePullFields(req.body?.pullFields);
     const sessionCount = Number(req.body?.sessionCount);
+    const name = text(req.body?.name);
+    const cleanupMode = normalizeCleanupMode(req.body?.cleanupMode);
+    if (!name) {
+      res.status(400).json({ error: "Template name is required." });
+      return;
+    }
     if (!Number.isInteger(sessionCount) || sessionCount < 1 || sessionCount > MAX_SESSION_COUNT) {
       res.status(400).json({ error: `Session count must be between 1 and ${MAX_SESSION_COUNT}.` });
       return;
     }
     const rows = await db.update(reportTemplatesTable)
-      .set({ pullFields: JSON.stringify(pullFields), sessionCount })
+      .set({ name, pullFields: JSON.stringify(pullFields), sessionCount, cleanupMode })
       .where(eq(reportTemplatesTable.id, templateId))
       .returning();
     if (!rows[0]) {
@@ -520,6 +542,7 @@ router.post("/prepare", requireManagerOrAdmin, async (req, res) => {
     }
     const pullFields = normalizePullFields(template.pullFields);
     const sessionCount = normalizeSessionCount(template.sessionCount);
+    const cleanupMode = normalizeCleanupMode(template.cleanupMode);
     const accessToken = await getValidPlanningCenterAccessToken(res.locals.dbUser.id);
     const customFieldDefinitions = await fetchReportFieldDefinitions(accessToken);
     const customLabels = new Map(customFieldDefinitions.map((field) => [field.key, field.label]));
@@ -624,7 +647,7 @@ router.post("/prepare", requireManagerOrAdmin, async (req, res) => {
     const cleanedPath = join(workDir, "cleaned.csv");
     const flagsPath = join(workDir, "flags.txt");
     await writeFile(rawPath, rawCsv, "utf8");
-    const output = await runPython([pythonScript("cleanup"), rawPath, cleanedPath, "--flags-out", flagsPath]);
+    const output = await runPython([pythonScript(cleanupMode), rawPath, cleanedPath, "--flags-out", flagsPath]);
     const cleaned = selectCleanedColumns(await readFile(cleanedPath, "utf8"), pullFields, customLabels);
     const flags = await readFile(flagsPath, "utf8").catch(() => "");
     const cleanedObjectPath = await storage.saveObjectEntityBuffer(Buffer.from(cleaned, "utf8"), "text/csv", "reports");

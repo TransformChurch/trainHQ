@@ -8,6 +8,7 @@ export const reportTemplatesTable = pgTable("report_templates", {
   objectPath: text("object_path").notNull(),
   pullFields: text("pull_fields").notNull(),
   sessionCount: integer("session_count").notNull().default(5),
+  cleanupMode: text("cleanup_mode").notNull().default("month_quarter"),
   uploadedByUserId: text("uploaded_by_user_id").notNull().references(() => usersTable.id),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });

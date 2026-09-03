@@ -14,7 +14,16 @@ const XLSX_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.s
 type EventOption = { id: string; name: string; frequency: string };
 type ReportFieldKey = string;
 type AvailableField = { key: ReportFieldKey; label: string };
-type ReportTemplate = { id: number; name: string; originalFileName: string; createdAt: string; pullFields: ReportFieldKey[]; sessionCount: number };
+type CleanupMode = "month_quarter" | "all_dates";
+type ReportTemplate = {
+  id: number;
+  name: string;
+  originalFileName: string;
+  createdAt: string;
+  pullFields: ReportFieldKey[];
+  sessionCount: number;
+  cleanupMode: CleanupMode;
+};
 type PreparedRun = {
   runId: string;
   eventName: string;
@@ -101,6 +110,8 @@ export default function Reporting() {
   const [editingTemplateId, setEditingTemplateId] = useState<number | null>(null);
   const [draftFields, setDraftFields] = useState<ReportFieldKey[]>(["planning_center_id"]);
   const [draftSessionCount, setDraftSessionCount] = useState(5);
+  const [draftTemplateName, setDraftTemplateName] = useState("");
+  const [draftCleanupMode, setDraftCleanupMode] = useState<CleanupMode>("month_quarter");
   const [savingSettings, setSavingSettings] = useState(false);
   const [planningCenterFields, setPlanningCenterFields] = useState<AvailableField[]>([]);
   const [fieldsLoading, setFieldsLoading] = useState(false);
@@ -287,6 +298,8 @@ export default function Reporting() {
       ...template.pullFields.filter((field) => field !== "planning_center_id"),
     ]);
     setDraftSessionCount(template.sessionCount);
+    setDraftTemplateName(template.name);
+    setDraftCleanupMode(template.cleanupMode);
   };
 
   const toggleField = (key: ReportFieldKey, enabled: boolean) => {
@@ -317,7 +330,12 @@ export default function Reporting() {
     try {
       await api(`/api/reports/templates/${templateId}/settings`, {
         method: "PATCH",
-        body: JSON.stringify({ pullFields: draftFields, sessionCount: draftSessionCount }),
+        body: JSON.stringify({
+          name: draftTemplateName.trim(),
+          pullFields: draftFields,
+          sessionCount: draftSessionCount,
+          cleanupMode: draftCleanupMode,
+        }),
       });
       await loadTemplates();
       setPrepared(null);
@@ -512,6 +530,26 @@ export default function Reporting() {
                           Checked fields are exported in the order shown. Planning Center ID is always the first column.
                         </p>
                       </div>
+                      <div className="max-w-lg space-y-2">
+                        <Label htmlFor={`template-display-name-${template.id}`}>Template name</Label>
+                        <Input
+                          id={`template-display-name-${template.id}`}
+                          value={draftTemplateName}
+                          onChange={(event) => setDraftTemplateName(event.target.value)}
+                        />
+                      </div>
+                      <div className="max-w-xs space-y-2">
+                        <Label htmlFor={`cleanup-mode-${template.id}`}>Cleanup format</Label>
+                        <select
+                          id={`cleanup-mode-${template.id}`}
+                          className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                          value={draftCleanupMode}
+                          onChange={(event) => setDraftCleanupMode(event.target.value as CleanupMode)}
+                        >
+                          <option value="month_quarter">Quarter/Monthly</option>
+                          <option value="all_dates">All Dates</option>
+                        </select>
+                      </div>
                       <div className="max-w-xs space-y-2">
                         <Label htmlFor={`session-count-${template.id}`}>Previous sessions to include</Label>
                         <Input
@@ -607,7 +645,7 @@ export default function Reporting() {
                       <div className="flex gap-2">
                         <Button
                           onClick={() => saveTemplateSettings(template.id)}
-                          disabled={savingSettings || !Number.isInteger(draftSessionCount) || draftSessionCount < 1 || draftSessionCount > 52}
+                          disabled={savingSettings || !draftTemplateName.trim() || !Number.isInteger(draftSessionCount) || draftSessionCount < 1 || draftSessionCount > 52}
                         >
                           {savingSettings && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} Save settings
                         </Button>
