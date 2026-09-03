@@ -14,3 +14,4 @@ export * from "./documents";
 export * from "./contentEditorGrants";
 export * from "./planningCenter";
 export * from "./facilities";
+export * from "./reporting";

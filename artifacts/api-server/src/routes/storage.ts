@@ -34,13 +34,23 @@ router.post("/storage/uploads/request-url", requireManagerOrAdmin, async (req: R
     const normalizedContentType = contentType.toLowerCase().split(";", 1)[0];
     const isVideoUpload = normalizedContentType.startsWith("video/");
     const isImageUpload = normalizedContentType.startsWith("image/");
-    if (!isVideoUpload && !isImageUpload) {
-      res.status(415).json({ error: "Only image and video uploads are supported" });
+    const isReportTemplate = normalizedContentType === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+    if (!isVideoUpload && !isImageUpload && !isReportTemplate) {
+      res.status(415).json({ error: "Only image, video, and XLSX report-template uploads are supported" });
       return;
     }
 
     // Media-specific checks are repeated by the signed upload endpoint.
-    if (isVideoUpload) {
+    if (isReportTemplate) {
+      if (res.locals.dbUser?.role !== "admin") {
+        res.status(403).json({ error: "Only administrators can upload report templates" });
+        return;
+      }
+      if (size > 25 * 1024 * 1024) {
+        res.status(413).json({ error: "Report templates must be 25 MB or smaller" });
+        return;
+      }
+    } else if (isVideoUpload) {
       const enabledRows = await db.select().from(settingsTable).where(eq(settingsTable.key, "video_upload_enabled")).limit(1);
       const uploadEnabled = enabledRows[0]?.value !== "false";
       if (!uploadEnabled) {

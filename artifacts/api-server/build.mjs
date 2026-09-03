@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { build as esbuild } from "esbuild";
 import esbuildPluginPino from "esbuild-plugin-pino";
-import { rm } from "node:fs/promises";
+import { copyFile, rm } from "node:fs/promises";
 
 // Plugins (e.g. 'esbuild-plugin-pino') may use `require` to resolve dependencies
 globalThis.require = createRequire(import.meta.url);
@@ -118,6 +118,16 @@ globalThis.__dirname = __bannerPath.dirname(globalThis.__filename);
     `,
     },
   });
+  await Promise.all([
+    copyFile(
+      path.resolve(artifactDir, "../../attached_assets/cleanup_attendance_1788449493804.py"),
+      path.resolve(distDir, "cleanup_attendance.py"),
+    ),
+    copyFile(
+      path.resolve(artifactDir, "../../attached_assets/paste_to_template_1788451691917.py"),
+      path.resolve(distDir, "paste_to_template.py"),
+    ),
+  ]);
 }
 
 buildAll().catch((err) => {

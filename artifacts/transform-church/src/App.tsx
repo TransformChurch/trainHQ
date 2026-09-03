@@ -22,6 +22,7 @@ import Groups from "@/pages/Groups";
 import Documents from "@/pages/Documents";
 import Facilities from "@/pages/Facilities";
 import AdminFacilities from "@/pages/AdminFacilities";
+import Reporting from "@/pages/Reporting";
 import NotFound from "@/pages/not-found";
 import { useUpsertMe, useGetMe } from "@workspace/api-client-react";
 import { setAuthTokenGetter, setBaseUrl } from "@workspace/api-client-react";
@@ -259,6 +260,7 @@ function AppRoutes() {
           <Route path="/groups"><ProtectedRoute component={Groups} /></Route>
           <Route path="/documents"><ProtectedRoute component={Documents} /></Route>
           <Route path="/facilities"><ProtectedRoute component={Facilities} /></Route>
+          <Route path="/reporting"><ProtectedRoute component={Reporting} managerOrAdmin /></Route>
           <Route path="/admin"><ProtectedRoute component={AdminDashboard} adminOnly /></Route>
           <Route path="/admin/users"><ProtectedRoute component={AdminUsers} managerOrAdmin /></Route>
           <Route path="/admin/content"><Redirect to="/admin/modules" /></Route>

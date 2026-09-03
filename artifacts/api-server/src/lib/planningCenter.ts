@@ -255,7 +255,7 @@ export async function createAuthorizationRequest(returnToValue: unknown): Promis
   url.searchParams.set("client_id", settings.clientId);
   url.searchParams.set("redirect_uri", settings.redirectUri);
   url.searchParams.set("response_type", "code");
-  url.searchParams.set("scope", "people");
+  url.searchParams.set("scope", "people check_ins");
   url.searchParams.set("state", state);
   url.searchParams.set("code_challenge", codeChallenge);
   url.searchParams.set("code_challenge_method", "S256");

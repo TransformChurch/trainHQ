@@ -135,6 +135,26 @@ export class ObjectStorageService {
     return { path, name };
   }
 
+  async saveObjectEntityBuffer(
+    data: Uint8Array,
+    contentType: string,
+    directory = "generated",
+  ): Promise<string> {
+    if (!isSafeRelativePath(directory)) throw new UploadValidationError("Invalid storage directory");
+    const name = `${directory}/${randomUUID()}`;
+    const path = this.resolveObjectPath(this.getPrivateObjectDir(), name);
+    await mkdir(resolve(path, ".."), { recursive: true });
+    await writeFile(path, data, { mode: 0o600 });
+    await this.writeMetadata({ path, name }, { contentType });
+    return `/objects/${name}`;
+  }
+
+  async deleteObjectEntity(objectPath: string): Promise<void> {
+    const file = await this.getObjectEntityFile(objectPath);
+    await unlink(file.path).catch(() => undefined);
+    await unlink(`${file.path}${metadataSuffix}`).catch(() => undefined);
+  }
+
   normalizeObjectEntityPath(rawPath: string): string {
     if (rawPath.startsWith("/objects/")) return rawPath;
     try {
