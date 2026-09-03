@@ -71,7 +71,7 @@ FIRST_TIMER_VALUE = "First-timer"
 # Fixed (non-week) columns expected in the raw export. Everything in the
 # CSV header that ISN'T one of these is auto-detected as a week/date column.
 FIXED_COLUMNS = [
-    "First Name", "Last Name", "Birthdate", "Email",
+    "Planning Center ID", "First Name", "Last Name", "Birthdate", "Email",
     "Phone Number (mobile)",
     "Gender", "Grade", "First Timers", "Attendance Rate",
 ]
@@ -228,7 +228,7 @@ def load_rows(path):
 def merge_duplicates(rows, week_cols, flags):
     groups = OrderedDict()
     for r in rows:
-        k = name_key(r["First Name"], r["Last Name"])
+        k = norm(r.get("Planning Center ID")) or name_key(r["First Name"], r["Last Name"])
         groups.setdefault(k, []).append(r)
 
     merged = []
@@ -266,6 +266,7 @@ def merge_duplicates(rows, week_cols, flags):
             flags["merged"].append(f"{who}: rows {[r['_rownum'] for r in grp]} -> 1 record")
 
         merged.append({
+            "Planning Center ID": norm(first.get("Planning Center ID")),
             "First Name": norm(first["First Name"]),
             "Last Name": norm(first["Last Name"]),
             "Birthdate": norm(first.get("Birthdate")),
@@ -378,7 +379,7 @@ def compute_attendance_rate(weekly, week_cols):
 
 def write_output(records, week_cols, out_path):
     fieldnames = [
-        "First Name", "Last Name", "Birthdate", "Email",
+        "Planning Center ID", "First Name", "Last Name", "Birthdate", "Email",
         "Phone Number (mobile)",
         "Gender", "Grade", "First Timers",
     ] + week_cols + ["Attendance Rate"]

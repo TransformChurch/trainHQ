@@ -96,7 +96,7 @@ FIXED_LEAD_COLUMNS = [
     "Gender", "Grade", "First Timers",
 ]
 TRAILING_LABELS = ["Attendance Rate", "ID", "Dupe Check"]
-CSV_ONLY_COLUMNS = ["Birthdate"]
+CSV_ONLY_COLUMNS = ["Planning Center ID", "Birthdate"]
 PLACEHOLDER_MARKER = "Unknown"
 
 DATE_FORMATS = ["%d-%b-%y", "%d-%b-%Y", "%m/%d/%Y", "%m/%d/%y", "%Y-%m-%d", "%B %d, %Y"]
@@ -418,18 +418,18 @@ def build_raw_data_rows(layout, rows, week_cols, week_dates, warnings):
     rows_xml = [new_header]
 
     # ---- real student rows ----
-    concat_vals = [f"{r['First Name']}{r['Last Name']}" for r in rows]
+    concat_vals = [f"{r.get('First Name', '')}{r.get('Last Name', '')}" for r in rows]
     for idx, r in enumerate(rows):
         rn = idx + 2
         cells = []
-        cells.append(inline_cell(f"A{rn}", r["First Name"]))
-        cells.append(inline_cell(f"B{rn}", r["Last Name"]))
-        cells.append(inline_cell(f"C{rn}", r["Email"]))
+        cells.append(inline_cell(f"A{rn}", r.get("First Name", "")))
+        cells.append(inline_cell(f"B{rn}", r.get("Last Name", "")))
+        cells.append(inline_cell(f"C{rn}", r.get("Email", "")))
         cells.append(inline_cell(f"D{rn}", r.get("Phone Number (home)", "")))
-        cells.append(inline_cell(f"E{rn}", r["Phone Number (mobile)"]))
-        cells.append(inline_cell(f"F{rn}", r["Gender"]))
-        cells.append(inline_cell(f"G{rn}", r["Grade"]))
-        cells.append(inline_cell(f"H{rn}", r["First Timers"]))
+        cells.append(inline_cell(f"E{rn}", r.get("Phone Number (mobile)", "")))
+        cells.append(inline_cell(f"F{rn}", r.get("Gender", "")))
+        cells.append(inline_cell(f"G{rn}", r.get("Grade", "")))
+        cells.append(inline_cell(f"H{rn}", r.get("First Timers", "")))
         for i, letters in enumerate(week_letters):
             val = str(r.get(week_cols[i], "")).strip().upper() == "TRUE"
             cells.append(bool_cell(f"{letters}{rn}", val))

@@ -21,6 +21,19 @@ const CHECK_INS_BASE = "https://api.planningcenteronline.com/check-ins/v2";
 const PEOPLE_BASE = "https://api.planningcenteronline.com/people/v2";
 const XLSX_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 const REPORT_TTL_MS = 24 * 60 * 60 * 1000;
+const REPORT_FIELDS = [
+  { key: "planning_center_id", label: "Planning Center ID" },
+  { key: "first_name", label: "First Name" },
+  { key: "last_name", label: "Last Name" },
+  { key: "birthdate", label: "Birthdate" },
+  { key: "email", label: "Email" },
+  { key: "phone_mobile", label: "Phone Number (mobile)" },
+  { key: "gender", label: "Gender" },
+  { key: "grade", label: "Grade" },
+  { key: "first_timers", label: "First Timers" },
+] as const;
+const DEFAULT_PULL_FIELDS = REPORT_FIELDS.map((field) => field.key);
+type ReportFieldKey = typeof REPORT_FIELDS[number]["key"];
 
 type JsonApiResource = {
   id: string;
@@ -46,6 +59,61 @@ function dateOnly(value: unknown): string {
 
 function safeFilePart(value: string): string {
   return value.replace(/[^a-z0-9_-]+/gi, "-").replace(/^-+|-+$/g, "").slice(0, 80) || "report";
+}
+
+function normalizePullFields(raw: unknown): ReportFieldKey[] {
+  let values: unknown = raw;
+  if (typeof raw === "string") {
+    try { values = JSON.parse(raw); } catch { values = []; }
+  }
+  const valid = new Set<ReportFieldKey>(REPORT_FIELDS.map((field) => field.key));
+  const selected = Array.isArray(values)
+    ? values.filter((value): value is ReportFieldKey => typeof value === "string" && valid.has(value as ReportFieldKey))
+    : [];
+  return ["planning_center_id", ...selected.filter((field) => field !== "planning_center_id")];
+}
+
+function fieldLabel(key: ReportFieldKey): string {
+  return REPORT_FIELDS.find((field) => field.key === key)!.label;
+}
+
+function parseCsv(input: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let value = "";
+  let quoted = false;
+  for (let index = 0; index < input.length; index += 1) {
+    const character = input[index];
+    if (quoted) {
+      if (character === '"' && input[index + 1] === '"') { value += '"'; index += 1; }
+      else if (character === '"') quoted = false;
+      else value += character;
+    } else if (character === '"') quoted = true;
+    else if (character === ",") { row.push(value); value = ""; }
+    else if (character === "\n") { row.push(value.replace(/\r$/, "")); rows.push(row); row = []; value = ""; }
+    else value += character;
+  }
+  if (value || row.length) { row.push(value.replace(/\r$/, "")); rows.push(row); }
+  return rows.filter((candidate) => candidate.some((cell) => cell.length > 0));
+}
+
+function selectCleanedColumns(cleaned: string, selectedFields: ReportFieldKey[]): string {
+  const rows = parseCsv(cleaned);
+  if (!rows.length) throw new Error("The cleanup script returned no rows.");
+  const inputHeaders = rows[0];
+  const selectedHeaders = selectedFields.map(fieldLabel);
+  const indexes = selectedHeaders.map((header) => inputHeaders.indexOf(header));
+  const weekIndexes = inputHeaders
+    .map((header, index) => ({ header, index }))
+    .filter(({ header }) => /^\d{4}-\d{2}-\d{2}$/.test(header));
+  const attendanceIndex = inputHeaders.indexOf("Attendance Rate");
+  const outputHeaders = [...selectedHeaders, ...weekIndexes.map(({ header }) => header), "Attendance Rate"];
+  const outputRows = rows.slice(1).map((row) => [
+    ...indexes.map((index) => index >= 0 ? row[index] ?? "" : ""),
+    ...weekIndexes.map(({ index }) => row[index] ?? ""),
+    attendanceIndex >= 0 ? row[attendanceIndex] ?? "" : "",
+  ]);
+  return [outputHeaders, ...outputRows].map((row) => row.map(csv).join(",")).join("\n");
 }
 
 async function planningCenterRequest(url: string, accessToken: string): Promise<any> {
@@ -213,7 +281,10 @@ router.get("/events", requireManagerOrAdmin, async (req, res) => {
 
 router.get("/templates", requireManagerOrAdmin, async (_req, res) => {
   const rows = await db.select().from(reportTemplatesTable).orderBy(reportTemplatesTable.name);
-  res.json(rows.map(({ objectPath: _objectPath, ...row }) => row));
+  res.json(rows.map(({ objectPath: _objectPath, pullFields, ...row }) => ({
+    ...row,
+    pullFields: normalizePullFields(pullFields),
+  })));
 });
 
 router.post("/templates", requireAdmin, async (req, res) => {
@@ -230,11 +301,39 @@ router.post("/templates", requireAdmin, async (req, res) => {
       name,
       originalFileName,
       objectPath,
+      pullFields: JSON.stringify(DEFAULT_PULL_FIELDS),
       uploadedByUserId: res.locals.dbUser.id,
     }).returning();
-    res.status(201).json({ ...rows[0], objectPath: undefined });
+    res.status(201).json({
+      ...rows[0],
+      objectPath: undefined,
+      pullFields: normalizePullFields(rows[0].pullFields),
+    });
   } catch (error) {
     sendError(req, res, error, "Failed to save report template");
+  }
+});
+
+router.patch("/templates/:templateId/settings", requireAdmin, async (req, res) => {
+  try {
+    const templateId = Number(req.params.templateId);
+    if (!Number.isInteger(templateId)) {
+      res.status(400).json({ error: "Invalid template." });
+      return;
+    }
+    const pullFields = normalizePullFields(req.body?.pullFields);
+    const rows = await db.update(reportTemplatesTable)
+      .set({ pullFields: JSON.stringify(pullFields) })
+      .where(eq(reportTemplatesTable.id, templateId))
+      .returning();
+    if (!rows[0]) {
+      res.status(404).json({ error: "Template not found." });
+      return;
+    }
+    const { objectPath: _objectPath, pullFields: storedFields, ...template } = rows[0];
+    res.json({ ...template, pullFields: normalizePullFields(storedFields) });
+  } catch (error) {
+    sendError(req, res, error, "Failed to update report template settings");
   }
 });
 
@@ -262,8 +361,9 @@ router.post("/prepare", requireManagerOrAdmin, async (req, res) => {
     const eventId = text(req.body?.eventId);
     const startDate = dateOnly(req.body?.startDate);
     const endDate = dateOnly(req.body?.endDate);
-    if (!eventId || !startDate || !endDate || startDate > endDate) {
-      res.status(400).json({ error: "Select an event and a valid date range." });
+    const templateId = Number(req.body?.templateId);
+    if (!eventId || !startDate || !endDate || startDate > endDate || !Number.isInteger(templateId)) {
+      res.status(400).json({ error: "Select an event, template, and valid date range." });
       return;
     }
     const rangeDays = (Date.parse(`${endDate}T00:00:00Z`) - Date.parse(`${startDate}T00:00:00Z`)) / 86_400_000;
@@ -272,6 +372,15 @@ router.post("/prepare", requireManagerOrAdmin, async (req, res) => {
       return;
     }
 
+    const templates = await db.select().from(reportTemplatesTable)
+      .where(eq(reportTemplatesTable.id, templateId))
+      .limit(1);
+    const template = templates[0];
+    if (!template) {
+      res.status(404).json({ error: "Report template not found." });
+      return;
+    }
+    const pullFields = normalizePullFields(template.pullFields);
     const accessToken = await getValidPlanningCenterAccessToken(res.locals.dbUser.id);
     const eventPage = await planningCenterRequest(`${CHECK_INS_BASE}/events/${encodeURIComponent(eventId)}`, accessToken);
     const eventName = firstValue(eventPage.data?.attributes ?? {}, "name") || `Event ${eventId}`;
@@ -311,6 +420,7 @@ router.post("/prepare", requireManagerOrAdmin, async (req, res) => {
       const lastName = firstValue(attrs, "last_name") || firstValue(person, "last_name", "family_name");
       const key = personId || `${firstName.toLowerCase()}|${lastName.toLowerCase()}`;
       const current = records.get(key) ?? {
+        "Planning Center ID": personId,
         "First Name": firstName,
         "Last Name": lastName,
         "Birthdate": birthdateFrom(person),
@@ -327,8 +437,7 @@ router.post("/prepare", requireManagerOrAdmin, async (req, res) => {
     }
 
     const headers = [
-      "First Name", "Last Name", "Birthdate", "Email", "Phone Number (mobile)",
-      "Gender", "Grade", "First Timers", ...serviceDates,
+      ...REPORT_FIELDS.map((field) => field.label), ...serviceDates,
     ];
     const rawCsv = [
       headers.map(csv).join(","),
@@ -343,9 +452,9 @@ router.post("/prepare", requireManagerOrAdmin, async (req, res) => {
     const flagsPath = join(workDir, "flags.txt");
     await writeFile(rawPath, rawCsv, "utf8");
     const output = await runPython([pythonScript("cleanup"), rawPath, cleanedPath, "--flags-out", flagsPath]);
-    const cleaned = await readFile(cleanedPath);
+    const cleaned = selectCleanedColumns(await readFile(cleanedPath, "utf8"), pullFields);
     const flags = await readFile(flagsPath, "utf8").catch(() => "");
-    const cleanedObjectPath = await storage.saveObjectEntityBuffer(cleaned, "text/csv", "reports");
+    const cleanedObjectPath = await storage.saveObjectEntityBuffer(Buffer.from(cleaned, "utf8"), "text/csv", "reports");
     const runId = randomUUID();
     const expiresAt = new Date(Date.now() + REPORT_TTL_MS);
     await db.insert(reportRunsTable).values({
@@ -354,6 +463,7 @@ router.post("/prepare", requireManagerOrAdmin, async (req, res) => {
       eventName,
       startDate,
       endDate,
+      templateId,
       cleanedObjectPath,
       requestedByUserId: res.locals.dbUser.id,
       expiresAt,
@@ -365,6 +475,8 @@ router.post("/prepare", requireManagerOrAdmin, async (req, res) => {
       rawRows: inRange.length,
       peopleCount: records.size,
       serviceDates,
+      pullFields,
+      pullFieldLabels: pullFields.map(fieldLabel),
       reviewCount,
       flags,
       expiresAt: expiresAt.toISOString(),
@@ -401,6 +513,10 @@ router.post("/generate", requireManagerOrAdmin, async (req, res) => {
       res.status(404).json({ error: "Report template not found." });
       return;
     }
+    if (run.templateId !== templateId) {
+      res.status(409).json({ error: "This report was prepared for a different template. Prepare the data again." });
+      return;
+    }
 
     workDir = await mkdtemp(join(tmpdir(), "tc-report-output-"));
     const templateFile = await storage.getObjectEntityFile(template.objectPath);
@@ -431,6 +547,29 @@ router.post("/generate", requireManagerOrAdmin, async (req, res) => {
     sendError(req, res, error, "Failed to generate report");
   } finally {
     if (workDir) await rm(workDir, { recursive: true, force: true }).catch(() => undefined);
+  }
+});
+
+router.get("/runs/:runId/data.csv", requireManagerOrAdmin, async (req, res) => {
+  try {
+    const runs = await db.select().from(reportRunsTable).where(and(
+      eq(reportRunsTable.id, req.params.runId as string),
+      eq(reportRunsTable.requestedByUserId, res.locals.dbUser.id),
+    )).limit(1);
+    const run = runs[0];
+    if (!run || run.expiresAt < new Date()) {
+      res.status(410).json({ error: "This prepared report expired. Prepare the data again." });
+      return;
+    }
+    const file = await storage.getObjectEntityFile(run.cleanedObjectPath);
+    const data = await readFile(file.path);
+    const fileName = `${safeFilePart(run.eventName)}-${run.startDate}-to-${run.endDate}.csv`;
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+    res.setHeader("Cache-Control", "private, no-store");
+    res.send(data);
+  } catch (error) {
+    sendError(req, res, error, "Failed to download prepared CSV");
   }
 });
 

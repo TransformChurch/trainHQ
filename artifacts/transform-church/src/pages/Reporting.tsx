@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useGetMe } from "@workspace/api-client-react";
 import { useUpload } from "@workspace/object-storage-web";
-import { BarChart3, Check, Download, FileSpreadsheet, Loader2, Plus, RefreshCw, Trash2, Upload } from "lucide-react";
+import { BarChart3, Check, ChevronDown, ChevronUp, Download, FileSpreadsheet, Loader2, Plus, RefreshCw, Settings2, Trash2, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -12,17 +12,32 @@ const BASE = import.meta.env.VITE_API_URL?.replace(/\/$/, "") ?? import.meta.env
 const XLSX_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
 type EventOption = { id: string; name: string; frequency: string };
-type ReportTemplate = { id: number; name: string; originalFileName: string; createdAt: string };
+type ReportFieldKey = "planning_center_id" | "first_name" | "last_name" | "birthdate" | "email" | "phone_mobile" | "gender" | "grade" | "first_timers";
+type ReportTemplate = { id: number; name: string; originalFileName: string; createdAt: string; pullFields: ReportFieldKey[] };
 type PreparedRun = {
   runId: string;
   eventName: string;
   rawRows: number;
   peopleCount: number;
   serviceDates: string[];
+  pullFields: ReportFieldKey[];
+  pullFieldLabels: string[];
   reviewCount: number;
   flags: string;
   expiresAt: string;
 };
+
+const FIELD_OPTIONS: { key: ReportFieldKey; label: string }[] = [
+  { key: "planning_center_id", label: "Planning Center ID" },
+  { key: "first_name", label: "First Name" },
+  { key: "last_name", label: "Last Name" },
+  { key: "birthdate", label: "Birthdate" },
+  { key: "email", label: "Email" },
+  { key: "phone_mobile", label: "Phone Number (mobile)" },
+  { key: "gender", label: "Gender" },
+  { key: "grade", label: "Grade" },
+  { key: "first_timers", label: "First Timers" },
+];
 
 async function api(path: string, options?: RequestInit): Promise<Response> {
   const token = sessionStorage.getItem("auth_bearer_token");
@@ -76,6 +91,9 @@ export default function Reporting() {
   const [templateName, setTemplateName] = useState("");
   const [templateFile, setTemplateFile] = useState<File | null>(null);
   const [savingTemplate, setSavingTemplate] = useState(false);
+  const [editingTemplateId, setEditingTemplateId] = useState<number | null>(null);
+  const [draftFields, setDraftFields] = useState<ReportFieldKey[]>(["planning_center_id"]);
+  const [savingSettings, setSavingSettings] = useState(false);
 
   const reconnectUrl = useMemo(() => {
     const returnTo = `${window.location.origin}${import.meta.env.BASE_URL.replace(/\/$/, "")}/reporting`;
@@ -86,7 +104,11 @@ export default function Reporting() {
     const response = await api("/api/reports/templates");
     const rows = await response.json() as ReportTemplate[];
     setTemplates(rows);
-    setSelectedTemplate((current) => current || (rows[0]?.id ? String(rows[0].id) : ""));
+    setSelectedTemplate((current) =>
+      current && rows.some((template) => String(template.id) === current)
+        ? current
+        : (rows[0]?.id ? String(rows[0].id) : ""),
+    );
   };
 
   const loadEvents = async () => {
@@ -117,13 +139,13 @@ export default function Reporting() {
   });
 
   const prepare = async () => {
-    if (!eventId || !startDate || !endDate) return;
+    if (!eventId || !startDate || !endDate || !selectedTemplate) return;
     setPreparing(true);
     setPrepared(null);
     try {
       const response = await api("/api/reports/prepare", {
         method: "POST",
-        body: JSON.stringify({ eventId, startDate, endDate }),
+        body: JSON.stringify({ eventId, startDate, endDate, templateId: Number(selectedTemplate) }),
       });
       const result = await response.json() as PreparedRun;
       setPrepared(result);
@@ -132,6 +154,24 @@ export default function Reporting() {
       toast({ title: "Could not prepare report", description: error instanceof Error ? error.message : "Request failed.", variant: "destructive" });
     } finally {
       setPreparing(false);
+    }
+  };
+
+  const downloadCsv = async () => {
+    if (!prepared) return;
+    try {
+      const response = await api(`/api/reports/runs/${prepared.runId}/data.csv`);
+      const blob = await response.blob();
+      const disposition = response.headers.get("Content-Disposition") ?? "";
+      const fileName = disposition.match(/filename="([^"]+)"/)?.[1] ?? "attendance-report.csv";
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = fileName;
+      anchor.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      toast({ title: "Could not download CSV", description: error instanceof Error ? error.message : "Request failed.", variant: "destructive" });
     }
   };
 
@@ -201,6 +241,49 @@ export default function Reporting() {
     }
   };
 
+  const editTemplateSettings = (template: ReportTemplate) => {
+    setEditingTemplateId((current) => current === template.id ? null : template.id);
+    setDraftFields([
+      "planning_center_id",
+      ...template.pullFields.filter((field) => field !== "planning_center_id"),
+    ]);
+  };
+
+  const toggleField = (key: ReportFieldKey, enabled: boolean) => {
+    if (key === "planning_center_id") return;
+    setDraftFields((current) => enabled
+      ? [...current, key]
+      : current.filter((field) => field !== key));
+  };
+
+  const moveField = (index: number, direction: -1 | 1) => {
+    const target = index + direction;
+    if (index <= 0 || target <= 0 || target >= draftFields.length) return;
+    setDraftFields((current) => {
+      const next = [...current];
+      [next[index], next[target]] = [next[target], next[index]];
+      return next;
+    });
+  };
+
+  const saveTemplateSettings = async (templateId: number) => {
+    setSavingSettings(true);
+    try {
+      await api(`/api/reports/templates/${templateId}/settings`, {
+        method: "PATCH",
+        body: JSON.stringify({ pullFields: draftFields }),
+      });
+      await loadTemplates();
+      setPrepared(null);
+      setEditingTemplateId(null);
+      toast({ title: "Template pull fields saved" });
+    } catch (error) {
+      toast({ title: "Could not save template settings", description: error instanceof Error ? error.message : "Request failed.", variant: "destructive" });
+    } finally {
+      setSavingSettings(false);
+    }
+  };
+
   return (
     <div className="mx-auto max-w-5xl space-y-6 p-4 md:p-8">
       <div>
@@ -257,43 +340,8 @@ export default function Reporting() {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-3">
-            <StepNumber number={2} active={!prepared} complete={!!prepared} />
-            Clean and review
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <p className="text-sm text-muted-foreground">
-            Pull First Name, Last Name, Birthdate, Email, mobile phone, Gender, Grade, and First Timers, then merge duplicates and flag data that needs review.
-          </p>
-          <Button onClick={prepare} disabled={preparing || !eventId || !!eventsError}>
-            {preparing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
-            {preparing ? "Cleaning attendance…" : "Pull and clean attendance"}
-          </Button>
-          {prepared && (
-            <div className="space-y-3 rounded-lg border bg-muted/30 p-4">
-              <div className="grid gap-3 text-sm sm:grid-cols-4">
-                <div><span className="block text-muted-foreground">Event</span><strong>{prepared.eventName}</strong></div>
-                <div><span className="block text-muted-foreground">People</span><strong>{prepared.peopleCount}</strong></div>
-                <div><span className="block text-muted-foreground">Check-ins</span><strong>{prepared.rawRows}</strong></div>
-                <div><span className="block text-muted-foreground">Review flags</span><strong>{prepared.reviewCount}</strong></div>
-              </div>
-              <p className="text-xs text-muted-foreground">Service dates: {prepared.serviceDates.join(", ")}</p>
-              {prepared.reviewCount > 0 && (
-                <details>
-                  <summary className="cursor-pointer text-sm font-medium">Review cleanup flags</summary>
-                  <pre className="mt-2 max-h-72 overflow-auto whitespace-pre-wrap rounded bg-background p-3 text-xs">{prepared.flags}</pre>
-                </details>
-              )}
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-3">
-            <StepNumber number={3} active={!!prepared} complete={false} />
-            Build and download
+            <StepNumber number={2} active={!!eventId && !selectedTemplate} complete={!!selectedTemplate} />
+            Select template
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -303,13 +351,61 @@ export default function Reporting() {
               id="report-template"
               className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
               value={selectedTemplate}
-              onChange={(event) => setSelectedTemplate(event.target.value)}
+              onChange={(event) => { setSelectedTemplate(event.target.value); setPrepared(null); }}
             >
               {!templates.length && <option value="">No templates available</option>}
               {templates.map((template) => <option key={template.id} value={template.id}>{template.name}</option>)}
             </select>
           </div>
+          {selectedTemplate && (
+            <div className="rounded-lg border bg-muted/30 p-3 text-sm">
+              <span className="font-medium">CSV column order: </span>
+              {templates.find((template) => String(template.id) === selectedTemplate)?.pullFields
+                .map((key) => FIELD_OPTIONS.find((field) => field.key === key)?.label)
+                .filter(Boolean)
+                .join(" → ")}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-3">
+            <StepNumber number={3} active={!!selectedTemplate} complete={!!prepared} />
+            Pull, review, and download
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            Pull the fields configured for this template, merge duplicate check-ins, and format the CSV in the saved column order.
+          </p>
+          <Button onClick={prepare} disabled={preparing || !eventId || !selectedTemplate || !!eventsError}>
+            {preparing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+            {preparing ? "Pulling and formatting data…" : "Pull and prepare data"}
+          </Button>
+          {prepared && (
+            <div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+              <div className="grid gap-3 text-sm sm:grid-cols-4">
+                <div><span className="block text-muted-foreground">Event</span><strong>{prepared.eventName}</strong></div>
+                <div><span className="block text-muted-foreground">People</span><strong>{prepared.peopleCount}</strong></div>
+                <div><span className="block text-muted-foreground">Check-ins</span><strong>{prepared.rawRows}</strong></div>
+                <div><span className="block text-muted-foreground">Review flags</span><strong>{prepared.reviewCount}</strong></div>
+              </div>
+              <p className="text-xs text-muted-foreground">Fields: {prepared.pullFieldLabels.join(" → ")}</p>
+              <p className="text-xs text-muted-foreground">Service dates: {prepared.serviceDates.join(", ")}</p>
+              {prepared.reviewCount > 0 && (
+                <details>
+                  <summary className="cursor-pointer text-sm font-medium">Review cleanup flags</summary>
+                  <pre className="mt-2 max-h-72 overflow-auto whitespace-pre-wrap rounded bg-background p-3 text-xs">{prepared.flags}</pre>
+                </details>
+              )}
+            </div>
+          )}
           <div className="flex flex-wrap gap-3">
+            <Button variant="outline" onClick={downloadCsv} disabled={!prepared}>
+              <Download className="mr-2 h-4 w-4" /> Download CSV
+            </Button>
             <Button onClick={() => download("xlsx")} disabled={!prepared || !selectedTemplate || !!generating}>
               {generating === "xlsx" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileSpreadsheet className="mr-2 h-4 w-4" />}
               Download XLSX
@@ -342,9 +438,88 @@ export default function Reporting() {
             <div className="divide-y rounded-lg border">
               {!templates.length && <p className="p-4 text-sm text-muted-foreground">No report templates have been added.</p>}
               {templates.map((template) => (
-                <div key={template.id} className="flex items-center justify-between gap-4 p-3">
-                  <div><p className="font-medium">{template.name}</p><p className="text-xs text-muted-foreground">{template.originalFileName}</p></div>
-                  <Button size="icon" variant="ghost" onClick={() => removeTemplate(template)} aria-label={`Delete ${template.name}`}><Trash2 className="h-4 w-4" /></Button>
+                <div key={template.id} className="p-3">
+                  <div className="flex items-center justify-between gap-4">
+                    <div>
+                      <p className="font-medium">{template.name}</p>
+                      <p className="text-xs text-muted-foreground">{template.originalFileName}</p>
+                      <p className="mt-1 text-xs text-muted-foreground">{template.pullFields.length} profile fields configured</p>
+                    </div>
+                    <div className="flex gap-1">
+                      <Button size="sm" variant="outline" onClick={() => editTemplateSettings(template)}>
+                        <Settings2 className="mr-2 h-4 w-4" /> Fields
+                      </Button>
+                      <Button size="icon" variant="ghost" onClick={() => removeTemplate(template)} aria-label={`Delete ${template.name}`}><Trash2 className="h-4 w-4" /></Button>
+                    </div>
+                  </div>
+                  {editingTemplateId === template.id && (
+                    <div className="mt-4 space-y-4 rounded-lg border bg-muted/20 p-4">
+                      <div>
+                        <p className="font-medium">Profile fields and CSV order</p>
+                        <p className="text-xs text-muted-foreground">
+                          Checked fields are exported in the order shown. Planning Center ID is always the first column.
+                        </p>
+                      </div>
+                      <div className="space-y-2">
+                        {[
+                          ...draftFields.map((key) => FIELD_OPTIONS.find((field) => field.key === key)!),
+                          ...FIELD_OPTIONS.filter((field) => !draftFields.includes(field.key)),
+                        ].map((field) => {
+                          const checked = draftFields.includes(field.key);
+                          const orderIndex = draftFields.indexOf(field.key);
+                          return (
+                            <div key={field.key} className={`flex items-center gap-3 rounded-md border p-2 ${checked ? "bg-background" : "opacity-65"}`}>
+                              <input
+                                id={`template-${template.id}-${field.key}`}
+                                type="checkbox"
+                                className="h-4 w-4 rounded border-input"
+                                checked={checked}
+                                disabled={field.key === "planning_center_id"}
+                                onChange={(event) => toggleField(field.key, event.target.checked)}
+                              />
+                              <Label htmlFor={`template-${template.id}-${field.key}`} className="flex-1 cursor-pointer">
+                                {checked && <span className="mr-2 text-xs text-muted-foreground">{orderIndex + 1}.</span>}
+                                {field.label}
+                                {field.key === "planning_center_id" && <span className="ml-2 text-xs text-muted-foreground">(required)</span>}
+                              </Label>
+                              {checked && field.key !== "planning_center_id" && (
+                                <div className="flex gap-1">
+                                  <Button
+                                    type="button"
+                                    size="icon"
+                                    variant="ghost"
+                                    className="h-7 w-7"
+                                    disabled={orderIndex <= 1}
+                                    onClick={() => moveField(orderIndex, -1)}
+                                    aria-label={`Move ${field.label} up`}
+                                  >
+                                    <ChevronUp className="h-4 w-4" />
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    size="icon"
+                                    variant="ghost"
+                                    className="h-7 w-7"
+                                    disabled={orderIndex === draftFields.length - 1}
+                                    onClick={() => moveField(orderIndex, 1)}
+                                    aria-label={`Move ${field.label} down`}
+                                  >
+                                    <ChevronDown className="h-4 w-4" />
+                                  </Button>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <div className="flex gap-2">
+                        <Button onClick={() => saveTemplateSettings(template.id)} disabled={savingSettings}>
+                          {savingSettings && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} Save field settings
+                        </Button>
+                        <Button variant="ghost" onClick={() => setEditingTemplateId(null)}>Cancel</Button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>

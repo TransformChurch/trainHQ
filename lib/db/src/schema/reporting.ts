@@ -1,4 +1,4 @@
-import { pgTable, serial, text, timestamp } from "drizzle-orm/pg-core";
+import { integer, pgTable, serial, text, timestamp } from "drizzle-orm/pg-core";
 import { usersTable } from "./users";
 
 export const reportTemplatesTable = pgTable("report_templates", {
@@ -6,6 +6,7 @@ export const reportTemplatesTable = pgTable("report_templates", {
   name: text("name").notNull(),
   originalFileName: text("original_file_name").notNull(),
   objectPath: text("object_path").notNull(),
+  pullFields: text("pull_fields").notNull(),
   uploadedByUserId: text("uploaded_by_user_id").notNull().references(() => usersTable.id),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
@@ -16,6 +17,7 @@ export const reportRunsTable = pgTable("report_runs", {
   eventName: text("event_name").notNull(),
   startDate: text("start_date").notNull(),
   endDate: text("end_date").notNull(),
+  templateId: integer("template_id").references(() => reportTemplatesTable.id, { onDelete: "set null" }),
   cleanedObjectPath: text("cleaned_object_path").notNull(),
   requestedByUserId: text("requested_by_user_id").notNull().references(() => usersTable.id),
   createdAt: timestamp("created_at").notNull().defaultNow(),
