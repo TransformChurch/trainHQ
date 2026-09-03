@@ -26,5 +26,14 @@ export const reportRunsTable = pgTable("report_runs", {
   expiresAt: timestamp("expires_at").notNull(),
 });
 
+export const reportScriptsTable = pgTable("report_scripts", {
+  slot: text("slot").primaryKey(),
+  originalFileName: text("original_file_name").notNull(),
+  objectPath: text("object_path").notNull(),
+  uploadedByUserId: text("uploaded_by_user_id").notNull().references(() => usersTable.id),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
 export type ReportTemplate = typeof reportTemplatesTable.$inferSelect;
 export type ReportRun = typeof reportRunsTable.$inferSelect;
+export type ReportScript = typeof reportScriptsTable.$inferSelect;

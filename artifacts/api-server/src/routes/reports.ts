@@ -1,6 +1,6 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { randomUUID } from "crypto";
-import { mkdtemp, readFile, rm, writeFile } from "fs/promises";
+import { mkdtemp, readFile, rm, stat, writeFile } from "fs/promises";
 import { tmpdir } from "os";
 import { basename, dirname, join } from "path";
 import { fileURLToPath } from "url";
@@ -8,6 +8,7 @@ import { spawn } from "child_process";
 import {
   db,
   reportRunsTable,
+  reportScriptsTable,
   reportTemplatesTable,
 } from "@workspace/db";
 import { and, eq, lt } from "drizzle-orm";
@@ -24,6 +25,7 @@ const REPORT_TTL_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_SESSION_COUNT = 5;
 const MAX_SESSION_COUNT = 52;
 type CleanupMode = "month_quarter" | "all_dates";
+type ScriptSlot = CleanupMode | "template";
 type PreparationProgress = {
   stage: "loading" | "profiles" | "complete" | "failed";
   completedBatches: number;
@@ -35,6 +37,12 @@ type PreparationProgress = {
 const PEOPLE_BATCH_SIZE = 5;
 const PEOPLE_BATCH_DELAY_MS = 2_000;
 const PROGRESS_TTL_MS = 10 * 60 * 1000;
+const MAX_SCRIPT_BYTES = 500_000;
+const SCRIPT_SLOTS: Array<{ slot: ScriptSlot; label: string }> = [
+  { slot: "month_quarter", label: "Monthly/Quarterly cleanup" },
+  { slot: "all_dates", label: "All Dates cleanup" },
+  { slot: "template", label: "Template population" },
+];
 const preparationProgress = new Map<string, PreparationProgress>();
 
 function progressKey(userId: number, progressId: string): string {
@@ -405,7 +413,7 @@ async function fetchPeopleDetails(
   return result;
 }
 
-function pythonScript(name: CleanupMode | "template"): string {
+function bundledPythonScript(name: ScriptSlot): string {
   const fileName = name === "month_quarter"
     ? "cleanup_attendance_month_quarter.py"
     : name === "all_dates"
@@ -424,6 +432,20 @@ function pythonScript(name: CleanupMode | "template"): string {
     sourceFileName,
   );
   return process.env.NODE_ENV === "production" ? built : source;
+}
+
+async function pythonScript(name: ScriptSlot): Promise<string> {
+  const rows = await db.select().from(reportScriptsTable)
+    .where(eq(reportScriptsTable.slot, name))
+    .limit(1);
+  if (!rows[0]) return bundledPythonScript(name);
+  try {
+    return (await storage.getObjectEntityFile(rows[0].objectPath)).path;
+  } catch {
+    const error = new Error(`The uploaded ${SCRIPT_SLOTS.find((item) => item.slot === name)?.label ?? name} script is unavailable. Upload it again or reset it to the bundled version.`) as Error & { status?: number };
+    error.status = 500;
+    throw error;
+  }
 }
 
 async function runPython(args: string[], timeoutMs = 120_000): Promise<string> {
@@ -487,6 +509,91 @@ router.get("/fields", requireAdmin, async (req, res) => {
     });
   } catch (error) {
     sendError(req, res, error, "Failed to load Planning Center fields");
+  }
+});
+
+router.get("/scripts", requireAdmin, async (_req, res) => {
+  const rows = await db.select().from(reportScriptsTable);
+  const bySlot = new Map(rows.map((row) => [row.slot, row]));
+  res.json(SCRIPT_SLOTS.map(({ slot, label }) => {
+    const row = bySlot.get(slot);
+    return {
+      slot,
+      label,
+      source: row ? "uploaded" : "bundled",
+      originalFileName: row?.originalFileName ?? null,
+      updatedAt: row?.updatedAt?.toISOString() ?? null,
+    };
+  }));
+});
+
+router.put("/scripts/:slot", requireAdmin, async (req, res) => {
+  try {
+    const slot = text(req.params.slot) as ScriptSlot;
+    const originalFileName = text(req.body?.originalFileName);
+    const objectPath = text(req.body?.objectPath);
+    if (!SCRIPT_SLOTS.some((item) => item.slot === slot)) {
+      res.status(400).json({ error: "Invalid report script type." });
+      return;
+    }
+    if (!originalFileName.toLowerCase().endsWith(".py") || !objectPath.startsWith("/objects/")) {
+      res.status(400).json({ error: "Upload a valid Python (.py) file." });
+      return;
+    }
+    const file = await storage.getObjectEntityFile(objectPath);
+    const fileStats = await stat(file.path);
+    if (!fileStats.size || fileStats.size > MAX_SCRIPT_BYTES) {
+      res.status(400).json({ error: "Python scripts must be between 1 byte and 500 KB." });
+      return;
+    }
+    await runPython([
+      "-c",
+      "import sys; compile(open(sys.argv[1], 'rb').read(), sys.argv[1], 'exec')",
+      file.path,
+    ], 15_000);
+
+    const existing = await db.select().from(reportScriptsTable)
+      .where(eq(reportScriptsTable.slot, slot))
+      .limit(1);
+    const rows = await db.insert(reportScriptsTable).values({
+      slot,
+      originalFileName,
+      objectPath,
+      uploadedByUserId: res.locals.dbUser.id,
+      updatedAt: new Date(),
+    }).onConflictDoUpdate({
+      target: reportScriptsTable.slot,
+      set: {
+        originalFileName,
+        objectPath,
+        uploadedByUserId: res.locals.dbUser.id,
+        updatedAt: new Date(),
+      },
+    }).returning();
+    if (existing[0]?.objectPath && existing[0].objectPath !== objectPath) {
+      await storage.deleteObjectEntity(existing[0].objectPath).catch(() => undefined);
+    }
+    const { objectPath: _objectPath, uploadedByUserId: _uploadedByUserId, ...response } = rows[0];
+    res.json({ ...response, label: SCRIPT_SLOTS.find((item) => item.slot === slot)?.label, source: "uploaded" });
+  } catch (error) {
+    sendError(req, res, error, "Failed to update report script");
+  }
+});
+
+router.delete("/scripts/:slot", requireAdmin, async (req, res) => {
+  try {
+    const slot = text(req.params.slot) as ScriptSlot;
+    if (!SCRIPT_SLOTS.some((item) => item.slot === slot)) {
+      res.status(400).json({ error: "Invalid report script type." });
+      return;
+    }
+    const rows = await db.delete(reportScriptsTable)
+      .where(eq(reportScriptsTable.slot, slot))
+      .returning();
+    if (rows[0]?.objectPath) await storage.deleteObjectEntity(rows[0].objectPath).catch(() => undefined);
+    res.status(204).end();
+  } catch (error) {
+    sendError(req, res, error, "Failed to reset report script");
   }
 });
 
@@ -766,7 +873,7 @@ router.post("/prepare", requireManagerOrAdmin, async (req, res) => {
     const cleanedPath = join(workDir, "cleaned.csv");
     const flagsPath = join(workDir, "flags.txt");
     await writeFile(rawPath, rawCsv, "utf8");
-    const output = await runPython([pythonScript(cleanupMode), rawPath, cleanedPath, "--flags-out", flagsPath]);
+    const output = await runPython([await pythonScript(cleanupMode), rawPath, cleanedPath, "--flags-out", flagsPath]);
     const cleaned = selectCleanedColumns(await readFile(cleanedPath, "utf8"), pullFields, customLabels);
     const flags = await readFile(flagsPath, "utf8").catch(() => "");
     const cleanedObjectPath = await storage.saveObjectEntityBuffer(Buffer.from(cleaned, "utf8"), "text/csv", "reports");
@@ -861,7 +968,7 @@ router.post("/generate", requireManagerOrAdmin, async (req, res) => {
     await writeFile(templatePath, await readFile(templateFile.path));
     await writeFile(cleanedPath, await readFile(cleanedFile.path));
     const args = [
-      pythonScript("template"),
+      await pythonScript("template"),
       "--template", templatePath,
       "--data", cleanedPath,
       "--out-xlsx", xlsxPath,

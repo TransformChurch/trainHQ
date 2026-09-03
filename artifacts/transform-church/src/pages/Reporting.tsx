@@ -43,6 +43,14 @@ type PreparationProgress = {
   totalBatches: number;
   message: string;
 };
+type ScriptSlot = "month_quarter" | "all_dates" | "template";
+type ReportScriptStatus = {
+  slot: ScriptSlot;
+  label: string;
+  source: "bundled" | "uploaded";
+  originalFileName: string | null;
+  updatedAt: string | null;
+};
 
 const FIELD_OPTIONS: AvailableField[] = [
   { key: "planning_center_id", label: "Planning Center ID" },
@@ -125,6 +133,9 @@ export default function Reporting() {
   const [fieldsLoading, setFieldsLoading] = useState(false);
   const [fieldsError, setFieldsError] = useState("");
   const [fieldToAdd, setFieldToAdd] = useState("");
+  const [reportScripts, setReportScripts] = useState<ReportScriptStatus[]>([]);
+  const [scriptFiles, setScriptFiles] = useState<Partial<Record<ScriptSlot, File>>>({});
+  const [savingScript, setSavingScript] = useState<ScriptSlot | null>(null);
 
   const fieldOptions = useMemo(
     () => [...FIELD_OPTIONS, ...planningCenterFields],
@@ -184,6 +195,11 @@ export default function Reporting() {
     }
   };
 
+  const loadReportScripts = async () => {
+    const response = await api("/api/reports/scripts");
+    setReportScripts(await response.json() as ReportScriptStatus[]);
+  };
+
   useEffect(() => {
     loadEvents();
     loadTemplates().catch((error) => {
@@ -192,7 +208,12 @@ export default function Reporting() {
   }, []);
 
   useEffect(() => {
-    if (isAdmin) loadPlanningCenterFields();
+    if (isAdmin) {
+      loadPlanningCenterFields();
+      loadReportScripts().catch((error) => {
+        toast({ title: "Could not load report scripts", description: error.message, variant: "destructive" });
+      });
+    }
   }, [isAdmin]);
 
   const { uploadFile, isUploading } = useUpload({
@@ -324,6 +345,45 @@ export default function Reporting() {
       toast({ title: "Report template deleted" });
     } catch (error) {
       toast({ title: "Could not delete template", description: error instanceof Error ? error.message : "Request failed.", variant: "destructive" });
+    }
+  };
+
+  const updateReportScript = async (slot: ScriptSlot) => {
+    const file = scriptFiles[slot];
+    if (!file) return;
+    setSavingScript(slot);
+    try {
+      const normalizedFile = new File([file], file.name, { type: "text/x-python" });
+      const uploaded = await uploadFile(normalizedFile);
+      if (!uploaded) throw new Error("The script upload failed.");
+      await api(`/api/reports/scripts/${slot}`, {
+        method: "PUT",
+        body: JSON.stringify({
+          originalFileName: file.name,
+          objectPath: uploaded.objectPath,
+        }),
+      });
+      setScriptFiles((current) => ({ ...current, [slot]: undefined }));
+      await loadReportScripts();
+      toast({ title: "Report script updated", description: `${reportScripts.find((script) => script.slot === slot)?.label ?? "Script"} is now active.` });
+    } catch (error) {
+      toast({ title: "Could not update report script", description: error instanceof Error ? error.message : "Upload failed.", variant: "destructive" });
+    } finally {
+      setSavingScript(null);
+    }
+  };
+
+  const resetReportScript = async (script: ReportScriptStatus) => {
+    if (!window.confirm(`Reset ${script.label} to the bundled version?`)) return;
+    setSavingScript(script.slot);
+    try {
+      await api(`/api/reports/scripts/${script.slot}`, { method: "DELETE" });
+      await loadReportScripts();
+      toast({ title: "Report script reset", description: `${script.label} now uses the bundled version.` });
+    } catch (error) {
+      toast({ title: "Could not reset report script", description: error instanceof Error ? error.message : "Request failed.", variant: "destructive" });
+    } finally {
+      setSavingScript(null);
     }
   };
 
@@ -718,6 +778,58 @@ export default function Reporting() {
                   )}
                 </div>
               ))}
+            </div>
+            <div className="border-t pt-5">
+              <div>
+                <h3 className="font-semibold">Processing scripts</h3>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Admin-uploaded Python runs with the API server&apos;s access. Only upload scripts you trust and have reviewed.
+                </p>
+              </div>
+              <div className="mt-4 divide-y rounded-lg border">
+                {reportScripts.map((script) => (
+                  <div key={script.slot} className="grid items-end gap-3 p-4 md:grid-cols-[1fr_1fr_auto_auto]">
+                    <div>
+                      <p className="font-medium">{script.label}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {script.source === "uploaded"
+                          ? `${script.originalFileName} · uploaded ${script.updatedAt ? new Date(script.updatedAt).toLocaleString() : "recently"}`
+                          : "Using the bundled version"}
+                      </p>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor={`report-script-${script.slot}`}>Python file</Label>
+                      <Input
+                        id={`report-script-${script.slot}`}
+                        type="file"
+                        accept=".py,text/x-python"
+                        onChange={(event) => {
+                          const file = event.target.files?.[0];
+                          setScriptFiles((current) => ({ ...current, [script.slot]: file }));
+                        }}
+                      />
+                    </div>
+                    <Button
+                      size="sm"
+                      onClick={() => updateReportScript(script.slot)}
+                      disabled={!scriptFiles[script.slot] || savingScript !== null || isUploading}
+                    >
+                      {(savingScript === script.slot || (isUploading && !!scriptFiles[script.slot]))
+                        ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        : <Upload className="mr-2 h-4 w-4" />}
+                      Update
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => resetReportScript(script)}
+                      disabled={script.source === "bundled" || savingScript !== null}
+                    >
+                      Reset
+                    </Button>
+                  </div>
+                ))}
+              </div>
             </div>
           </CardContent>
         </Card>

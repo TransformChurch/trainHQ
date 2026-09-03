@@ -11,3 +11,4 @@
 - [Document file handling](document-file-handling.md) — the repository accepts any file type, but only PDFs embed; other files remain listed and open externally.
 - [Reporting data retention](reporting-data-retention.md) — prepared attendance exports are private, user-scoped, and expire after 24 hours; never expose them through public storage.
 - [Reporting enrichment completeness](reporting-enrichment-completeness.md) — never produce partial exports when Planning Center throttles person enrichment; retry or fail explicitly.
+- [Reporting script uploads](reporting-script-uploads.md) — admins may upload trusted Python processors despite server-level execution risk; keep uploads private and validate before activation.
