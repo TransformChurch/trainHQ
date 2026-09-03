@@ -332,7 +332,8 @@ async function fetchPeopleDetails(
 function pythonScript(name: "cleanup" | "template"): string {
   const built = join(dirname(fileURLToPath(import.meta.url)), name === "cleanup" ? "cleanup_attendance.py" : "paste_to_template.py");
   const source = join(
-    process.cwd(),
+    dirname(fileURLToPath(import.meta.url)),
+    "../../../..",
     "attached_assets",
     name === "cleanup" ? "cleanup_attendance_1788449493804.py" : "paste_to_template_1788451691917.py",
   );
