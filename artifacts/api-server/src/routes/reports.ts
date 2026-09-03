@@ -414,8 +414,8 @@ function pythonScript(name: CleanupMode | "template"): string {
   const sourceFileName = name === "month_quarter"
     ? "cleanup_attendance_MonthQuarter_1788469555267.py"
     : name === "all_dates"
-      ? "cleanup_attendance_AllDates_1788469555268.py"
-      : "paste_to_template_1788451691917.py";
+      ? "cleanup_attendance_all_datesv2_1788477465544.py"
+      : "paste_to_templatev2_1788477465546.py";
   const built = join(dirname(fileURLToPath(import.meta.url)), fileName);
   const source = join(
     dirname(fileURLToPath(import.meta.url)),

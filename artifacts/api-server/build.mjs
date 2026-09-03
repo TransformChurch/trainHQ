@@ -124,11 +124,11 @@ globalThis.__dirname = __bannerPath.dirname(globalThis.__filename);
       path.resolve(distDir, "cleanup_attendance_month_quarter.py"),
     ),
     copyFile(
-      path.resolve(artifactDir, "../../attached_assets/cleanup_attendance_AllDates_1788469555268.py"),
+      path.resolve(artifactDir, "../../attached_assets/cleanup_attendance_all_datesv2_1788477465544.py"),
       path.resolve(distDir, "cleanup_attendance_all_dates.py"),
     ),
     copyFile(
-      path.resolve(artifactDir, "../../attached_assets/paste_to_template_1788451691917.py"),
+      path.resolve(artifactDir, "../../attached_assets/paste_to_templatev2_1788477465546.py"),
       path.resolve(distDir, "paste_to_template.py"),
     ),
   ]);
