@@ -120,7 +120,7 @@ globalThis.__dirname = __bannerPath.dirname(globalThis.__filename);
   });
   await Promise.all([
     copyFile(
-      path.resolve(artifactDir, "../../attached_assets/cleanup_attendance_MonthQuarter_1788469555267.py"),
+      path.resolve(artifactDir, "../../attached_assets/cleanup_attendance_MonthQuarterv2_1788478015757.py"),
       path.resolve(distDir, "cleanup_attendance_month_quarter.py"),
     ),
     copyFile(

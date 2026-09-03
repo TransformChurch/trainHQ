@@ -412,7 +412,7 @@ function pythonScript(name: CleanupMode | "template"): string {
       ? "cleanup_attendance_all_dates.py"
       : "paste_to_template.py";
   const sourceFileName = name === "month_quarter"
-    ? "cleanup_attendance_MonthQuarter_1788469555267.py"
+    ? "cleanup_attendance_MonthQuarterv2_1788478015757.py"
     : name === "all_dates"
       ? "cleanup_attendance_all_datesv2_1788477465544.py"
       : "paste_to_templatev2_1788477465546.py";
