@@ -156,26 +156,41 @@ function selectCleanedColumns(cleaned: string, selectedFields: ReportFieldKey[],
 }
 
 async function planningCenterRequest(url: string, accessToken: string): Promise<any> {
-  const response = await fetch(url, {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      Accept: "application/json",
-      "User-Agent": "Transform Church Reporting",
-    },
-  });
-  if (!response.ok) {
+  const maxAttempts = 6;
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const response = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        Accept: "application/json",
+        "User-Agent": "Transform Church Reporting",
+      },
+    });
+    if (response.ok) return response.json();
+
     const body = await response.text();
+    const retryable = response.status === 429 || response.status >= 500;
+    if (retryable && attempt < maxAttempts - 1) {
+      const retryAfterSeconds = Number(response.headers.get("retry-after"));
+      const delayMs = Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0
+        ? retryAfterSeconds * 1000
+        : Math.min(1_000 * 2 ** attempt, 15_000);
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      continue;
+    }
+
     const permission = response.status === 401 || response.status === 403;
     const error = new Error(
       permission
         ? "Planning Center Check-Ins access is missing. Reconnect Church Center and approve Check-Ins access."
-        : `Planning Center request failed (${response.status}).`,
+        : response.status === 429
+          ? "Planning Center is temporarily limiting report requests. Please try preparing the report again shortly."
+          : `Planning Center request failed (${response.status}).`,
     ) as Error & { status?: number; details?: string };
-    error.status = permission ? 403 : 502;
+    error.status = permission ? 403 : response.status === 429 ? 503 : 502;
     error.details = body.slice(0, 1000);
     throw error;
   }
-  return response.json();
+  throw new Error("Planning Center request retry limit was reached.");
 }
 
 async function fetchCollection(
@@ -285,6 +300,7 @@ async function fetchPeopleDetails(
   accessToken: string,
 ): Promise<Map<string, Record<string, unknown>>> {
   const result = new Map<string, Record<string, unknown>>();
+  const failedIds: string[] = [];
   let cursor = 0;
   async function worker() {
     while (cursor < ids.length) {
@@ -311,18 +327,18 @@ async function fetchPeopleDetails(
         if (mobilePhone) attributes.phone_number_mobile = mobilePhone;
         if (phones[0]) attributes.phone_number = phones[0].number;
         try {
-          const fieldPage = await planningCenterRequest(
+          const fieldPage = await fetchCollection(
             `${PEOPLE_BASE}/people/${encodeURIComponent(id)}/field_data?include=field_definition&per_page=100`,
             accessToken,
           );
           const definitions = new Map<string, string>(
-            (Array.isArray(fieldPage.included) ? fieldPage.included as JsonApiResource[] : [])
+            fieldPage.included
               .map((definition) => [
                 definition.id,
                 firstValue(definition.attributes ?? {}, "name", "label"),
               ]),
           );
-          for (const fieldData of Array.isArray(fieldPage.data) ? fieldPage.data as JsonApiResource[] : []) {
+          for (const fieldData of fieldPage.data) {
             const fieldAttributes = fieldData.attributes ?? {};
             const definitionId = relationshipId(fieldData, "field_definition");
             const fieldName = firstValue(fieldAttributes, "name", "field_name", "fieldName", "label")
@@ -335,15 +351,23 @@ async function fetchPeopleDetails(
             }
           }
         } catch {
-          // Standard person details remain usable when custom field data is unavailable.
+          failedIds.push(id);
+          continue;
         }
         result.set(id, attributes);
       } catch {
-        result.set(id, {});
+        failedIds.push(id);
       }
     }
   }
-  await Promise.all(Array.from({ length: Math.min(6, ids.length) }, () => worker()));
+  await Promise.all(Array.from({ length: Math.min(4, ids.length) }, () => worker()));
+  if (failedIds.length) {
+    const error = new Error(
+      `Planning Center profile details could not be loaded for ${failedIds.length} ${failedIds.length === 1 ? "person" : "people"}. Please prepare the report again.`,
+    ) as Error & { status?: number };
+    error.status = 503;
+    throw error;
+  }
   return result;
 }
 

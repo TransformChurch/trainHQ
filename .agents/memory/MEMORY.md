@@ -10,3 +10,4 @@
 - [Request Hub access layers](request-hub-access.md) — whole-hub grants include every category; category grants can independently expose only selected sections.
 - [Document file handling](document-file-handling.md) — the repository accepts any file type, but only PDFs embed; other files remain listed and open externally.
 - [Reporting data retention](reporting-data-retention.md) — prepared attendance exports are private, user-scoped, and expire after 24 hours; never expose them through public storage.
+- [Reporting enrichment completeness](reporting-enrichment-completeness.md) — never produce partial exports when Planning Center throttles person enrichment; retry or fail explicitly.
