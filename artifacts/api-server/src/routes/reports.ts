@@ -525,6 +525,7 @@ router.post("/prepare", requireManagerOrAdmin, async (req, res) => {
   try {
     await cleanExpiredRuns();
     const eventId = text(req.body?.eventId);
+    const requestedStartDate = dateOnly(req.body?.startDate);
     const endDate = dateOnly(req.body?.endDate);
     const templateId = Number(req.body?.templateId);
     if (!eventId || !endDate || !Number.isInteger(templateId)) {
@@ -543,6 +544,10 @@ router.post("/prepare", requireManagerOrAdmin, async (req, res) => {
     const pullFields = normalizePullFields(template.pullFields);
     const sessionCount = normalizeSessionCount(template.sessionCount);
     const cleanupMode = normalizeCleanupMode(template.cleanupMode);
+    if (cleanupMode === "all_dates" && (!requestedStartDate || requestedStartDate > endDate)) {
+      res.status(400).json({ error: "Select a valid start and end date for an All Dates template." });
+      return;
+    }
     const accessToken = await getValidPlanningCenterAccessToken(res.locals.dbUser.id);
     const customFieldDefinitions = await fetchReportFieldDefinitions(accessToken);
     const customLabels = new Map(customFieldDefinitions.map((field) => [field.key, field.label]));
@@ -563,17 +568,27 @@ router.post("/prepare", requireManagerOrAdmin, async (req, res) => {
         accessToken,
       ),
     ]);
-    const sessions = periodCollection.data
+    const eligibleSessions = periodCollection.data
       .map((period) => ({
         id: period.id,
         date: dateOnly(period.attributes?.starts_at),
       }))
-      .filter((period) => period.id && period.date && period.date <= endDate)
-      .sort((a, b) => b.date.localeCompare(a.date))
-      .slice(0, sessionCount)
-      .reverse();
+      .filter((period) =>
+        period.id
+        && period.date
+        && period.date <= endDate
+        && (cleanupMode !== "all_dates" || period.date >= requestedStartDate),
+      )
+      .sort((a, b) => b.date.localeCompare(a.date));
+    const sessions = cleanupMode === "all_dates"
+      ? eligibleSessions.reverse()
+      : eligibleSessions.slice(0, sessionCount).reverse();
     if (!sessions.length) {
-      res.status(404).json({ error: "No Planning Center sessions were found on or before that end date." });
+      res.status(404).json({
+        error: cleanupMode === "all_dates"
+          ? "No Planning Center sessions were found in that date range."
+          : "No Planning Center sessions were found on or before that end date.",
+      });
       return;
     }
     const selectedSessionIds = new Set(sessions.map((session) => session.id));
@@ -593,7 +608,7 @@ router.post("/prepare", requireManagerOrAdmin, async (req, res) => {
     const personIds = [...new Set(inRange.map((checkIn) => relationshipId(checkIn, "person")).filter(Boolean))];
     const peopleDetails = await fetchPeopleDetails(personIds, accessToken);
     const serviceDates = sessions.map((session) => session.date);
-    const startDate = serviceDates[0];
+    const startDate = cleanupMode === "all_dates" ? requestedStartDate : serviceDates[0];
     const records = new Map<string, Record<string, string | boolean>>();
 
     for (const checkIn of inRange) {

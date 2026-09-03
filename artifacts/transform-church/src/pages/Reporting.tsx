@@ -97,6 +97,7 @@ export default function Reporting() {
   const [events, setEvents] = useState<EventOption[]>([]);
   const [templates, setTemplates] = useState<ReportTemplate[]>([]);
   const [eventId, setEventId] = useState("");
+  const [startDate, setStartDate] = useState(defaultDate(-30));
   const [endDate, setEndDate] = useState(defaultDate(0));
   const [selectedTemplate, setSelectedTemplate] = useState("");
   const [prepared, setPrepared] = useState<PreparedRun | null>(null);
@@ -125,6 +126,10 @@ export default function Reporting() {
   const fieldByKey = useMemo(
     () => new Map(fieldOptions.map((field) => [field.key, field])),
     [fieldOptions],
+  );
+  const activeTemplate = useMemo(
+    () => templates.find((template) => String(template.id) === selectedTemplate),
+    [templates, selectedTemplate],
   );
 
   const reconnectUrl = useMemo(() => {
@@ -189,13 +194,18 @@ export default function Reporting() {
   });
 
   const prepare = async () => {
-    if (!eventId || !endDate || !selectedTemplate) return;
+    if (!eventId || !endDate || !selectedTemplate || (activeTemplate?.cleanupMode === "all_dates" && !startDate)) return;
     setPreparing(true);
     setPrepared(null);
     try {
       const response = await api("/api/reports/prepare", {
         method: "POST",
-        body: JSON.stringify({ eventId, endDate, templateId: Number(selectedTemplate) }),
+        body: JSON.stringify({
+          eventId,
+          startDate: activeTemplate?.cleanupMode === "all_dates" ? startDate : undefined,
+          endDate,
+          templateId: Number(selectedTemplate),
+        }),
       });
       const result = await response.json() as PreparedRun;
       setPrepared(result);
@@ -366,7 +376,7 @@ export default function Reporting() {
             Select attendance cutoff
           </CardTitle>
         </CardHeader>
-        <CardContent className="grid gap-4 md:grid-cols-2">
+        <CardContent className={`grid gap-4 ${activeTemplate?.cleanupMode === "all_dates" ? "md:grid-cols-3" : "md:grid-cols-2"}`}>
           <div className="space-y-2">
             <Label htmlFor="report-event">Active event</Label>
             <select
@@ -379,11 +389,19 @@ export default function Reporting() {
               {events.map((event) => <option key={event.id} value={event.id}>{event.name}</option>)}
             </select>
           </div>
+          {activeTemplate?.cleanupMode === "all_dates" && (
+            <div className="space-y-2">
+              <Label htmlFor="report-start">Start date</Label>
+              <Input id="report-start" type="date" value={startDate} max={endDate} onChange={(event) => { setStartDate(event.target.value); setPrepared(null); }} />
+            </div>
+          )}
           <div className="space-y-2">
             <Label htmlFor="report-end">End date</Label>
             <Input id="report-end" type="date" value={endDate} onChange={(event) => { setEndDate(event.target.value); setPrepared(null); }} />
             <p className="text-xs text-muted-foreground">
-              The selected template determines how many previous Planning Center sessions are included.
+              {activeTemplate?.cleanupMode === "all_dates"
+                ? "All Planning Center sessions in the selected date range are included."
+                : "The selected template determines how many previous Planning Center sessions are included."}
             </p>
           </div>
           {eventsLoading && <p className="flex items-center gap-2 text-sm text-muted-foreground md:col-span-3"><Loader2 className="h-4 w-4 animate-spin" /> Loading Planning Center events…</p>}
@@ -423,12 +441,14 @@ export default function Reporting() {
           {selectedTemplate && (
             <div className="rounded-lg border bg-muted/30 p-3 text-sm">
               <span className="font-medium">CSV column order: </span>
-              {templates.find((template) => String(template.id) === selectedTemplate)?.pullFields
+              {activeTemplate?.pullFields
                 .map((key) => fieldByKey.get(key)?.label ?? key)
                 .filter(Boolean)
                 .join(" → ")}
               <span className="mt-1 block text-muted-foreground">
-                Sessions: {templates.find((template) => String(template.id) === selectedTemplate)?.sessionCount ?? 5}
+                {activeTemplate?.cleanupMode === "all_dates"
+                  ? "Attendance: All sessions in the selected date range"
+                  : `Sessions: ${activeTemplate?.sessionCount ?? 5}`}
               </span>
             </div>
           )}
@@ -446,7 +466,10 @@ export default function Reporting() {
           <p className="text-sm text-muted-foreground">
             Pull the fields configured for this template, merge duplicate check-ins, and format the CSV in the saved column order.
           </p>
-          <Button onClick={prepare} disabled={preparing || !eventId || !selectedTemplate || !!eventsError}>
+          <Button
+            onClick={prepare}
+            disabled={preparing || !eventId || !selectedTemplate || !!eventsError || (activeTemplate?.cleanupMode === "all_dates" && (!startDate || startDate > endDate))}
+          >
             {preparing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
             {preparing ? "Pulling and formatting data…" : "Pull and prepare data"}
           </Button>
@@ -512,7 +535,7 @@ export default function Reporting() {
                       <p className="font-medium">{template.name}</p>
                       <p className="text-xs text-muted-foreground">{template.originalFileName}</p>
                       <p className="mt-1 text-xs text-muted-foreground">
-                        {template.pullFields.length} profile fields · {template.sessionCount} sessions
+                        {template.pullFields.length} profile fields · {template.cleanupMode === "all_dates" ? "All Dates" : `${template.sessionCount} sessions`}
                       </p>
                     </div>
                     <div className="flex gap-1">
@@ -550,20 +573,22 @@ export default function Reporting() {
                           <option value="all_dates">All Dates</option>
                         </select>
                       </div>
-                      <div className="max-w-xs space-y-2">
-                        <Label htmlFor={`session-count-${template.id}`}>Previous sessions to include</Label>
-                        <Input
-                          id={`session-count-${template.id}`}
-                          type="number"
-                          min={1}
-                          max={52}
-                          value={draftSessionCount}
-                          onChange={(event) => setDraftSessionCount(Number(event.target.value))}
-                        />
-                        <p className="text-xs text-muted-foreground">
-                          Counts backward from the report end date. New templates default to 5 sessions.
-                        </p>
-                      </div>
+                      {draftCleanupMode === "month_quarter" && (
+                        <div className="max-w-xs space-y-2">
+                          <Label htmlFor={`session-count-${template.id}`}>Previous sessions to include</Label>
+                          <Input
+                            id={`session-count-${template.id}`}
+                            type="number"
+                            min={1}
+                            max={52}
+                            value={draftSessionCount}
+                            onChange={(event) => setDraftSessionCount(Number(event.target.value))}
+                          />
+                          <p className="text-xs text-muted-foreground">
+                            Counts backward from the report end date. New templates default to 5 sessions.
+                          </p>
+                        </div>
+                      )}
                       <div className="space-y-2">
                         <Label htmlFor={`add-field-${template.id}`}>Add field</Label>
                         <div className="flex flex-col gap-2 sm:flex-row">
@@ -645,7 +670,12 @@ export default function Reporting() {
                       <div className="flex gap-2">
                         <Button
                           onClick={() => saveTemplateSettings(template.id)}
-                          disabled={savingSettings || !draftTemplateName.trim() || !Number.isInteger(draftSessionCount) || draftSessionCount < 1 || draftSessionCount > 52}
+                          disabled={
+                            savingSettings
+                            || !draftTemplateName.trim()
+                            || (draftCleanupMode === "month_quarter"
+                              && (!Number.isInteger(draftSessionCount) || draftSessionCount < 1 || draftSessionCount > 52))
+                          }
                         >
                           {savingSettings && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} Save settings
                         </Button>
