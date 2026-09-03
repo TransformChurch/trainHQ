@@ -37,6 +37,12 @@ type PreparedRun = {
   flags: string;
   expiresAt: string;
 };
+type PreparationProgress = {
+  stage: "loading" | "profiles" | "complete" | "failed";
+  completedBatches: number;
+  totalBatches: number;
+  message: string;
+};
 
 const FIELD_OPTIONS: AvailableField[] = [
   { key: "planning_center_id", label: "Planning Center ID" },
@@ -104,6 +110,7 @@ export default function Reporting() {
   const [eventsLoading, setEventsLoading] = useState(true);
   const [eventsError, setEventsError] = useState("");
   const [preparing, setPreparing] = useState(false);
+  const [preparationProgress, setPreparationProgress] = useState<PreparationProgress | null>(null);
   const [generating, setGenerating] = useState<"xlsx" | "pdf" | null>(null);
   const [templateName, setTemplateName] = useState("");
   const [templateFile, setTemplateFile] = useState<File | null>(null);
@@ -195,12 +202,29 @@ export default function Reporting() {
 
   const prepare = async () => {
     if (!eventId || !endDate || !selectedTemplate || (activeTemplate?.cleanupMode === "all_dates" && !startDate)) return;
+    const progressId = crypto.randomUUID();
+    let progressTimer: number | undefined;
     setPreparing(true);
     setPrepared(null);
+    setPreparationProgress({
+      stage: "loading",
+      completedBatches: 0,
+      totalBatches: 0,
+      message: "Loading attendance data…",
+    });
     try {
+      progressTimer = window.setInterval(async () => {
+        try {
+          const response = await api(`/api/reports/prepare-progress/${encodeURIComponent(progressId)}`);
+          setPreparationProgress(await response.json() as PreparationProgress);
+        } catch {
+          // The main preparation request reports actionable errors.
+        }
+      }, 750);
       const response = await api("/api/reports/prepare", {
         method: "POST",
         body: JSON.stringify({
+          progressId,
           eventId,
           startDate: activeTemplate?.cleanupMode === "all_dates" ? startDate : undefined,
           endDate,
@@ -213,7 +237,9 @@ export default function Reporting() {
     } catch (error) {
       toast({ title: "Could not prepare report", description: error instanceof Error ? error.message : "Request failed.", variant: "destructive" });
     } finally {
+      if (progressTimer !== undefined) window.clearInterval(progressTimer);
       setPreparing(false);
+      setPreparationProgress(null);
     }
   };
 
@@ -466,13 +492,20 @@ export default function Reporting() {
           <p className="text-sm text-muted-foreground">
             Pull the fields configured for this template, merge duplicate check-ins, and format the CSV in the saved column order.
           </p>
-          <Button
-            onClick={prepare}
-            disabled={preparing || !eventId || !selectedTemplate || !!eventsError || (activeTemplate?.cleanupMode === "all_dates" && (!startDate || startDate > endDate))}
-          >
-            {preparing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
-            {preparing ? "Pulling and formatting data…" : "Pull and prepare data"}
-          </Button>
+          <div className="flex flex-wrap items-center gap-3">
+            <Button
+              onClick={prepare}
+              disabled={preparing || !eventId || !selectedTemplate || !!eventsError || (activeTemplate?.cleanupMode === "all_dates" && (!startDate || startDate > endDate))}
+            >
+              {preparing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+              {preparing ? "Pulling and formatting data…" : "Pull and prepare data"}
+            </Button>
+            {preparing && preparationProgress && (
+              <span className="text-sm text-muted-foreground" role="status" aria-live="polite">
+                {preparationProgress.message}
+              </span>
+            )}
+          </div>
           {prepared && (
             <div className="space-y-3 rounded-lg border bg-muted/30 p-4">
               <div className="grid gap-3 text-sm sm:grid-cols-4">

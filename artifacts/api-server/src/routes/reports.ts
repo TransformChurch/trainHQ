@@ -24,6 +24,36 @@ const REPORT_TTL_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_SESSION_COUNT = 5;
 const MAX_SESSION_COUNT = 52;
 type CleanupMode = "month_quarter" | "all_dates";
+type PreparationProgress = {
+  stage: "loading" | "profiles" | "complete" | "failed";
+  completedBatches: number;
+  totalBatches: number;
+  message: string;
+  expiresAt: number;
+};
+
+const PEOPLE_BATCH_SIZE = 5;
+const PEOPLE_BATCH_DELAY_MS = 2_000;
+const PROGRESS_TTL_MS = 10 * 60 * 1000;
+const preparationProgress = new Map<string, PreparationProgress>();
+
+function progressKey(userId: number, progressId: string): string {
+  return `${userId}:${progressId}`;
+}
+
+function setPreparationProgress(userId: number, progressId: string, progress: Omit<PreparationProgress, "expiresAt">) {
+  preparationProgress.set(progressKey(userId, progressId), {
+    ...progress,
+    expiresAt: Date.now() + PROGRESS_TTL_MS,
+  });
+}
+
+function cleanPreparationProgress() {
+  const now = Date.now();
+  for (const [key, progress] of preparationProgress) {
+    if (progress.expiresAt <= now) preparationProgress.delete(key);
+  }
+}
 const REPORT_FIELDS = [
   { key: "planning_center_id", label: "Planning Center ID" },
   { key: "first_name", label: "First Name" },
@@ -298,13 +328,14 @@ function nestedValue(attributes: Record<string, unknown>, ...names: string[]): s
 async function fetchPeopleDetails(
   ids: string[],
   accessToken: string,
+  onBatchComplete?: (completedBatches: number, totalBatches: number) => void,
 ): Promise<Map<string, Record<string, unknown>>> {
   const result = new Map<string, Record<string, unknown>>();
   const failedIds: string[] = [];
-  let cursor = 0;
-  async function worker() {
-    while (cursor < ids.length) {
-      const id = ids[cursor++];
+  const totalBatches = Math.ceil(ids.length / PEOPLE_BATCH_SIZE);
+  for (let batchIndex = 0; batchIndex < totalBatches; batchIndex += 1) {
+    const batch = ids.slice(batchIndex * PEOPLE_BATCH_SIZE, (batchIndex + 1) * PEOPLE_BATCH_SIZE);
+    await Promise.all(batch.map(async (id) => {
       try {
         const page = await planningCenterRequest(
           `${PEOPLE_BASE}/people/${encodeURIComponent(id)}?include=emails,phone_numbers`,
@@ -352,15 +383,18 @@ async function fetchPeopleDetails(
           }
         } catch {
           failedIds.push(id);
-          continue;
+          return;
         }
         result.set(id, attributes);
       } catch {
         failedIds.push(id);
       }
+    }));
+    onBatchComplete?.(batchIndex + 1, totalBatches);
+    if (batchIndex < totalBatches - 1) {
+      await new Promise((resolve) => setTimeout(resolve, PEOPLE_BATCH_DELAY_MS));
     }
   }
-  await Promise.all(Array.from({ length: Math.min(4, ids.length) }, () => worker()));
   if (failedIds.length) {
     const error = new Error(
       `Planning Center profile details could not be loaded for ${failedIds.length} ${failedIds.length === 1 ? "person" : "people"}. Please prepare the report again.`,
@@ -544,10 +578,38 @@ router.delete("/templates/:templateId", requireAdmin, async (req, res) => {
   }
 });
 
+router.get("/prepare-progress/:progressId", requireManagerOrAdmin, (req, res) => {
+  cleanPreparationProgress();
+  const progressId = text(req.params.progressId);
+  const progress = preparationProgress.get(progressKey(res.locals.dbUser.id, progressId));
+  if (!progress) {
+    res.json({
+      stage: "loading",
+      completedBatches: 0,
+      totalBatches: 0,
+      message: "Loading attendance data…",
+    });
+    return;
+  }
+  const { expiresAt: _expiresAt, ...response } = progress;
+  res.json(response);
+});
+
 router.post("/prepare", requireManagerOrAdmin, async (req, res) => {
   let workDir = "";
+  const progressId = text(req.body?.progressId);
+  const userId = res.locals.dbUser.id;
   try {
     await cleanExpiredRuns();
+    cleanPreparationProgress();
+    if (progressId) {
+      setPreparationProgress(userId, progressId, {
+        stage: "loading",
+        completedBatches: 0,
+        totalBatches: 0,
+        message: "Loading attendance data…",
+      });
+    }
     const eventId = text(req.body?.eventId);
     const requestedStartDate = dateOnly(req.body?.startDate);
     const endDate = dateOnly(req.body?.endDate);
@@ -630,7 +692,25 @@ router.post("/prepare", requireManagerOrAdmin, async (req, res) => {
       collection.included.filter((resource) => resource.id).map((resource) => [resource.id, resource.attributes ?? {}]),
     );
     const personIds = [...new Set(inRange.map((checkIn) => relationshipId(checkIn, "person")).filter(Boolean))];
-    const peopleDetails = await fetchPeopleDetails(personIds, accessToken);
+    const totalProfileBatches = Math.ceil(personIds.length / PEOPLE_BATCH_SIZE);
+    if (progressId) {
+      setPreparationProgress(userId, progressId, {
+        stage: "profiles",
+        completedBatches: 0,
+        totalBatches: totalProfileBatches,
+        message: `Loading profile batch 0 of ${totalProfileBatches}…`,
+      });
+    }
+    const peopleDetails = await fetchPeopleDetails(personIds, accessToken, (completedBatches, totalBatches) => {
+      if (progressId) {
+        setPreparationProgress(userId, progressId, {
+          stage: "profiles",
+          completedBatches,
+          totalBatches,
+          message: `Loaded profile batch ${completedBatches} of ${totalBatches}`,
+        });
+      }
+    });
     const serviceDates = sessions.map((session) => session.date);
     const startDate = cleanupMode === "all_dates" ? requestedStartDate : serviceDates[0];
     const records = new Map<string, Record<string, string | boolean>>();
@@ -704,6 +784,14 @@ router.post("/prepare", requireManagerOrAdmin, async (req, res) => {
       expiresAt,
     });
     const reviewCount = Number(output.match(/ENTRIES NEEDING YOUR REVIEW:\s*(\d+)/)?.[1] ?? 0);
+    if (progressId) {
+      setPreparationProgress(userId, progressId, {
+        stage: "complete",
+        completedBatches: totalProfileBatches,
+        totalBatches: totalProfileBatches,
+        message: "All profile batches loaded",
+      });
+    }
     res.json({
       runId,
       eventName,
@@ -718,6 +806,15 @@ router.post("/prepare", requireManagerOrAdmin, async (req, res) => {
       expiresAt: expiresAt.toISOString(),
     });
   } catch (error) {
+    if (progressId) {
+      const current = preparationProgress.get(progressKey(userId, progressId));
+      setPreparationProgress(userId, progressId, {
+        stage: "failed",
+        completedBatches: current?.completedBatches ?? 0,
+        totalBatches: current?.totalBatches ?? 0,
+        message: "Report preparation stopped",
+      });
+    }
     sendError(req, res, error, "Failed to prepare report data");
   } finally {
     if (workDir) await rm(workDir, { recursive: true, force: true }).catch(() => undefined);
