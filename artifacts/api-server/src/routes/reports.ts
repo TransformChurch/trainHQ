@@ -977,6 +977,16 @@ router.post("/generate", requireManagerOrAdmin, async (req, res) => {
     if (format === "pdf") args.push("--out-pdf", pdfPath);
     await runPython(args, format === "pdf" ? 180_000 : 90_000);
     const outputPath = format === "pdf" ? pdfPath : xlsxPath;
+    const outputStats = await stat(outputPath).catch(() => null);
+    if (!outputStats?.isFile() || outputStats.size === 0) {
+      const error = new Error(
+        format === "pdf"
+          ? "The template processing script did not create a PDF. Reset or update the Template population script and try again."
+          : "The template processing script did not create an XLSX file.",
+      ) as Error & { status?: number };
+      error.status = 422;
+      throw error;
+    }
     const result = await readFile(outputPath);
     const fileName = `${safeFilePart(run.eventName)}-${run.startDate}-to-${run.endDate}.${format}`;
     res.setHeader("Content-Type", format === "pdf" ? "application/pdf" : XLSX_TYPE);

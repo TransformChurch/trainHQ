@@ -157,8 +157,10 @@ very easy to miss.
 import argparse
 import csv
 import datetime
+import os
 import re
 import shutil
+import socket
 import sys
 import zipfile
 from pathlib import Path
@@ -1451,12 +1453,18 @@ def export_pdf(xlsx_path, pdf_path, work_dir):
 
     disposable = work_dir.parent / f".{Path(xlsx_path).stem}_pdf_disposable.xlsx"
     shutil.copy(xlsx_path, disposable)
+    profile_dir = work_dir.parent / f".libreoffice-pdf-{os.getpid()}"
+    profile_dir.mkdir(parents=True, exist_ok=True)
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as port_socket:
+        port_socket.bind(("127.0.0.1", 0))
+        uno_port = port_socket.getsockname()[1]
 
     print(f"\nRendering PDF via a disposable LibreOffice copy (never the delivered xlsx)...")
     proc = subprocess.Popen(
-        ["soffice", "--headless", "--invisible", "--nocrashreport", "--nodefault",
+        ["soffice", f"-env:UserInstallation={profile_dir.resolve().as_uri()}",
+         "--headless", "--invisible", "--nocrashreport", "--nodefault",
          "--norestore", "--nologo", "--nofirststartwizard",
-         "--accept=socket,host=localhost,port=2002;urp;"],
+         f"--accept=socket,host=localhost,port={uno_port};urp;"],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
     )
     try:
@@ -1470,7 +1478,7 @@ def prop(name, value):
 
 ctx = uno.getComponentContext()
 resolver = ctx.ServiceManager.createInstanceWithContext("com.sun.star.bridge.UnoUrlResolver", ctx)
-remote_ctx = resolver.resolve("uno:socket,host=localhost,port=2002;urp;StarOffice.ComponentContext")
+remote_ctx = resolver.resolve("uno:socket,host=localhost,port={uno_port};urp;StarOffice.ComponentContext")
 smgr = remote_ctx.ServiceManager
 desktop = smgr.createInstanceWithContext("com.sun.star.frame.Desktop", remote_ctx)
 
@@ -1494,11 +1502,27 @@ print("PDF_OK")
 '''
         script_path = work_dir.parent / "_export_pdf_uno.py"
         script_path.write_text(script, encoding="utf-8")
-        result = subprocess.run([sys.executable, str(script_path)], capture_output=True, text=True, timeout=90)
-        if "PDF_OK" not in result.stdout:
-            print("PDF export may have failed:", result.stdout, result.stderr, file=sys.stderr)
-        else:
-            print(f"Wrote {pdf_path}")
+        soffice_path = shutil.which("soffice")
+        if not soffice_path:
+            raise RuntimeError("LibreOffice (soffice) is not available for PDF export.")
+        program_dir = str(Path(soffice_path).resolve().parent)
+        helper_env = os.environ.copy()
+        helper_env["PYTHONPATH"] = os.pathsep.join(
+            value for value in (program_dir, helper_env.get("PYTHONPATH", "")) if value
+        )
+        helper_env["URE_BOOTSTRAP"] = f"vnd.sun.star.pathname:{program_dir}/fundamentalrc"
+        result = subprocess.run(
+            [sys.executable, str(script_path)],
+            capture_output=True,
+            text=True,
+            timeout=90,
+            env=helper_env,
+        )
+        pdf_file = Path(pdf_path)
+        if result.returncode != 0 or "PDF_OK" not in result.stdout or not pdf_file.exists() or pdf_file.stat().st_size == 0:
+            details = (result.stderr or result.stdout or "LibreOffice did not create a PDF.").strip()
+            raise RuntimeError(f"PDF export failed: {details}")
+        print(f"Wrote {pdf_path}")
         script_path.unlink(missing_ok=True)
     finally:
         proc.terminate()
@@ -1507,6 +1531,7 @@ print("PDF_OK")
         except Exception:
             proc.kill()
         disposable.unlink(missing_ok=True)
+        shutil.rmtree(profile_dir, ignore_errors=True)
 
 
 if __name__ == "__main__":
