@@ -27,10 +27,16 @@ const REPORT_FIELDS = [
   { key: "last_name", label: "Last Name" },
   { key: "birthdate", label: "Birthdate" },
   { key: "email", label: "Email" },
+  { key: "phone_home", label: "Phone Number (home)" },
   { key: "phone_mobile", label: "Phone Number (mobile)" },
+  { key: "primary_contact_name", label: "Primary Contact Name" },
+  { key: "primary_contact_email", label: "Primary Contact Email" },
   { key: "gender", label: "Gender" },
   { key: "grade", label: "Grade" },
   { key: "first_timers", label: "First Timers" },
+  { key: "completed_thrive", label: "Completed Thrive" },
+  { key: "baptized", label: "Baptized?" },
+  { key: "last_served", label: "Last served" },
 ] as const;
 const DEFAULT_PULL_FIELDS = REPORT_FIELDS.map((field) => field.key);
 type ReportFieldKey = typeof REPORT_FIELDS[number]["key"];
@@ -188,6 +194,55 @@ function firstValue(attributes: Record<string, unknown>, ...names: string[]): st
   return "";
 }
 
+function reportText(value: unknown): string {
+  if (typeof value === "boolean") return value ? "Yes" : "No";
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  if (Array.isArray(value)) return value.map(reportText).filter(Boolean).join(", ");
+  return text(value);
+}
+
+function firstReportValue(attributes: Record<string, unknown>, ...names: string[]): string {
+  for (const name of names) {
+    const value = reportText(attributes[name]);
+    if (value) return value;
+  }
+  return "";
+}
+
+function nestedValue(attributes: Record<string, unknown>, ...names: string[]): string {
+  const direct = firstReportValue(attributes, ...names);
+  if (direct) return direct;
+  const normalizedNames = names.map((name) => name.toLowerCase().replace(/[^a-z0-9]/g, ""));
+  const topLevelMatch = Object.entries(attributes).find(([key]) =>
+    normalizedNames.includes(key.toLowerCase().replace(/[^a-z0-9]/g, "")),
+  );
+  if (topLevelMatch && reportText(topLevelMatch[1])) return reportText(topLevelMatch[1]);
+  for (const containerName of ["custom_fields", "customFields", "field_data", "fieldData"]) {
+    const container = attributes[containerName];
+    if (!container || typeof container !== "object" || Array.isArray(container)) continue;
+    const values = container as Record<string, unknown>;
+    for (const name of names) {
+      const wanted = name.toLowerCase().replace(/[^a-z0-9]/g, "");
+      const match = Object.entries(values).find(([key, value]) =>
+        key.toLowerCase().replace(/[^a-z0-9]/g, "") === wanted
+        || (value && typeof value === "object" && !Array.isArray(value)
+          && text((value as Record<string, unknown>).name).toLowerCase().replace(/[^a-z0-9]/g, "") === wanted),
+      );
+      if (match) {
+        const value = match[1];
+        if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+          const record = value as Record<string, unknown>;
+          const result = firstReportValue(record, "value", "display_value", "displayValue", "answer");
+          if (result) return result;
+        } else if (reportText(value)) {
+          return reportText(value);
+        }
+      }
+    }
+  }
+  return "";
+}
+
 async function fetchPeopleDetails(
   ids: string[],
   accessToken: string,
@@ -205,9 +260,43 @@ async function fetchPeopleDetails(
         const attributes = { ...(page.data?.attributes ?? {}) } as Record<string, unknown>;
         const included = Array.isArray(page.included) ? page.included as JsonApiResource[] : [];
         const emails = included.filter((item) => item.type === "Email").map((item) => text(item.attributes?.address)).filter(Boolean);
-        const phones = included.filter((item) => item.type === "PhoneNumber").map((item) => text(item.attributes?.number)).filter(Boolean);
+        const phones = included
+          .filter((item) => item.type === "PhoneNumber")
+          .map((item) => ({
+            number: text(item.attributes?.number),
+            location: text(item.attributes?.location).toLowerCase(),
+          }))
+          .filter((item) => item.number);
         if (emails[0]) attributes.email = emails[0];
-        if (phones[0]) attributes.phone_number = phones[0];
+        const homePhone = phones.find((phone) => phone.location.includes("home"))?.number;
+        const mobilePhone = phones.find((phone) => phone.location.includes("mobile") || phone.location.includes("cell"))?.number;
+        if (homePhone) attributes.phone_number_home = homePhone;
+        if (mobilePhone) attributes.phone_number_mobile = mobilePhone;
+        if (phones[0]) attributes.phone_number = phones[0].number;
+        try {
+          const fieldPage = await planningCenterRequest(
+            `${PEOPLE_BASE}/people/${encodeURIComponent(id)}/field_data?include=field_definition&per_page=100`,
+            accessToken,
+          );
+          const definitions = new Map<string, string>(
+            (Array.isArray(fieldPage.included) ? fieldPage.included as JsonApiResource[] : [])
+              .map((definition) => [
+                definition.id,
+                firstValue(definition.attributes ?? {}, "name", "label"),
+              ]),
+          );
+          for (const fieldData of Array.isArray(fieldPage.data) ? fieldPage.data as JsonApiResource[] : []) {
+            const fieldAttributes = fieldData.attributes ?? {};
+            const definitionId = relationshipId(fieldData, "field_definition");
+            const fieldName = firstValue(fieldAttributes, "name", "field_name", "fieldName", "label")
+              || definitions.get(definitionId)
+              || "";
+            const fieldValue = firstReportValue(fieldAttributes, "value", "display_value", "displayValue", "answer");
+            if (fieldName && fieldValue) attributes[fieldName] = fieldValue;
+          }
+        } catch {
+          // Standard person details remain usable when custom field data is unavailable.
+        }
         result.set(id, attributes);
       } catch {
         result.set(id, {});
@@ -425,10 +514,16 @@ router.post("/prepare", requireManagerOrAdmin, async (req, res) => {
         "Last Name": lastName,
         "Birthdate": birthdateFrom(person),
         "Email": firstValue(person, "email", "primary_email"),
-        "Phone Number (mobile)": firstValue(person, "phone_number", "primary_phone_number", "mobile_phone_number"),
+        "Phone Number (home)": firstValue(person, "phone_number_home", "home_phone_number", "phone_home"),
+        "Phone Number (mobile)": firstValue(person, "phone_number_mobile", "mobile_phone_number", "primary_phone_number", "phone_number"),
+        "Primary Contact Name": nestedValue(person, "primary_contact_name", "primary contact name"),
+        "Primary Contact Email": nestedValue(person, "primary_contact_email", "primary contact email"),
         "Gender": firstValue(person, "gender"),
         "Grade": normalizeGrade(person.grade),
         "First Timers": "",
+        "Completed Thrive": nestedValue(person, "completed_thrive", "completed thrive"),
+        "Baptized?": nestedValue(person, "baptized", "baptized?"),
+        "Last served": nestedValue(person, "last_served", "last served"),
       };
       const firstTimer = firstTimeIds.has(checkIn.id) || attrs.first_time === true || attrs.first_time_in_event === true;
       if (firstTimer) current["First Timers"] = "First-timer";

@@ -72,8 +72,10 @@ FIRST_TIMER_VALUE = "First-timer"
 # CSV header that ISN'T one of these is auto-detected as a week/date column.
 FIXED_COLUMNS = [
     "Planning Center ID", "First Name", "Last Name", "Birthdate", "Email",
-    "Phone Number (mobile)",
-    "Gender", "Grade", "First Timers", "Attendance Rate",
+    "Phone Number (home)", "Phone Number (mobile)",
+    "Primary Contact Name", "Primary Contact Email",
+    "Gender", "Grade", "First Timers",
+    "Completed Thrive", "Baptized?", "Last served", "Attendance Rate",
 ]
 
 # Minimum difflib similarity ratio to flag two non-identical names as a
@@ -271,10 +273,16 @@ def merge_duplicates(rows, week_cols, flags):
             "Last Name": norm(first["Last Name"]),
             "Birthdate": norm(first.get("Birthdate")),
             "Email": norm(best["Email"]),
+            "Phone Number (home)": norm(best.get("Phone Number (home)")),
             "Phone Number (mobile)": norm(best["Phone Number (mobile)"]),
+            "Primary Contact Name": norm(best.get("Primary Contact Name")),
+            "Primary Contact Email": norm(best.get("Primary Contact Email")),
             "Gender": gender_final,
             "Grade": grade_final,
             "First Timers": FIRST_TIMER_VALUE if first_timer else "",
+            "Completed Thrive": norm(best.get("Completed Thrive")),
+            "Baptized?": norm(best.get("Baptized?")),
+            "Last served": norm(best.get("Last served")),
             "_weekly": weekly,
             "_orig_rows": [r["_rownum"] for r in grp],
         })
@@ -380,8 +388,10 @@ def compute_attendance_rate(weekly, week_cols):
 def write_output(records, week_cols, out_path):
     fieldnames = [
         "Planning Center ID", "First Name", "Last Name", "Birthdate", "Email",
-        "Phone Number (mobile)",
+        "Phone Number (home)", "Phone Number (mobile)",
+        "Primary Contact Name", "Primary Contact Email",
         "Gender", "Grade", "First Timers",
+        "Completed Thrive", "Baptized?", "Last served",
     ] + week_cols + ["Attendance Rate"]
 
     with open(out_path, "w", newline="", encoding="utf-8") as f:

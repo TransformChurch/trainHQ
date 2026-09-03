@@ -96,7 +96,11 @@ FIXED_LEAD_COLUMNS = [
     "Gender", "Grade", "First Timers",
 ]
 TRAILING_LABELS = ["Attendance Rate", "ID", "Dupe Check"]
-CSV_ONLY_COLUMNS = ["Planning Center ID", "Birthdate"]
+CSV_ONLY_COLUMNS = [
+    "Planning Center ID", "Birthdate",
+    "Primary Contact Name", "Primary Contact Email",
+    "Completed Thrive", "Baptized?", "Last served",
+]
 PLACEHOLDER_MARKER = "Unknown"
 
 DATE_FORMATS = ["%d-%b-%y", "%d-%b-%Y", "%m/%d/%Y", "%m/%d/%y", "%Y-%m-%d", "%B %d, %Y"]

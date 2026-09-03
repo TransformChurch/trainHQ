@@ -12,7 +12,7 @@ const BASE = import.meta.env.VITE_API_URL?.replace(/\/$/, "") ?? import.meta.env
 const XLSX_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
 type EventOption = { id: string; name: string; frequency: string };
-type ReportFieldKey = "planning_center_id" | "first_name" | "last_name" | "birthdate" | "email" | "phone_mobile" | "gender" | "grade" | "first_timers";
+type ReportFieldKey = "planning_center_id" | "first_name" | "last_name" | "birthdate" | "email" | "phone_home" | "phone_mobile" | "primary_contact_name" | "primary_contact_email" | "gender" | "grade" | "first_timers" | "completed_thrive" | "baptized" | "last_served";
 type ReportTemplate = { id: number; name: string; originalFileName: string; createdAt: string; pullFields: ReportFieldKey[] };
 type PreparedRun = {
   runId: string;
@@ -33,10 +33,16 @@ const FIELD_OPTIONS: { key: ReportFieldKey; label: string }[] = [
   { key: "last_name", label: "Last Name" },
   { key: "birthdate", label: "Birthdate" },
   { key: "email", label: "Email" },
+  { key: "phone_home", label: "Phone Number (home)" },
   { key: "phone_mobile", label: "Phone Number (mobile)" },
+  { key: "primary_contact_name", label: "Primary Contact Name" },
+  { key: "primary_contact_email", label: "Primary Contact Email" },
   { key: "gender", label: "Gender" },
   { key: "grade", label: "Grade" },
   { key: "first_timers", label: "First Timers" },
+  { key: "completed_thrive", label: "Completed Thrive" },
+  { key: "baptized", label: "Baptized?" },
+  { key: "last_served", label: "Last served" },
 ];
 
 async function api(path: string, options?: RequestInit): Promise<Response> {
