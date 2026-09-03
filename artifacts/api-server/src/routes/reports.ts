@@ -39,7 +39,9 @@ const REPORT_FIELDS = [
   { key: "last_served", label: "Last served" },
 ] as const;
 const DEFAULT_PULL_FIELDS = REPORT_FIELDS.map((field) => field.key);
-type ReportFieldKey = typeof REPORT_FIELDS[number]["key"];
+type StandardFieldKey = typeof REPORT_FIELDS[number]["key"];
+type ReportFieldKey = StandardFieldKey | `custom:${string}`;
+type ReportFieldDefinition = { key: ReportFieldKey; label: string };
 
 type JsonApiResource = {
   id: string;
@@ -72,15 +74,32 @@ function normalizePullFields(raw: unknown): ReportFieldKey[] {
   if (typeof raw === "string") {
     try { values = JSON.parse(raw); } catch { values = []; }
   }
-  const valid = new Set<ReportFieldKey>(REPORT_FIELDS.map((field) => field.key));
+  const valid = new Set<string>(REPORT_FIELDS.map((field) => field.key));
   const selected = Array.isArray(values)
-    ? values.filter((value): value is ReportFieldKey => typeof value === "string" && valid.has(value as ReportFieldKey))
+    ? values.filter((value): value is ReportFieldKey =>
+      typeof value === "string" && (valid.has(value) || /^custom:[A-Za-z0-9_-]+$/.test(value)),
+    )
     : [];
   return ["planning_center_id", ...selected.filter((field) => field !== "planning_center_id")];
 }
 
-function fieldLabel(key: ReportFieldKey): string {
+function isCustomFieldKey(key: ReportFieldKey): key is `custom:${string}` {
+  return key.startsWith("custom:");
+}
+
+function fieldLabel(key: ReportFieldKey, customLabels = new Map<string, string>()): string {
+  if (isCustomFieldKey(key)) return customLabels.get(key) || `Planning Center field ${key.slice("custom:".length)}`;
   return REPORT_FIELDS.find((field) => field.key === key)!.label;
+}
+
+async function fetchReportFieldDefinitions(accessToken: string): Promise<ReportFieldDefinition[]> {
+  const collection = await fetchCollection(`${PEOPLE_BASE}/field_definitions?per_page=100`, accessToken);
+  return collection.data
+    .filter((field) => !field.attributes?.deleted_at)
+    .map((field) => ({
+      key: `custom:${field.id}` as ReportFieldKey,
+      label: firstValue(field.attributes ?? {}, "name", "label") || `Planning Center field ${field.id}`,
+    }));
 }
 
 function parseCsv(input: string): string[][] {
@@ -103,11 +122,11 @@ function parseCsv(input: string): string[][] {
   return rows.filter((candidate) => candidate.some((cell) => cell.length > 0));
 }
 
-function selectCleanedColumns(cleaned: string, selectedFields: ReportFieldKey[]): string {
+function selectCleanedColumns(cleaned: string, selectedFields: ReportFieldKey[], customLabels: Map<string, string>): string {
   const rows = parseCsv(cleaned);
   if (!rows.length) throw new Error("The cleanup script returned no rows.");
   const inputHeaders = rows[0];
-  const selectedHeaders = selectedFields.map(fieldLabel);
+  const selectedHeaders = selectedFields.map((field) => fieldLabel(field, customLabels));
   const indexes = selectedHeaders.map((header) => inputHeaders.indexOf(header));
   const weekIndexes = inputHeaders
     .map((header, index) => ({ header, index }))
@@ -292,7 +311,10 @@ async function fetchPeopleDetails(
               || definitions.get(definitionId)
               || "";
             const fieldValue = firstReportValue(fieldAttributes, "value", "display_value", "displayValue", "answer");
-            if (fieldName && fieldValue) attributes[fieldName] = fieldValue;
+            if (fieldValue) {
+              if (definitionId) attributes[`custom:${definitionId}`] = fieldValue;
+              if (fieldName) attributes[fieldName] = fieldValue;
+            }
           }
         } catch {
           // Standard person details remain usable when custom field data is unavailable.
@@ -365,6 +387,19 @@ router.get("/events", requireManagerOrAdmin, async (req, res) => {
     })));
   } catch (error) {
     sendError(req, res, error, "Failed to load Planning Center events");
+  }
+});
+
+router.get("/fields", requireAdmin, async (req, res) => {
+  try {
+    const accessToken = await getValidPlanningCenterAccessToken(res.locals.dbUser.id);
+    const customFields = await fetchReportFieldDefinitions(accessToken);
+    res.json({
+      standardFields: REPORT_FIELDS,
+      planningCenterFields: customFields,
+    });
+  } catch (error) {
+    sendError(req, res, error, "Failed to load Planning Center fields");
   }
 });
 
@@ -471,6 +506,9 @@ router.post("/prepare", requireManagerOrAdmin, async (req, res) => {
     }
     const pullFields = normalizePullFields(template.pullFields);
     const accessToken = await getValidPlanningCenterAccessToken(res.locals.dbUser.id);
+    const customFieldDefinitions = await fetchReportFieldDefinitions(accessToken);
+    const customLabels = new Map(customFieldDefinitions.map((field) => [field.key, field.label]));
+    const selectedCustomFields = pullFields.filter(isCustomFieldKey);
     const eventPage = await planningCenterRequest(`${CHECK_INS_BASE}/events/${encodeURIComponent(eventId)}`, accessToken);
     const eventName = firstValue(eventPage.data?.attributes ?? {}, "name") || `Event ${eventId}`;
     const [collection, firstTimeCollection] = await Promise.all([
@@ -525,6 +563,9 @@ router.post("/prepare", requireManagerOrAdmin, async (req, res) => {
         "Baptized?": nestedValue(person, "baptized", "baptized?"),
         "Last served": nestedValue(person, "last_served", "last served"),
       };
+      for (const customField of selectedCustomFields) {
+        current[fieldLabel(customField, customLabels)] = firstReportValue(person, customField);
+      }
       const firstTimer = firstTimeIds.has(checkIn.id) || attrs.first_time === true || attrs.first_time_in_event === true;
       if (firstTimer) current["First Timers"] = "First-timer";
       current[dateOnly(attrs.created_at)] = true;
@@ -532,7 +573,9 @@ router.post("/prepare", requireManagerOrAdmin, async (req, res) => {
     }
 
     const headers = [
-      ...REPORT_FIELDS.map((field) => field.label), ...serviceDates,
+      ...REPORT_FIELDS.map((field) => field.label),
+      ...selectedCustomFields.map((field) => fieldLabel(field, customLabels)),
+      ...serviceDates,
     ];
     const rawCsv = [
       headers.map(csv).join(","),
@@ -547,7 +590,7 @@ router.post("/prepare", requireManagerOrAdmin, async (req, res) => {
     const flagsPath = join(workDir, "flags.txt");
     await writeFile(rawPath, rawCsv, "utf8");
     const output = await runPython([pythonScript("cleanup"), rawPath, cleanedPath, "--flags-out", flagsPath]);
-    const cleaned = selectCleanedColumns(await readFile(cleanedPath, "utf8"), pullFields);
+    const cleaned = selectCleanedColumns(await readFile(cleanedPath, "utf8"), pullFields, customLabels);
     const flags = await readFile(flagsPath, "utf8").catch(() => "");
     const cleanedObjectPath = await storage.saveObjectEntityBuffer(Buffer.from(cleaned, "utf8"), "text/csv", "reports");
     const runId = randomUUID();
@@ -571,7 +614,7 @@ router.post("/prepare", requireManagerOrAdmin, async (req, res) => {
       peopleCount: records.size,
       serviceDates,
       pullFields,
-      pullFieldLabels: pullFields.map(fieldLabel),
+      pullFieldLabels: pullFields.map((field) => fieldLabel(field, customLabels)),
       reviewCount,
       flags,
       expiresAt: expiresAt.toISOString(),

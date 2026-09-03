@@ -219,15 +219,16 @@ def load_rows(path):
                 continue  # skip fully blank rows
             r["_rownum"] = i + 2  # 1-indexed + header row
             rows.append(r)
-    week_cols = [c for c in fieldnames if c not in FIXED_COLUMNS]
-    return rows, week_cols
+    week_cols = [c for c in fieldnames if re.fullmatch(r"\d{4}-\d{2}-\d{2}", c or "")]
+    extra_cols = [c for c in fieldnames if c not in FIXED_COLUMNS and c not in week_cols]
+    return rows, week_cols, extra_cols
 
 
 # ============================================================================
 # Merge duplicates
 # ============================================================================
 
-def merge_duplicates(rows, week_cols, flags):
+def merge_duplicates(rows, week_cols, extra_cols, flags):
     groups = OrderedDict()
     for r in rows:
         k = norm(r.get("Planning Center ID")) or name_key(r["First Name"], r["Last Name"])
@@ -283,6 +284,7 @@ def merge_duplicates(rows, week_cols, flags):
             "Completed Thrive": norm(best.get("Completed Thrive")),
             "Baptized?": norm(best.get("Baptized?")),
             "Last served": norm(best.get("Last served")),
+            **{column: norm(best.get(column)) for column in extra_cols},
             "_weekly": weekly,
             "_orig_rows": [r["_rownum"] for r in grp],
         })
@@ -385,14 +387,14 @@ def compute_attendance_rate(weekly, week_cols):
     return round(attended / len(week_cols), 4)
 
 
-def write_output(records, week_cols, out_path):
+def write_output(records, week_cols, extra_cols, out_path):
     fieldnames = [
         "Planning Center ID", "First Name", "Last Name", "Birthdate", "Email",
         "Phone Number (home)", "Phone Number (mobile)",
         "Primary Contact Name", "Primary Contact Email",
         "Gender", "Grade", "First Timers",
         "Completed Thrive", "Baptized?", "Last served",
-    ] + week_cols + ["Attendance Rate"]
+    ] + extra_cols + week_cols + ["Attendance Rate"]
 
     with open(out_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -418,15 +420,15 @@ def main():
 
     flags = defaultdict(list)
 
-    rows, week_cols = load_rows(args.input_csv)
+    rows, week_cols, extra_cols = load_rows(args.input_csv)
     print(f"Loaded {len(rows)} raw rows.")
     print(f"Detected {len(week_cols)} week/date column(s): {week_cols}")
 
-    records = merge_duplicates(rows, week_cols, flags)
+    records = merge_duplicates(rows, week_cols, extra_cols, flags)
     apply_anomaly_checks(records, flags)
     find_near_matches(records, flags)
 
-    write_output(records, week_cols, args.output_csv)
+    write_output(records, week_cols, extra_cols, args.output_csv)
 
     # ---- report ----
     lines = []

@@ -12,7 +12,8 @@ const BASE = import.meta.env.VITE_API_URL?.replace(/\/$/, "") ?? import.meta.env
 const XLSX_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
 type EventOption = { id: string; name: string; frequency: string };
-type ReportFieldKey = "planning_center_id" | "first_name" | "last_name" | "birthdate" | "email" | "phone_home" | "phone_mobile" | "primary_contact_name" | "primary_contact_email" | "gender" | "grade" | "first_timers" | "completed_thrive" | "baptized" | "last_served";
+type ReportFieldKey = string;
+type AvailableField = { key: ReportFieldKey; label: string };
 type ReportTemplate = { id: number; name: string; originalFileName: string; createdAt: string; pullFields: ReportFieldKey[] };
 type PreparedRun = {
   runId: string;
@@ -27,7 +28,7 @@ type PreparedRun = {
   expiresAt: string;
 };
 
-const FIELD_OPTIONS: { key: ReportFieldKey; label: string }[] = [
+const FIELD_OPTIONS: AvailableField[] = [
   { key: "planning_center_id", label: "Planning Center ID" },
   { key: "first_name", label: "First Name" },
   { key: "last_name", label: "Last Name" },
@@ -100,6 +101,19 @@ export default function Reporting() {
   const [editingTemplateId, setEditingTemplateId] = useState<number | null>(null);
   const [draftFields, setDraftFields] = useState<ReportFieldKey[]>(["planning_center_id"]);
   const [savingSettings, setSavingSettings] = useState(false);
+  const [planningCenterFields, setPlanningCenterFields] = useState<AvailableField[]>([]);
+  const [fieldsLoading, setFieldsLoading] = useState(false);
+  const [fieldsError, setFieldsError] = useState("");
+  const [fieldToAdd, setFieldToAdd] = useState("");
+
+  const fieldOptions = useMemo(
+    () => [...FIELD_OPTIONS, ...planningCenterFields],
+    [planningCenterFields],
+  );
+  const fieldByKey = useMemo(
+    () => new Map(fieldOptions.map((field) => [field.key, field])),
+    [fieldOptions],
+  );
 
   const reconnectUrl = useMemo(() => {
     const returnTo = `${window.location.origin}${import.meta.env.BASE_URL.replace(/\/$/, "")}/reporting`;
@@ -132,12 +146,30 @@ export default function Reporting() {
     }
   };
 
+  const loadPlanningCenterFields = async () => {
+    setFieldsLoading(true);
+    setFieldsError("");
+    try {
+      const response = await api("/api/reports/fields");
+      const result = await response.json() as { planningCenterFields: AvailableField[] };
+      setPlanningCenterFields(result.planningCenterFields);
+    } catch (error) {
+      setFieldsError(error instanceof Error ? error.message : "Could not load Planning Center fields.");
+    } finally {
+      setFieldsLoading(false);
+    }
+  };
+
   useEffect(() => {
     loadEvents();
     loadTemplates().catch((error) => {
       toast({ title: "Could not load report templates", description: error.message, variant: "destructive" });
     });
   }, []);
+
+  useEffect(() => {
+    if (isAdmin) loadPlanningCenterFields();
+  }, [isAdmin]);
 
   const { uploadFile, isUploading } = useUpload({
     basePath: `${BASE}/api/storage`,
@@ -262,6 +294,12 @@ export default function Reporting() {
       : current.filter((field) => field !== key));
   };
 
+  const addPlanningCenterField = () => {
+    if (!fieldToAdd) return;
+    setDraftFields((current) => current.includes(fieldToAdd) ? current : [...current, fieldToAdd]);
+    setFieldToAdd("");
+  };
+
   const moveField = (index: number, direction: -1 | 1) => {
     const target = index + direction;
     if (index <= 0 || target <= 0 || target >= draftFields.length) return;
@@ -367,7 +405,7 @@ export default function Reporting() {
             <div className="rounded-lg border bg-muted/30 p-3 text-sm">
               <span className="font-medium">CSV column order: </span>
               {templates.find((template) => String(template.id) === selectedTemplate)?.pullFields
-                .map((key) => FIELD_OPTIONS.find((field) => field.key === key)?.label)
+                .map((key) => fieldByKey.get(key)?.label ?? key)
                 .filter(Boolean)
                 .join(" → ")}
             </div>
@@ -467,8 +505,34 @@ export default function Reporting() {
                         </p>
                       </div>
                       <div className="space-y-2">
+                        <Label htmlFor={`add-field-${template.id}`}>Add field</Label>
+                        <div className="flex flex-col gap-2 sm:flex-row">
+                          <select
+                            id={`add-field-${template.id}`}
+                            className="flex h-10 min-w-0 flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                            value={fieldToAdd}
+                            disabled={fieldsLoading}
+                            onChange={(event) => setFieldToAdd(event.target.value)}
+                          >
+                            <option value="">{fieldsLoading ? "Loading Planning Center fields…" : "Select a Planning Center field"}</option>
+                            {planningCenterFields
+                              .filter((field) => !draftFields.includes(field.key))
+                              .map((field) => <option key={field.key} value={field.key}>{field.label}</option>)}
+                          </select>
+                          <Button type="button" variant="outline" onClick={addPlanningCenterField} disabled={!fieldToAdd || fieldsLoading}>
+                            <Plus className="mr-2 h-4 w-4" /> Add field
+                          </Button>
+                        </div>
+                        {fieldsError && (
+                          <div className="flex items-center gap-2 text-sm text-destructive">
+                            <span>{fieldsError}</span>
+                            <Button type="button" size="sm" variant="outline" onClick={loadPlanningCenterFields}>Try again</Button>
+                          </div>
+                        )}
+                      </div>
+                      <div className="space-y-2">
                         {[
-                          ...draftFields.map((key) => FIELD_OPTIONS.find((field) => field.key === key)!),
+                          ...draftFields.map((key) => fieldByKey.get(key) ?? { key, label: `Unavailable Planning Center field (${key})` }),
                           ...FIELD_OPTIONS.filter((field) => !draftFields.includes(field.key)),
                         ].map((field) => {
                           const checked = draftFields.includes(field.key);
