@@ -28,8 +28,8 @@ service date that month, in date order. Everything that isn't a
 recognized fixed column is treated as a week/attendance column, so this
 adapts automatically to a 4-week vs. 5-week month -- no code change needed.
 
-    First Name, Last Name, Email, Phone Number (home),
-    Phone Number (mobile), Gender, Grade, First Timers,
+    First Name, Last Name, Birthdate, Email, Phone Number (mobile),
+    Gender, Grade, First Timers,
     <date col 1>, <date col 2>, ..., [Attendance Rate]
 
 CONFIG -- check these before running each month
@@ -71,8 +71,8 @@ FIRST_TIMER_VALUE = "First-timer"
 # Fixed (non-week) columns expected in the raw export. Everything in the
 # CSV header that ISN'T one of these is auto-detected as a week/date column.
 FIXED_COLUMNS = [
-    "First Name", "Last Name", "Age", "Email",
-    "Phone Number (home)", "Phone Number (mobile)",
+    "First Name", "Last Name", "Birthdate", "Email",
+    "Phone Number (mobile)",
     "Gender", "Grade", "First Timers", "Attendance Rate",
 ]
 
@@ -148,7 +148,7 @@ def phone_key(phone):
 
 
 def contact_completeness(row):
-    return sum(1 for f in ("Email", "Phone Number (home)", "Phone Number (mobile)")
+    return sum(1 for f in ("Email", "Phone Number (mobile)")
                if norm(row.get(f)))
 
 
@@ -258,9 +258,8 @@ def merge_duplicates(rows, week_cols, flags):
 
         best = max(grp, key=contact_completeness)
         emails = {norm(r["Email"]).lower() for r in grp if norm(r["Email"])}
-        homes = {digits_only(r["Phone Number (home)"]) for r in grp if norm(r["Phone Number (home)"])}
         mobiles = {digits_only(r["Phone Number (mobile)"]) for r in grp if norm(r["Phone Number (mobile)"])}
-        if len(grp) > 1 and (len(emails) > 1 or len(homes) > 1 or len(mobiles) > 1):
+        if len(grp) > 1 and (len(emails) > 1 or len(mobiles) > 1):
             flags["contact_conflict"].append(f"{who} (rows {[r['_rownum'] for r in grp]}): kept most-complete row's contact info")
 
         if len(grp) > 1:
@@ -269,9 +268,8 @@ def merge_duplicates(rows, week_cols, flags):
         merged.append({
             "First Name": norm(first["First Name"]),
             "Last Name": norm(first["Last Name"]),
-            "Age": norm(first.get("Age")),
+            "Birthdate": norm(first.get("Birthdate")),
             "Email": norm(best["Email"]),
-            "Phone Number (home)": norm(best["Phone Number (home)"]),
             "Phone Number (mobile)": norm(best["Phone Number (mobile)"]),
             "Gender": gender_final,
             "Grade": grade_final,
@@ -343,8 +341,8 @@ def find_near_matches(records, flags):
             # Worth an occasional manual skim of rows sharing an
             # email/phone if you want that last bit of coverage.
             shares_email = norm(a["Email"]).lower() and norm(a["Email"]).lower() == norm(b["Email"]).lower()
-            a_phones = {phone_key(a["Phone Number (home)"]), phone_key(a["Phone Number (mobile)"])} - {None}
-            b_phones = {phone_key(b["Phone Number (home)"]), phone_key(b["Phone Number (mobile)"])} - {None}
+            a_phones = {phone_key(a["Phone Number (mobile)"])} - {None}
+            b_phones = {phone_key(b["Phone Number (mobile)"])} - {None}
             shares_phone = bool(a_phones & b_phones)
 
             def overlaps(x, y, min_len=3):
@@ -380,8 +378,8 @@ def compute_attendance_rate(weekly, week_cols):
 
 def write_output(records, week_cols, out_path):
     fieldnames = [
-        "First Name", "Last Name", "Age", "Email",
-        "Phone Number (home)", "Phone Number (mobile)",
+        "First Name", "Last Name", "Birthdate", "Email",
+        "Phone Number (mobile)",
         "Gender", "Grade", "First Timers",
     ] + week_cols + ["Attendance Rate"]
 

@@ -94,21 +94,9 @@ function relationshipId(resource: JsonApiResource, name: string): string {
   return text(resource.relationships?.[name]?.data?.id);
 }
 
-function ageFrom(attributes: Record<string, unknown>): string {
-  const explicit = attributes.age;
-  if (typeof explicit === "number" && Number.isFinite(explicit)) return String(Math.floor(explicit));
-  if (typeof explicit === "string" && explicit.trim()) return explicit.trim();
-  const birthdate = dateOnly(attributes.birthdate);
-  if (!birthdate) return "";
-  const born = new Date(`${birthdate}T00:00:00Z`);
-  if (Number.isNaN(born.getTime())) return "";
-  const today = new Date();
-  let age = today.getUTCFullYear() - born.getUTCFullYear();
-  if (
-    today.getUTCMonth() < born.getUTCMonth() ||
-    (today.getUTCMonth() === born.getUTCMonth() && today.getUTCDate() < born.getUTCDate())
-  ) age -= 1;
-  return age >= 0 ? String(age) : "";
+function birthdateFrom(attributes: Record<string, unknown>): string {
+  const raw = firstValue(attributes, "birthdate", "birth_date");
+  return dateOnly(raw) || raw;
 }
 
 function normalizeGrade(value: unknown): string {
@@ -325,9 +313,8 @@ router.post("/prepare", requireManagerOrAdmin, async (req, res) => {
       const current = records.get(key) ?? {
         "First Name": firstName,
         "Last Name": lastName,
-        "Age": ageFrom(person),
+        "Birthdate": birthdateFrom(person),
         "Email": firstValue(person, "email", "primary_email"),
-        "Phone Number (home)": "",
         "Phone Number (mobile)": firstValue(person, "phone_number", "primary_phone_number", "mobile_phone_number"),
         "Gender": firstValue(person, "gender"),
         "Grade": normalizeGrade(person.grade),
@@ -340,8 +327,8 @@ router.post("/prepare", requireManagerOrAdmin, async (req, res) => {
     }
 
     const headers = [
-      "First Name", "Last Name", "Age", "Email", "Phone Number (home)",
-      "Phone Number (mobile)", "Gender", "Grade", "First Timers", ...serviceDates,
+      "First Name", "Last Name", "Birthdate", "Email", "Phone Number (mobile)",
+      "Gender", "Grade", "First Timers", ...serviceDates,
     ];
     const rawCsv = [
       headers.map(csv).join(","),

@@ -263,7 +263,7 @@ export default function Reporting() {
         </CardHeader>
         <CardContent className="space-y-4">
           <p className="text-sm text-muted-foreground">
-            Pull attendee names, ages, grades, first-timer status, phones, and emails, then merge duplicates and flag data that needs review.
+            Pull First Name, Last Name, Birthdate, Email, mobile phone, Gender, Grade, and First Timers, then merge duplicates and flag data that needs review.
           </p>
           <Button onClick={prepare} disabled={preparing || !eventId || !!eventsError}>
             {preparing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}

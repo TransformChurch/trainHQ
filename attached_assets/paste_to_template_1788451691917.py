@@ -96,7 +96,7 @@ FIXED_LEAD_COLUMNS = [
     "Gender", "Grade", "First Timers",
 ]
 TRAILING_LABELS = ["Attendance Rate", "ID", "Dupe Check"]
-CSV_ONLY_COLUMNS = ["Age"]
+CSV_ONLY_COLUMNS = ["Birthdate"]
 PLACEHOLDER_MARKER = "Unknown"
 
 DATE_FORMATS = ["%d-%b-%y", "%d-%b-%Y", "%m/%d/%Y", "%m/%d/%y", "%Y-%m-%d", "%B %d, %Y"]
@@ -425,7 +425,7 @@ def build_raw_data_rows(layout, rows, week_cols, week_dates, warnings):
         cells.append(inline_cell(f"A{rn}", r["First Name"]))
         cells.append(inline_cell(f"B{rn}", r["Last Name"]))
         cells.append(inline_cell(f"C{rn}", r["Email"]))
-        cells.append(inline_cell(f"D{rn}", r["Phone Number (home)"]))
+        cells.append(inline_cell(f"D{rn}", r.get("Phone Number (home)", "")))
         cells.append(inline_cell(f"E{rn}", r["Phone Number (mobile)"]))
         cells.append(inline_cell(f"F{rn}", r["Gender"]))
         cells.append(inline_cell(f"G{rn}", r["Grade"]))
