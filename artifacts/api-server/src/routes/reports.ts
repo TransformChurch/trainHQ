@@ -202,14 +202,18 @@ function birthdateFrom(attributes: Record<string, unknown>): string {
 }
 
 function normalizeGrade(value: unknown): string {
-  const raw = text(value);
+  const raw = typeof value === "number" && Number.isFinite(value)
+    ? String(value)
+    : text(value);
   if (!raw) return "";
   const normalized = raw.toLowerCase().replace(/\s+/g, " ");
   if (["k", "kg", "kindergarten"].includes(normalized)) return "Kindergarten";
   if (["pre-k", "prek", "pre k"].includes(normalized)) return "Pre-K";
-  const gradeNumber = normalized.match(/\d{1,2}/)?.[0];
+  const gradeNumber = normalized.match(/-?\d{1,2}/)?.[0];
   if (!gradeNumber) return raw;
   const n = Number(gradeNumber);
+  if (n < 0) return "Pre-K";
+  if (n === 0) return "Kindergarten";
   const suffix = n === 1 ? "st" : n === 2 ? "nd" : n === 3 ? "rd" : "th";
   return `${n}${suffix} Grade`;
 }
