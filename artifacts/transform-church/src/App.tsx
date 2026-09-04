@@ -20,6 +20,9 @@ import AdminSettings from "@/pages/AdminSettings";
 import Profile from "@/pages/Profile";
 import Groups from "@/pages/Groups";
 import Documents from "@/pages/Documents";
+import Wiki from "@/pages/Wiki";
+import WikiArticle from "@/pages/WikiArticle";
+import AdminWiki from "@/pages/AdminWiki";
 import Facilities from "@/pages/Facilities";
 import AdminFacilities from "@/pages/AdminFacilities";
 import Reporting from "@/pages/Reporting";
@@ -259,6 +262,8 @@ function AppRoutes() {
           <Route path="/profile"><ProtectedRoute component={Profile} /></Route>
           <Route path="/groups"><ProtectedRoute component={Groups} /></Route>
           <Route path="/documents"><ProtectedRoute component={Documents} /></Route>
+          <Route path="/wiki"><ProtectedRoute component={Wiki} /></Route>
+          <Route path="/wiki/:slug"><ProtectedRoute component={WikiArticle} /></Route>
           <Route path="/facilities"><ProtectedRoute component={Facilities} /></Route>
           <Route path="/reporting"><ProtectedRoute component={Reporting} managerOrAdmin /></Route>
           <Route path="/admin"><ProtectedRoute component={AdminDashboard} adminOnly /></Route>
@@ -269,6 +274,7 @@ function AppRoutes() {
           <Route path="/admin/growth-tracks"><ProtectedRoute component={AdminGrowthTracks} managerOrAdmin /></Route>
           <Route path="/admin/settings"><ProtectedRoute component={AdminSettings} adminOnly /></Route>
           <Route path="/admin/facilities"><ProtectedRoute component={AdminFacilities} adminOnly /></Route>
+          <Route path="/admin/wiki"><ProtectedRoute component={AdminWiki} adminOnly /></Route>
           <Route component={NotFound} />
         </Switch>
       </UserSyncProvider>

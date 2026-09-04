@@ -7,6 +7,7 @@ export const SITE_COPY_DEFAULTS = {
   "nav.groups": "Groups",
   "nav.myProfile": "My Profile",
   "nav.documents": "Documents",
+  "nav.wiki": "Wiki",
   "nav.requestHub": "Request Hub",
   "nav.usersProgress": "Users & Progress",
   "nav.moduleManager": "Module Manager",

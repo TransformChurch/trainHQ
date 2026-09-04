@@ -8,6 +8,7 @@ import adminDocumentsRouter from "./adminDocuments";
 import contentGrantsRouter from "./contentGrants";
 import { syncPlanningCenterModuleAssignment } from "../lib/planningCenter";
 import adminFacilitiesRouter from "./adminFacilities";
+import adminWikiRouter from "./adminWiki";
 
 const router = Router();
 
@@ -386,5 +387,6 @@ router.get("/audit-log", requireAdmin, async (req, res) => {
 router.use("/documents", adminDocumentsRouter);
 router.use("/content-grants", contentGrantsRouter);
 router.use("/facilities", adminFacilitiesRouter);
+router.use("/wiki", adminWikiRouter);
 
 export default router;
