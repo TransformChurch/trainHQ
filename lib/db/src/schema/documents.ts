@@ -12,6 +12,10 @@ export const documentsTable = pgTable("documents", {
   resourceType: docResourceTypeEnum("resource_type").notNull().default("file"),
   parentId: integer("parent_id").references((): any => documentsTable.id, { onDelete: "cascade" }),
   sortOrder: smallint("sort_order").notNull().default(0),
+  pdfText: text("pdf_text"),
+  pdfTextStatus: text("pdf_text_status").notNull().default("pending"),
+  pdfTextExtractedAt: timestamp("pdf_text_extracted_at"),
+  pdfTextAttempts: integer("pdf_text_attempts").notNull().default(0),
   createdByExternalUserId: text("created_by_external_user_id"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });

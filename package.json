@@ -28,5 +28,8 @@
   "devDependencies": {
     "prettier": "^3.8.3",
     "typescript": "~5.9.3"
+  },
+  "dependencies": {
+    "pdf-parse": "^2.4.5"
   }
 }

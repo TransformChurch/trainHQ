@@ -11,6 +11,7 @@ import {
 import { eq, and, inArray, sql, isNull } from "drizzle-orm";
 import { requireManagerOrAdmin } from "../middlewares/requireAuth";
 import { canEditContent } from "../lib/canEditContent";
+import { queueDocumentPdfIndexing } from "../lib/documentPdfSearch";
 
 const router = Router();
 
@@ -45,7 +46,21 @@ function inferMimeType(title: string): string | null {
 router.get("/", requireManagerOrAdmin, async (req, res) => {
   try {
     const docs = await db
-      .select()
+      .select({
+        id: documentsTable.id,
+        title: documentsTable.title,
+        description: documentsTable.description,
+        driveUrl: documentsTable.driveUrl,
+        mimeType: documentsTable.mimeType,
+        resourceType: documentsTable.resourceType,
+        parentId: documentsTable.parentId,
+        sortOrder: documentsTable.sortOrder,
+        pdfTextStatus: documentsTable.pdfTextStatus,
+        pdfTextExtractedAt: documentsTable.pdfTextExtractedAt,
+        pdfTextAttempts: documentsTable.pdfTextAttempts,
+        createdByExternalUserId: documentsTable.createdByExternalUserId,
+        createdAt: documentsTable.createdAt,
+      })
       .from(documentsTable)
       .orderBy(documentsTable.sortOrder, documentsTable.createdAt);
 
@@ -59,11 +74,13 @@ router.get("/", requireManagerOrAdmin, async (req, res) => {
 
     const countMap = new Map(counts.map(c => [c.documentId, c.count]));
 
-    const serialize = (d: typeof documentsTable.$inferSelect) => ({
-      ...d,
-      createdAt: d.createdAt.toISOString(),
-      accessCount: countMap.get(d.id) ?? 0,
-    });
+    const serialize = (d: (typeof docs)[number]) => {
+      return {
+        ...d,
+        createdAt: d.createdAt.toISOString(),
+        accessCount: countMap.get(d.id) ?? 0,
+      };
+    };
 
     const folders = docs.filter(d => d.resourceType === "folder");
     const fileDocs = docs.filter(d => d.resourceType === "file");
@@ -163,6 +180,7 @@ router.post("/import-folder", requireManagerOrAdmin, async (req, res) => {
     }));
 
     const inserted = await db.insert(documentsTable).values(toInsert).returning();
+    queueDocumentPdfIndexing();
 
     res.status(201).json({ imported: inserted.length, documents: inserted.map(d => ({ ...d, createdAt: d.createdAt.toISOString(), accessCount: 0 })) });
   } catch (err) {
@@ -198,6 +216,7 @@ router.post("/", requireManagerOrAdmin, async (req, res) => {
       parentId: parentId ?? null,
       createdByExternalUserId: auth!.userId!,
     }).returning();
+    queueDocumentPdfIndexing();
     res.status(201).json({ ...inserted[0], createdAt: inserted[0].createdAt.toISOString(), accessCount: 0 });
   } catch {
     res.status(500).json({ error: "Internal server error" });
@@ -238,13 +257,21 @@ router.patch("/:id", requireManagerOrAdmin, async (req, res) => {
     }
     if (parentId !== undefined) updates.parentId = parentId ?? null;
     if (sortOrder !== undefined) updates.sortOrder = sortOrder;
+    if (driveUrl !== undefined || mimeType !== undefined) {
+      updates.pdfText = null;
+      updates.pdfTextStatus = "pending";
+      updates.pdfTextExtractedAt = null;
+      updates.pdfTextAttempts = 0;
+    }
     if (Object.keys(updates).length === 0) {
       res.status(400).json({ error: "No fields to update" });
       return;
     }
     const updated = await db.update(documentsTable).set(updates).where(eq(documentsTable.id, id)).returning();
     if (!updated[0]) { res.status(404).json({ error: "Not found" }); return; }
-    res.json({ ...updated[0], createdAt: updated[0].createdAt.toISOString() });
+    if (driveUrl !== undefined || mimeType !== undefined) queueDocumentPdfIndexing();
+    const { pdfText: _pdfText, ...updatedDocument } = updated[0];
+    res.json({ ...updatedDocument, createdAt: updated[0].createdAt.toISOString() });
   } catch {
     res.status(500).json({ error: "Internal server error" });
   }

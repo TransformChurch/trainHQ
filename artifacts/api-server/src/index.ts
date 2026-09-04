@@ -7,6 +7,8 @@ const rootEnvFile = [resolve(process.cwd(), "../../.env"), resolve(process.cwd()
 if (rootEnvFile) process.loadEnvFile(rootEnvFile);
 
 const { default: app } = await import("./app");
+const { startDocumentPdfIndexer } = await import("./lib/documentPdfSearch");
+startDocumentPdfIndexer();
 const rawPort = process.env.PORT || "3000";
 const port = Number(rawPort);
 

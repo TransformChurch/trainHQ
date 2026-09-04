@@ -1,0 +1,1 @@
+ALTER TABLE "documents" ADD COLUMN "pdf_text_attempts" integer DEFAULT 0 NOT NULL;

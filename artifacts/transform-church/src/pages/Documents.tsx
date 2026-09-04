@@ -1,8 +1,9 @@
 import { useState, useEffect } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { FileText, FolderOpen, ExternalLink, X, Lock, AlertTriangle } from "lucide-react";
+import { FileText, FolderOpen, ExternalLink, X, Lock, AlertTriangle, Search, Loader2 } from "lucide-react";
 import { useSiteCopy } from "@/lib/siteCopy";
+import { Input } from "@/components/ui/input";
 
 const BASE = import.meta.env.VITE_API_URL?.replace(/\/$/, "") ?? import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -16,6 +17,7 @@ type RepoDoc = {
   parentId: number | null;
   createdAt: string;
 };
+type SearchResult = RepoDoc & { context: string };
 
 function fileExtension(doc: Pick<RepoDoc, "title" | "mimeType">): string | null {
   const titleExtension = doc.title.trim().match(/\.([a-z0-9]{1,12})$/i)?.[1];
@@ -127,7 +129,7 @@ function PreviewModal({ doc, onClose }: { doc: RepoDoc; onClose: () => void }) {
   );
 }
 
-function DocumentCard({ doc, onPreview }: { doc: RepoDoc; onPreview: (d: RepoDoc) => void }) {
+function DocumentCard({ doc, onPreview, context }: { doc: RepoDoc; onPreview: (d: RepoDoc) => void; context?: string }) {
   const fileId = doc.driveUrl ? extractFileId(doc.driveUrl) : null;
   const canPreview = isPdf(doc) && !!fileId;
 
@@ -149,6 +151,9 @@ function DocumentCard({ doc, onPreview }: { doc: RepoDoc; onPreview: (d: RepoDoc
             </div>
             {doc.description && (
               <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{doc.description}</p>
+            )}
+            {context && (
+              <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{context}</p>
             )}
           </div>
         </div>
@@ -174,6 +179,10 @@ export default function Documents() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<RepoDoc | null>(null);
+  const [query, setQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState("");
 
   useEffect(() => {
     fetch(`${BASE}/api/documents`, {
@@ -186,6 +195,40 @@ export default function Documents() {
       .catch(() => setError("Failed to load documents"))
       .finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    const normalized = query.trim();
+    if (normalized.length < 2) {
+      setSearchResults([]);
+      setSearching(false);
+      setSearchError("");
+      return;
+    }
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      setSearching(true);
+      setSearchError("");
+      try {
+        const token = sessionStorage.getItem("auth_bearer_token");
+        const response = await fetch(`${BASE}/api/documents/search?q=${encodeURIComponent(normalized)}`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+          signal: controller.signal,
+        });
+        if (!response.ok) throw new Error("Search failed");
+        setSearchResults(await response.json() as SearchResult[]);
+      } catch (searchFailure) {
+        if ((searchFailure as Error).name !== "AbortError") {
+          setSearchError("Could not search documents. Please try again.");
+        }
+      } finally {
+        if (!controller.signal.aborted) setSearching(false);
+      }
+    }, 350);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [query]);
 
   if (loading) {
     return (
@@ -222,7 +265,57 @@ export default function Documents() {
         <p className="text-muted-foreground mt-2">Resources and documents shared with you.</p>
       </div>
 
-      {!hasContent ? (
+      {hasContent && (
+        <div className="relative max-w-2xl">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            type="search"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search inside PDF documents…"
+            className="pl-10 pr-10"
+            aria-label="Search inside PDF documents"
+          />
+          {searching && <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-muted-foreground" />}
+        </div>
+      )}
+
+      {query.trim().length >= 2 ? (
+        <section className="space-y-4">
+          <div className="flex items-center gap-3">
+            <h2 className="text-lg font-semibold">Search results</h2>
+            {!searching && !searchError && (
+              <span className="text-sm text-muted-foreground">
+                {searchResults.length} {searchResults.length === 1 ? "result" : "results"}
+              </span>
+            )}
+            <div className="h-px flex-1 bg-border" />
+          </div>
+          {searchError ? (
+            <Card className="border-dashed">
+              <CardContent className="p-8 text-center text-sm text-muted-foreground">{searchError}</CardContent>
+            </Card>
+          ) : searching && !searchResults.length ? (
+            <Card className="border-dashed">
+              <CardContent className="flex items-center justify-center gap-2 p-8 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" /> Searching PDF content…
+              </CardContent>
+            </Card>
+          ) : !searchResults.length ? (
+            <Card className="border-dashed">
+              <CardContent className="p-8 text-center text-sm text-muted-foreground">
+                No visible PDFs matched “{query.trim()}”.
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              {searchResults.map((result) => (
+                <DocumentCard key={result.id} doc={result} context={result.context} onPreview={setPreview} />
+              ))}
+            </div>
+          )}
+        </section>
+      ) : !hasContent ? (
         <Card className="border-dashed">
           <CardContent className="p-12 text-center">
             <Lock className="w-10 h-10 text-muted-foreground/40 mx-auto mb-3" />
