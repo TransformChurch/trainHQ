@@ -1,5 +1,14 @@
 import { Router } from "express";
-import { db, wikiArticlesTable, wikiCategoriesTable } from "@workspace/db";
+import {
+  db,
+  groupMembersTable,
+  groupsTable,
+  usersTable,
+  wikiAccessTable,
+  wikiArticlesTable,
+  wikiCategoriesTable,
+  wikiGroupAccessTable,
+} from "@workspace/db";
 import { asc, eq } from "drizzle-orm";
 import { getAuth } from "../middlewares/auth";
 import { requireAdmin } from "../middlewares/requireAuth";
@@ -54,6 +63,99 @@ async function listCategories() {
 router.get("/", requireAdmin, async (_req, res) => {
   try {
     res.json(await listCategories());
+  } catch {
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.get("/access", requireAdmin, async (_req, res) => {
+  try {
+    const grants = await db.select().from(wikiAccessTable).orderBy(asc(wikiAccessTable.grantedAt));
+    res.json(grants.map((grant) => ({ ...grant, grantedAt: grant.grantedAt.toISOString() })));
+  } catch {
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.get("/access/groups", requireAdmin, async (_req, res) => {
+  try {
+    const grants = await db.select({
+      id: wikiGroupAccessTable.id,
+      groupId: wikiGroupAccessTable.groupId,
+      groupName: groupsTable.name,
+      memberCount: db.$count(groupMembersTable, eq(groupMembersTable.groupId, groupsTable.id)),
+      grantedByExternalUserId: wikiGroupAccessTable.grantedByExternalUserId,
+      grantedAt: wikiGroupAccessTable.grantedAt,
+    }).from(wikiGroupAccessTable)
+      .innerJoin(groupsTable, eq(wikiGroupAccessTable.groupId, groupsTable.id))
+      .orderBy(asc(groupsTable.name));
+    res.json(grants.map((grant) => ({ ...grant, grantedAt: grant.grantedAt.toISOString() })));
+  } catch {
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.put("/access/users/:userId", requireAdmin, async (req, res) => {
+  try {
+    const userId = String(req.params.userId);
+    const enabled = req.body?.enabled;
+    if (typeof enabled !== "boolean") {
+      res.status(400).json({ error: "enabled must be a boolean" });
+      return;
+    }
+    const user = await db.select().from(usersTable).where(eq(usersTable.id, userId)).limit(1);
+    if (!user[0]) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
+    if (user[0].role === "admin") {
+      res.json({ userId, allowed: true, inherited: true });
+      return;
+    }
+    if (enabled) {
+      const auth = getAuth(req);
+      const rows = await db.insert(wikiAccessTable)
+        .values({ userId, grantedByExternalUserId: auth!.userId! })
+        .onConflictDoUpdate({
+          target: wikiAccessTable.userId,
+          set: { grantedByExternalUserId: auth!.userId!, grantedAt: new Date() },
+        }).returning();
+      res.json({ ...rows[0], grantedAt: rows[0].grantedAt.toISOString(), allowed: true });
+      return;
+    }
+    await db.delete(wikiAccessTable).where(eq(wikiAccessTable.userId, userId));
+    res.json({ userId, allowed: false });
+  } catch {
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.put("/access/groups/:groupId", requireAdmin, async (req, res) => {
+  try {
+    const groupId = Number(req.params.groupId);
+    const enabled = req.body?.enabled;
+    if (!Number.isInteger(groupId) || groupId < 1 || typeof enabled !== "boolean") {
+      res.status(400).json({ error: "Valid group and enabled value are required" });
+      return;
+    }
+    const group = await db.select({ id: groupsTable.id }).from(groupsTable).where(eq(groupsTable.id, groupId)).limit(1);
+    if (!group[0]) {
+      res.status(404).json({ error: "Group not found" });
+      return;
+    }
+    if (enabled) {
+      const auth = getAuth(req);
+      const rows = await db.insert(wikiGroupAccessTable)
+        .values({ groupId, grantedByExternalUserId: auth!.userId! })
+        .onConflictDoUpdate({
+          target: wikiGroupAccessTable.groupId,
+          set: { grantedByExternalUserId: auth!.userId!, grantedAt: new Date() },
+        }).returning();
+      res.json({ ...rows[0], grantedAt: rows[0].grantedAt.toISOString(), allowed: true });
+      return;
+    }
+    await db.delete(wikiGroupAccessTable).where(eq(wikiGroupAccessTable.groupId, groupId));
+    res.json({ groupId, allowed: false });
   } catch {
     res.status(500).json({ error: "Internal server error" });
   }

@@ -26,16 +26,19 @@ export function Sidebar() {
   const isManager = user?.role === "manager";
   const isManagerOrAdmin = isAdmin || isManager;
   const [facilitiesAllowed, setFacilitiesAllowed] = useState(false);
+  const [wikiAllowed, setWikiAllowed] = useState(false);
 
   const isProfileIncomplete = user && (!user.phone || !user.firstName || !user.lastName);
 
   useEffect(() => {
     if (!user) {
       setFacilitiesAllowed(false);
+      setWikiAllowed(false);
       return;
     }
     if (user.role === "admin") {
       setFacilitiesAllowed(true);
+      setWikiAllowed(true);
       return;
     }
     const token = sessionStorage.getItem("auth_bearer_token");
@@ -46,6 +49,12 @@ export function Sidebar() {
       .then((response) => response.ok ? response.json() : { allowed: false })
       .then((result: { allowed?: boolean }) => setFacilitiesAllowed(result.allowed === true))
       .catch(() => setFacilitiesAllowed(false));
+    fetch(`${apiBase}/api/wiki/access`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    })
+      .then((response) => response.ok ? response.json() : { allowed: false })
+      .then((result: { allowed?: boolean }) => setWikiAllowed(result.allowed === true))
+      .catch(() => setWikiAllowed(false));
   }, [user?.id, user?.role, basePath]);
 
   const learningItems: NavigationItem[] = [
@@ -58,7 +67,7 @@ export function Sidebar() {
 
   const informationItems: NavigationItem[] = [
     { href: "/documents", label: copy("nav.documents"), icon: FileText },
-    { href: "/wiki", label: copy("nav.wiki"), icon: Library },
+    ...(wikiAllowed ? [{ href: "/wiki", label: copy("nav.wiki"), icon: Library }] : []),
     ...(facilitiesAllowed ? [{ href: "/facilities", label: copy("nav.requestHub"), icon: Wrench }] : []),
     ...(isManagerOrAdmin ? [{ href: "/reporting", label: "Reporting", icon: BarChart3 }] : []),
   ];

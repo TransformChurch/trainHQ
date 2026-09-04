@@ -1,4 +1,6 @@
 import { boolean, integer, pgTable, serial, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
+import { usersTable } from "./users";
+import { groupsTable } from "./groups";
 
 export const wikiCategoriesTable = pgTable(
   "wiki_categories",
@@ -37,5 +39,29 @@ export const wikiArticlesTable = pgTable(
   (table) => [uniqueIndex("wiki_articles_slug_unique").on(table.slug)],
 );
 
+export const wikiAccessTable = pgTable(
+  "wiki_access",
+  {
+    id: serial("id").primaryKey(),
+    userId: text("user_id").notNull().references(() => usersTable.id, { onDelete: "cascade" }),
+    grantedByExternalUserId: text("granted_by_external_user_id").notNull(),
+    grantedAt: timestamp("granted_at").notNull().defaultNow(),
+  },
+  (table) => [uniqueIndex("wiki_access_user_id_unique").on(table.userId)],
+);
+
+export const wikiGroupAccessTable = pgTable(
+  "wiki_group_access",
+  {
+    id: serial("id").primaryKey(),
+    groupId: integer("group_id").notNull().references(() => groupsTable.id, { onDelete: "cascade" }),
+    grantedByExternalUserId: text("granted_by_external_user_id").notNull(),
+    grantedAt: timestamp("granted_at").notNull().defaultNow(),
+  },
+  (table) => [uniqueIndex("wiki_group_access_group_id_unique").on(table.groupId)],
+);
+
 export type WikiCategory = typeof wikiCategoriesTable.$inferSelect;
 export type WikiArticle = typeof wikiArticlesTable.$inferSelect;
+export type WikiAccess = typeof wikiAccessTable.$inferSelect;
+export type WikiGroupAccess = typeof wikiGroupAccessTable.$inferSelect;

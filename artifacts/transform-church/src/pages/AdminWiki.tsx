@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useAdminListUsers } from "@workspace/api-client-react";
 import {
   BookOpen,
   ChevronDown,
@@ -7,7 +8,10 @@ import {
   Loader2,
   Pencil,
   Plus,
+  Search,
+  Shield,
   Trash2,
+  UsersRound,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -42,6 +46,10 @@ type ArticleDraft = {
   isActive: boolean;
 };
 
+type WikiAccessGrant = { userId: string };
+type WikiGroupAccessGrant = { groupId: number };
+type WikiGroup = { id: number; name: string; description?: string | null; memberCount: number };
+
 const emptyCategory: CategoryDraft = { name: "", slug: "", description: "", sortOrder: 0, isActive: true };
 
 const emptyArticle = (categoryId = 0): ArticleDraft => ({
@@ -55,6 +63,7 @@ const emptyArticle = (categoryId = 0): ArticleDraft => ({
 });
 
 export default function AdminWiki() {
+  const { data: users } = useAdminListUsers();
   const { toast } = useToast();
   const [categories, setCategories] = useState<WikiAdminCategory[]>([]);
   const [loading, setLoading] = useState(true);
@@ -64,11 +73,25 @@ export default function AdminWiki() {
   const [categoryDraft, setCategoryDraft] = useState<CategoryDraft>(emptyCategory);
   const [articleDraft, setArticleDraft] = useState<ArticleDraft>(emptyArticle());
   const [saving, setSaving] = useState(false);
+  const [accessGrants, setAccessGrants] = useState<WikiAccessGrant[]>([]);
+  const [groupAccessGrants, setGroupAccessGrants] = useState<WikiGroupAccessGrant[]>([]);
+  const [groups, setGroups] = useState<WikiGroup[]>([]);
+  const [accessSearch, setAccessSearch] = useState("");
+  const [savingAccess, setSavingAccess] = useState<Set<string>>(new Set());
 
   const load = async () => {
     setLoading(true);
     try {
-      setCategories(await wikiApi<WikiAdminCategory[]>("/api/admin/wiki"));
+      const [catalog, directAccess, groupAccess, availableGroups] = await Promise.all([
+        wikiApi<WikiAdminCategory[]>("/api/admin/wiki"),
+        wikiApi<WikiAccessGrant[]>("/api/admin/wiki/access"),
+        wikiApi<WikiGroupAccessGrant[]>("/api/admin/wiki/access/groups"),
+        wikiApi<WikiGroup[]>("/api/groups"),
+      ]);
+      setCategories(catalog);
+      setAccessGrants(directAccess);
+      setGroupAccessGrants(groupAccess);
+      setGroups(availableGroups);
     } catch (err) {
       toast({ title: "Wiki could not be loaded", description: (err as Error).message, variant: "destructive" });
     } finally {
@@ -79,6 +102,69 @@ export default function AdminWiki() {
   useEffect(() => {
     void load();
   }, []);
+
+  const grantedUserIds = useMemo(() => new Set(accessGrants.map((grant) => grant.userId)), [accessGrants]);
+  const grantedGroupIds = useMemo(() => new Set(groupAccessGrants.map((grant) => grant.groupId)), [groupAccessGrants]);
+  const normalizedAccessSearch = accessSearch.trim().toLowerCase();
+  const filteredUsers = useMemo(() => (users ?? []).filter((user) =>
+    !normalizedAccessSearch
+    || `${user.firstName} ${user.lastName} ${user.email} ${user.role}`.toLowerCase().includes(normalizedAccessSearch)
+  ), [users, normalizedAccessSearch]);
+  const filteredGroups = useMemo(() => groups.filter((group) =>
+    !normalizedAccessSearch
+    || `${group.name} ${group.description ?? ""}`.toLowerCase().includes(normalizedAccessSearch)
+  ), [groups, normalizedAccessSearch]);
+
+  const refreshAccess = async () => {
+    const [directAccess, groupAccess] = await Promise.all([
+      wikiApi<WikiAccessGrant[]>("/api/admin/wiki/access"),
+      wikiApi<WikiGroupAccessGrant[]>("/api/admin/wiki/access/groups"),
+    ]);
+    setAccessGrants(directAccess);
+    setGroupAccessGrants(groupAccess);
+  };
+
+  const setUserAccess = async (userId: string, enabled: boolean) => {
+    const key = `user:${userId}`;
+    setSavingAccess((current) => new Set(current).add(key));
+    try {
+      await wikiApi(`/api/admin/wiki/access/users/${userId}`, {
+        method: "PUT",
+        body: JSON.stringify({ enabled }),
+      });
+      await refreshAccess();
+      toast({ title: enabled ? "Wiki access granted" : "Wiki access removed" });
+    } catch (err) {
+      toast({ title: "Access could not be updated", description: (err as Error).message, variant: "destructive" });
+    } finally {
+      setSavingAccess((current) => {
+        const next = new Set(current);
+        next.delete(key);
+        return next;
+      });
+    }
+  };
+
+  const setGroupAccess = async (groupId: number, enabled: boolean) => {
+    const key = `group:${groupId}`;
+    setSavingAccess((current) => new Set(current).add(key));
+    try {
+      await wikiApi(`/api/admin/wiki/access/groups/${groupId}`, {
+        method: "PUT",
+        body: JSON.stringify({ enabled }),
+      });
+      await refreshAccess();
+      toast({ title: enabled ? "Group access granted" : "Group access removed" });
+    } catch (err) {
+      toast({ title: "Access could not be updated", description: (err as Error).message, variant: "destructive" });
+    } finally {
+      setSavingAccess((current) => {
+        const next = new Set(current);
+        next.delete(key);
+        return next;
+      });
+    }
+  };
 
   const openNewCategory = () => {
     setCategoryDraft({ ...emptyCategory, sortOrder: categories.length });
@@ -216,6 +302,76 @@ export default function AdminWiki() {
             <Plus className="mr-2 h-4 w-4" />Add Article
           </Button>
         </div>
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2"><Shield className="h-5 w-5" />Wiki Access</CardTitle>
+          <p className="text-sm text-muted-foreground">
+            Admins always have access. Enable individual people or groups below; every member of an enabled group inherits access.
+          </p>
+          <div className="relative max-w-md pt-2">
+            <Search className="absolute left-3 top-5 h-4 w-4 text-muted-foreground" />
+            <Input value={accessSearch} onChange={(event) => setAccessSearch(event.target.value)} placeholder="Search users or groups" className="pl-9" />
+          </div>
+        </CardHeader>
+      </Card>
+
+      <div className="grid gap-6 xl:grid-cols-2">
+        <Card>
+          <CardHeader><CardTitle>User Access</CardTitle></CardHeader>
+          <CardContent className="max-h-[32rem] divide-y overflow-y-auto p-0">
+            {filteredUsers.map((user) => {
+              const inherited = user.role === "admin";
+              const checked = inherited || grantedUserIds.has(user.id);
+              const key = `user:${user.id}`;
+              return (
+                <div key={user.id} className="flex items-center justify-between gap-4 px-6 py-4">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <p className="truncate font-medium">{user.firstName} {user.lastName}</p>
+                      <Badge variant="outline" className="capitalize">{user.role}</Badge>
+                    </div>
+                    <p className="truncate text-sm text-muted-foreground">{user.email}</p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="hidden text-xs text-muted-foreground sm:inline">{inherited ? "Always allowed" : checked ? "Allowed" : "No access"}</span>
+                    {savingAccess.has(key) && <Loader2 className="h-4 w-4 animate-spin" />}
+                    <Switch checked={checked} disabled={inherited || savingAccess.has(key)} onCheckedChange={(enabled) => void setUserAccess(user.id, enabled)} aria-label={`Wiki access for ${user.firstName} ${user.lastName}`} />
+                  </div>
+                </div>
+              );
+            })}
+            {filteredUsers.length === 0 && <p className="px-6 py-10 text-center text-sm text-muted-foreground">No users match your search.</p>}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader><CardTitle className="flex items-center gap-2"><UsersRound className="h-5 w-5" />Group Access</CardTitle></CardHeader>
+          <CardContent className="max-h-[32rem] divide-y overflow-y-auto p-0">
+            {filteredGroups.map((group) => {
+              const checked = grantedGroupIds.has(group.id);
+              const key = `group:${group.id}`;
+              return (
+                <div key={group.id} className="flex items-center justify-between gap-4 px-6 py-4">
+                  <div className="min-w-0">
+                    <p className="truncate font-medium">{group.name}</p>
+                    <p className="truncate text-sm text-muted-foreground">
+                      {group.memberCount} {group.memberCount === 1 ? "member" : "members"}
+                      {group.description ? ` · ${group.description}` : ""}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="hidden text-xs text-muted-foreground sm:inline">{checked ? "Allowed" : "No access"}</span>
+                    {savingAccess.has(key) && <Loader2 className="h-4 w-4 animate-spin" />}
+                    <Switch checked={checked} disabled={savingAccess.has(key)} onCheckedChange={(enabled) => void setGroupAccess(group.id, enabled)} aria-label={`Wiki access for ${group.name}`} />
+                  </div>
+                </div>
+              );
+            })}
+            {filteredGroups.length === 0 && <p className="px-6 py-10 text-center text-sm text-muted-foreground">No groups match your search.</p>}
+          </CardContent>
+        </Card>
       </div>
 
       {categories.length === 0 ? (
