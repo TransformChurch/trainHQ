@@ -1,0 +1,1 @@
+{"version":3,"file":"queueItem.d.ts","sourceRoot":"","sources":["../../../src/generated/types/queueItem.ts"],"names":[],"mappings":"AAAA;;;;;;GAMG;AACH,OAAO,KAAK,EAAE,KAAK,EAAE,MAAM,SAAS,CAAC;AAErC,MAAM,WAAW,SAAS;IACxB,EAAE,EAAE,MAAM,CAAC;IACX,MAAM,EAAE,MAAM,CAAC;IACf,OAAO,EAAE,MAAM,CAAC;IAChB,KAAK,EAAE,KAAK,CAAC;IACb,OAAO,EAAE,MAAM,CAAC;CACjB"}

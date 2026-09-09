@@ -1,0 +1,1 @@
+{"version":3,"file":"groupMember.d.ts","sourceRoot":"","sources":["../../../src/generated/types/groupMember.ts"],"names":[],"mappings":"AAAA;;;;;;GAMG;AACH,OAAO,KAAK,EAAE,eAAe,EAAE,MAAM,mBAAmB,CAAC;AAEzD,MAAM,WAAW,WAAW;IAC1B,EAAE,EAAE,MAAM,CAAC;IACX,OAAO,EAAE,MAAM,CAAC;IAChB,OAAO,EAAE,MAAM,CAAC;IAChB,IAAI,EAAE,eAAe,CAAC;CACvB"}

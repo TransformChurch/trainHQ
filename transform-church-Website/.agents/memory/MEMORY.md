@@ -1,0 +1,15 @@
+- [Orval inline schema conflict](orval-inline-schema-conflict.md) — inline request body schemas in OpenAPI cause duplicate name conflicts between zod api.ts and types/; always use named $ref schemas.
+- [Role-based access pattern](role-access.md) — requireManagerOrAdmin middleware stores dbUser in res.locals; res.locals.dbUser available in route handlers for audit logging without extra DB call.
+- [Audit log design](audit-log.md) — content_audit_log table tracks track/module/video mutations; logContentChange helper in api-server/src/lib/auditLog.ts; served from GET /admin/audit-log (admin-only, ?trackId filter).
+- [Orval hook names](orval-hooks.md) — tracks list hook is useListTracks (not useGetTracks); UseQueryOptions requires queryKey in strict TS so never pass {query:{enabled:...}} — call hooks unconditionally and check data/role instead.
+- [Orval and Zod compatibility](orval-zod-compatibility.md) — explicitly target Zod 3 during generation; current fetch output also requires DOM.Iterable in the client TS library set.
+- [API server zod imports](api-server-zod.md) — api-server has no direct zod dep; never import from "zod" or "zod/v4" in route files; use @workspace/api-zod for validated bodies or do manual JS type checks inline.
+- [Growth Tracks design](growth-tracks-design.md) — new tables growth_tracks/growth_track_steps/growth_track_enrollments; progression helper at api-server/src/lib/growthTrackProgression.ts; hooks in quiz submit + watch history routes.
+- [Planning Center identity linking](planning-center-identity-linking.md) — never auto-link Church Center users by email alone; require a stable person-ID match or an explicit administrator link.
+- [Runtime secret refresh](runtime-secret-refresh.md) — server workflows retain their loaded secrets until restarted after a Replit secret change.
+- [Request Hub access layers](request-hub-access.md) — whole-hub grants include every category; category grants can independently expose only selected sections.
+- [Document file handling](document-file-handling.md) — the repository accepts any file type, but only PDFs embed; other files remain listed and open externally.
+- [Reporting data retention](reporting-data-retention.md) — prepared attendance exports are private, user-scoped, and expire after 24 hours; never expose them through public storage.
+- [Reporting enrichment completeness](reporting-enrichment-completeness.md) — never produce partial exports when Planning Center throttles person enrichment; retry or fail explicitly.
+- [Reporting script uploads](reporting-script-uploads.md) — admins may upload trusted Python processors despite server-level execution risk; keep uploads private and validate before activation.
+- [Reporting PDF conversion](reporting-pdf-conversion.md) — LibreOffice PDF jobs need pyuno environment setup plus isolated profiles and ports; never trust process exit without checking output.
