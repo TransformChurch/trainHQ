@@ -6,6 +6,7 @@
 - [API server zod imports](api-server-zod.md) — api-server has no direct zod dep; never import from "zod" or "zod/v4" in route files; use @workspace/api-zod for validated bodies or do manual JS type checks inline.
 - [Growth Tracks design](growth-tracks-design.md) — new tables growth_tracks/growth_track_steps/growth_track_enrollments; progression helper at api-server/src/lib/growthTrackProgression.ts; hooks in quiz submit + watch history routes.
 - [Planning Center identity linking](planning-center-identity-linking.md) — never auto-link Church Center users by email alone; require a stable person-ID match or an explicit administrator link.
+- [Planning Center OAuth environments](planning-center-oauth-environments.md) — keep callback URLs environment-specific; production must never redirect through an idle-prone development URL.
 - [Runtime secret refresh](runtime-secret-refresh.md) — server workflows retain their loaded secrets until restarted after a Replit secret change.
 - [Request Hub access layers](request-hub-access.md) — whole-hub grants include every category; category grants can independently expose only selected sections.
 - [Document file handling](document-file-handling.md) — the repository accepts any file type, but only PDFs embed; other files remain listed and open externally.
