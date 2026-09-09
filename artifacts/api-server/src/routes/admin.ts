@@ -9,6 +9,8 @@ import contentGrantsRouter from "./contentGrants";
 import { syncPlanningCenterModuleAssignment } from "../lib/planningCenter";
 import adminFacilitiesRouter from "./adminFacilities";
 import adminWikiRouter from "./adminWiki";
+import adminTracksRouter from "./adminTracks";
+import adminPlanningCenterRouter from "./adminPlanningCenter";
 
 const router = Router();
 
@@ -388,5 +390,7 @@ router.use("/documents", adminDocumentsRouter);
 router.use("/content-grants", contentGrantsRouter);
 router.use("/facilities", adminFacilitiesRouter);
 router.use("/wiki", adminWikiRouter);
+router.use("/tracks", adminTracksRouter);
+router.use("/planning-center", adminPlanningCenterRouter);
 
 export default router;

@@ -6,6 +6,7 @@ import { requireAuth, requireManagerOrAdmin, getDbUser } from "../middlewares/re
 import { CreateModuleBody, UpdateModuleBody, CreateQuizQuestionBody, SubmitQuizBody, CompleteModuleBody } from "@workspace/api-zod";
 import { logContentChange } from "../lib/auditLog";
 import { checkGrowthTrackProgression } from "../lib/growthTrackProgression";
+import { checkTrackCompletion } from "../lib/trackProgression";
 import { canEditContent } from "../lib/canEditContent";
 import { PlanningCenterError, updatePlanningCenterModuleCompletion } from "../lib/planningCenter";
 
@@ -208,6 +209,7 @@ router.post("/complete", requireAuth, async (req, res) => {
     }).returning();
 
     void checkGrowthTrackProgression(dbUser.id, moduleId);
+    void checkTrackCompletion(dbUser.id, moduleId);
     res.json({
       moduleId,
       completedAt: saved[0].completedAt.toISOString(),

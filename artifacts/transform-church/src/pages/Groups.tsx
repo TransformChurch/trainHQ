@@ -4,7 +4,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { Users, Clock, CheckCircle2, UserPlus } from "lucide-react";
+import { Users, Clock, CheckCircle2, UserPlus, LogOut } from "lucide-react";
 
 const BASE = import.meta.env.VITE_API_URL?.replace(/\/$/, "") ?? import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -35,6 +35,7 @@ export default function Groups() {
   const [groups, setGroups] = useState<AvailableGroup[]>([]);
   const [loading, setLoading] = useState(true);
   const [requestingIds, setRequestingIds] = useState<Set<number>>(new Set());
+  const canSelfManageMembership = me?.role === "manager" || me?.role === "admin";
 
   const loadGroups = async () => {
     try {
@@ -62,6 +63,34 @@ export default function Groups() {
       toast({ title: msg, variant: "destructive" });
     } finally {
       setRequestingIds(prev => { const s = new Set(prev); s.delete(groupId); return s; });
+    }
+  };
+
+  const handleSelfJoin = async (groupId: number) => {
+    setRequestingIds(prev => new Set(prev).add(groupId));
+    try {
+      await apiFetch(`/api/groups/${groupId}/self-join`, { method: "POST" });
+      toast({ title: "Joined group" });
+      setGroups(prev => prev.map(group => group.id === groupId ? { ...group, isMember: true } : group));
+    } catch {
+      toast({ title: "Failed to join group", variant: "destructive" });
+    } finally {
+      setRequestingIds(prev => { const next = new Set(prev); next.delete(groupId); return next; });
+    }
+  };
+
+  const handleSelfLeave = async (groupId: number) => {
+    setRequestingIds(prev => new Set(prev).add(groupId));
+    try {
+      await apiFetch(`/api/groups/${groupId}/self-join`, { method: "DELETE" });
+      toast({ title: "Left group" });
+      setGroups(prev => prev.map(group =>
+        group.id === groupId ? { ...group, isMember: false, requestStatus: null } : group
+      ));
+    } catch {
+      toast({ title: "Failed to leave group", variant: "destructive" });
+    } finally {
+      setRequestingIds(prev => { const next = new Set(prev); next.delete(groupId); return next; });
     }
   };
 
@@ -107,15 +136,29 @@ export default function Groups() {
                       <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{group.description}</p>
                     )}
                   </div>
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between gap-2">
                     <Badge variant="secondary" className="text-xs">
                       <Users className="w-3 h-3 mr-1" />
                       {group.memberCount} member{group.memberCount !== 1 ? "s" : ""}
                     </Badge>
-                    <Badge className="text-xs bg-green-100 text-green-700 border-green-200">
-                      <CheckCircle2 className="w-3 h-3 mr-1" />
-                      Member
-                    </Badge>
+                    <div className="flex items-center gap-2">
+                      <Badge className="text-xs bg-green-100 text-green-700 border-green-200">
+                        <CheckCircle2 className="w-3 h-3 mr-1" />
+                        Member
+                      </Badge>
+                      {canSelfManageMembership && (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-7 text-xs text-muted-foreground"
+                          onClick={() => handleSelfLeave(group.id)}
+                          disabled={requestingIds.has(group.id)}
+                        >
+                          <LogOut className="w-3 h-3 mr-1" />
+                          Leave
+                        </Button>
+                      )}
+                    </div>
                   </div>
                 </CardContent>
               </Card>
@@ -143,6 +186,7 @@ export default function Groups() {
               const isPending = group.requestStatus === "pending";
               const isDenied = group.requestStatus === "denied";
               const isRequesting = requestingIds.has(group.id);
+              const canRequestToJoin = me?.role === "student";
               return (
                 <Card key={group.id} className="hover:shadow-md transition-shadow">
                   <CardContent className="p-5">
@@ -166,7 +210,7 @@ export default function Groups() {
                         <Badge variant="outline" className="text-xs text-muted-foreground">
                           Not approved
                         </Badge>
-                      ) : (
+                      ) : canRequestToJoin ? (
                         <Button
                           size="sm"
                           variant="outline"
@@ -177,6 +221,21 @@ export default function Groups() {
                           <UserPlus className="w-3 h-3 mr-1" />
                           {isRequesting ? "Sending..." : "Request to Join"}
                         </Button>
+                      ) : canSelfManageMembership ? (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-7 text-xs"
+                          onClick={() => handleSelfJoin(group.id)}
+                          disabled={isRequesting}
+                        >
+                          <UserPlus className="w-3 h-3 mr-1" />
+                          {isRequesting ? "Joining..." : "Join"}
+                        </Button>
+                      ) : (
+                        <Badge variant="outline" className="text-xs text-muted-foreground">
+                          Managed in Admin
+                        </Badge>
                       )}
                     </div>
                   </CardContent>

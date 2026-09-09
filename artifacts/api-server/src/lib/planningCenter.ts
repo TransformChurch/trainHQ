@@ -677,10 +677,9 @@ export function buildFieldDatumUpdate(fieldDataId: string, completedAt: Date) {
   };
 }
 
-async function updatePlanningCenterDateField(
+async function updatePlanningCenterFieldById(
   user: { id: string; planningCenterPersonId: string | null },
-  moduleId: number,
-  dateField: PlanningCenterDateField,
+  fieldDefinitionId: string,
   date: Date,
 ) {
   if (!user.planningCenterPersonId) {
@@ -690,7 +689,6 @@ async function updatePlanningCenterDateField(
       409,
     );
   }
-  const fieldDefinitionId = fieldDefinitionIdForModule(moduleId, dateField);
   const accessToken = await getValidPlanningCenterAccessToken(user.id);
   const fieldDataId = await findFieldDataIdAcrossPages(
     `/people/${encodeURIComponent(user.planningCenterPersonId)}/field_data`,
@@ -700,7 +698,7 @@ async function updatePlanningCenterDateField(
   if (!fieldDataId) {
     throw new PlanningCenterError(
       "planning_center_field_data_missing",
-      `The mapped Planning Center ${dateField} date field is not available on this member's profile.`,
+      "The mapped Planning Center field is not available on this member's profile.",
       422,
     );
   }
@@ -714,6 +712,80 @@ async function updatePlanningCenterDateField(
     },
   );
   return { fieldDataId };
+}
+
+async function updatePlanningCenterDateField(
+  user: { id: string; planningCenterPersonId: string | null },
+  moduleId: number,
+  dateField: PlanningCenterDateField,
+  date: Date,
+) {
+  const fieldDefinitionId = fieldDefinitionIdForModule(moduleId, dateField);
+  return updatePlanningCenterFieldById(user, fieldDefinitionId, date);
+}
+
+export type PlanningCenterFieldDefinition = { id: string; label: string };
+
+export async function listPlanningCenterFieldDefinitions(
+  accessToken: string,
+): Promise<PlanningCenterFieldDefinition[]> {
+  const records = await fetchPeopleCollection<{
+    id: string;
+    attributes?: { name?: unknown; label?: unknown; deleted_at?: unknown };
+  }>("/field_definitions?per_page=100", accessToken);
+  return records
+    .filter((record) => !record.attributes?.deleted_at)
+    .map((record) => {
+      const name = record.attributes?.name;
+      const label = record.attributes?.label;
+      return {
+        id: record.id,
+        label:
+          (typeof name === "string" && name.trim()) ||
+          (typeof label === "string" && label.trim()) ||
+          `Planning Center field ${record.id}`,
+      };
+    });
+}
+
+export async function updatePlanningCenterTrackDateField(
+  user: { id: string; planningCenterPersonId: string | null },
+  fieldDefinitionId: string,
+  date: Date,
+) {
+  return updatePlanningCenterFieldById(user, fieldDefinitionId, date);
+}
+
+export async function syncPlanningCenterTrackDateField(
+  user: { id: string; planningCenterPersonId: string | null },
+  fieldDefinitionId: string | null | undefined,
+  date: Date,
+): Promise<PlanningCenterAssignmentSyncResult> {
+  if (!fieldDefinitionId) {
+    return {
+      status: "skipped",
+      message: "This track has no Planning Center field selected for this date.",
+    };
+  }
+  if (!user.planningCenterPersonId) {
+    return {
+      status: "skipped",
+      message: "Church Center is not connected for this member.",
+    };
+  }
+  try {
+    await updatePlanningCenterTrackDateField(user, fieldDefinitionId, date);
+    return { status: "synced" };
+  } catch (err) {
+    if (err instanceof PlanningCenterError) {
+      return { status: "failed", code: err.code, message: err.message };
+    }
+    return {
+      status: "failed",
+      code: "planning_center_track_sync_failed",
+      message: "Planning Center could not be updated for this member.",
+    };
+  }
 }
 
 export async function updatePlanningCenterModuleAssignment(

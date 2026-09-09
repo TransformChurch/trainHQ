@@ -572,6 +572,44 @@ router.get("/:groupId/export.csv", requireManagerOrAdmin, async (req, res) => {
   }
 });
 
+router.post("/:groupId/self-join", requireManagerOrAdmin, async (req, res) => {
+  try {
+    const dbUser = res.locals.dbUser;
+    const groupId = parseInt(req.params.groupId as string);
+    const group = await db.select({ id: groupsTable.id }).from(groupsTable).where(eq(groupsTable.id, groupId)).limit(1);
+    if (!group[0]) {
+      res.status(404).json({ error: "Group not found" });
+      return;
+    }
+    const existing = await db
+      .select()
+      .from(groupMembersTable)
+      .where(and(eq(groupMembersTable.groupId, groupId), eq(groupMembersTable.userId, dbUser.id)))
+      .limit(1);
+    if (existing[0]) {
+      res.status(409).json({ error: "Already a member" });
+      return;
+    }
+    const inserted = await db.insert(groupMembersTable).values({ groupId, userId: dbUser.id }).returning();
+    res.status(201).json(inserted[0]);
+  } catch {
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.delete("/:groupId/self-join", requireManagerOrAdmin, async (req, res) => {
+  try {
+    const dbUser = res.locals.dbUser;
+    const groupId = parseInt(req.params.groupId as string);
+    await db
+      .delete(groupMembersTable)
+      .where(and(eq(groupMembersTable.groupId, groupId), eq(groupMembersTable.userId, dbUser.id)));
+    res.status(204).send();
+  } catch {
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 // ─── GET /groups/:groupId/join-requests ───────────────────────────────────────
 
 router.get("/:groupId/join-requests", requireManagerOrAdmin, async (req, res) => {

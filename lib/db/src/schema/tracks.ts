@@ -8,6 +8,8 @@ export const tracksTable = pgTable("tracks", {
   description: text("description"),
   imageUrl: text("image_url"),
   createdByExternalUserId: text("created_by_external_user_id"),
+  pcoAssignedFieldId: text("pco_assigned_field_id"),
+  pcoCompletedFieldId: text("pco_completed_field_id"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 

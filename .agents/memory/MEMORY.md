@@ -15,3 +15,4 @@
 - [Reporting script uploads](reporting-script-uploads.md) — admins may upload trusted Python processors despite server-level execution risk; keep uploads private and validate before activation.
 - [Reporting PDF conversion](reporting-pdf-conversion.md) — LibreOffice PDF jobs need pyuno environment setup plus isolated profiles and ports; never trust process exit without checking output.
 - [Wiki access policy](wiki-access-policy.md) — admins always have Wiki access; others require a direct or group grant, with existing users grandfathered during rollout.
+- [GitHub connector sync](github-connector-sync.md) — when Git auth is unavailable, integrate remote commits through authenticated API data and a parent-based three-way comparison.

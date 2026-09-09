@@ -24,6 +24,7 @@ import {
 import {
   Accordion, AccordionContent, AccordionItem, AccordionTrigger,
 } from "@/components/ui/accordion";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Plus, Trash2, Video, BookOpen, HelpCircle, Users, Pencil, Globe, Lock, Mail, Upload, Link, HardDrive, Image as ImageIcon, FileText, FolderOpen, Shield, X, AlertTriangle } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
@@ -1144,11 +1145,15 @@ function AssignmentManager() {
   const { toast } = useToast();
   const { data: users } = useAdminListUsers();
   const { data: modules } = useListModules(undefined, { query: { queryKey: getListModulesQueryKey() } });
+  const { data: tracks } = useListTracks();
   const [open, setOpen] = useState(false);
   const [assignTo, setAssignTo] = useState<"user" | "group">("user");
+  const [assignUnit, setAssignUnit] = useState<"module" | "track">("module");
   const [selectedUser, setSelectedUser] = useState("");
   const [selectedGroup, setSelectedGroup] = useState("");
   const [selectedModule, setSelectedModule] = useState("");
+  const [selectedTrack, setSelectedTrack] = useState("");
+  const [selectedTrackModuleIds, setSelectedTrackModuleIds] = useState<Set<number>>(new Set());
   const [dueDate, setDueDate] = useState("");
   const [notifyEmail, setNotifyEmail] = useState(false);
   const [resetProgress, setResetProgress] = useState(false);
@@ -1164,56 +1169,123 @@ function AssignmentManager() {
     }
   }, [open]);
 
+  const trackModules = (modules as any[] | undefined)?.filter(module => String(module.trackId) === selectedTrack) ?? [];
+
+  const handleSelectTrack = (trackId: string) => {
+    setSelectedTrack(trackId);
+    const ids = ((modules as any[] | undefined) ?? [])
+      .filter(module => String(module.trackId) === trackId)
+      .map(module => module.id as number);
+    setSelectedTrackModuleIds(new Set(ids));
+  };
+
+  const toggleTrackModule = (moduleId: number) => {
+    setSelectedTrackModuleIds(previous => {
+      const next = new Set(previous);
+      if (next.has(moduleId)) next.delete(moduleId);
+      else next.add(moduleId);
+      return next;
+    });
+  };
+
+  const resetForm = () => {
+    setSelectedUser("");
+    setSelectedGroup("");
+    setSelectedModule("");
+    setSelectedTrack("");
+    setSelectedTrackModuleIds(new Set());
+    setDueDate("");
+    setNotifyEmail(false);
+    setResetProgress(false);
+  };
+
   const handleAssign = async (e: React.FormEvent) => {
     e.preventDefault();
     const hasTarget = assignTo === "user" ? !!selectedUser : !!selectedGroup;
-    if (!hasTarget || !selectedModule) {
+    if (assignUnit === "module" && (!hasTarget || !selectedModule)) {
       toast({ title: "Please select a target and module", variant: "destructive" });
+      return;
+    }
+    if (assignUnit === "track" && (!hasTarget || !selectedTrack || selectedTrackModuleIds.size === 0)) {
+      toast({ title: "Please select a target, a track, and at least one module", variant: "destructive" });
       return;
     }
     setSubmitting(true);
     try {
-      const body: Record<string, any> = {
-        moduleId: parseInt(selectedModule),
-        dueDate: dueDate || null,
-        notifyEmail,
-        resetProgress,
-      };
-      if (assignTo === "user") {
-        body.userIds = [selectedUser];
-      } else {
-        body.groupId = parseInt(selectedGroup);
-      }
-      const response = await apiFetch("/api/admin/assignments", {
-        method: "POST",
-        body: JSON.stringify(body),
-      });
-      if (!response) throw new Error("Assignment response was empty");
-      const results = await response.json() as Array<{
-        planningCenterSync?: { status: "synced" | "skipped" | "failed"; message?: string };
-      }>;
-      const synced = results.filter(result => result.planningCenterSync?.status === "synced").length;
-      const skipped = results.filter(result => result.planningCenterSync?.status === "skipped").length;
-      const failed = results.filter(result => result.planningCenterSync?.status === "failed");
       const targetLabel = assignTo === "group"
         ? `group "${groups.find(g => String(g.id) === selectedGroup)?.name}"`
         : "user";
       const extras = [notifyEmail ? "email sent" : "", resetProgress ? "progress reset" : ""].filter(Boolean).join(", ");
-      toast({
-        title: `Module assigned to ${targetLabel}${extras ? ` — ${extras}` : ""}`,
-        description: [
-          `${synced} Planning Center profile${synced === 1 ? "" : "s"} updated`,
-          skipped > 0 ? `${skipped} skipped because Church Center is not connected` : "",
-          failed.length > 0
-            ? `${failed.length} failed${failed[0]?.planningCenterSync?.message ? `: ${failed[0].planningCenterSync.message}` : ""}`
-            : "",
-        ].filter(Boolean).join("; ") + ".",
-        variant: failed.length > 0 ? "destructive" : undefined,
-      });
+
+      if (assignUnit === "module") {
+        const body: Record<string, any> = {
+          moduleId: parseInt(selectedModule),
+          dueDate: dueDate || null,
+          notifyEmail,
+          resetProgress,
+        };
+        if (assignTo === "user") body.userIds = [selectedUser];
+        else body.groupId = parseInt(selectedGroup);
+        const response = await apiFetch("/api/admin/assignments", {
+          method: "POST",
+          body: JSON.stringify(body),
+        });
+        if (!response) throw new Error("Assignment response was empty");
+        const results = await response.json() as Array<{
+          planningCenterSync?: { status: "synced" | "skipped" | "failed"; message?: string };
+        }>;
+        const synced = results.filter(result => result.planningCenterSync?.status === "synced").length;
+        const skipped = results.filter(result => result.planningCenterSync?.status === "skipped").length;
+        const failed = results.filter(result => result.planningCenterSync?.status === "failed");
+        toast({
+          title: `Module assigned to ${targetLabel}${extras ? ` — ${extras}` : ""}`,
+          description: [
+            `${synced} Planning Center profile${synced === 1 ? "" : "s"} updated`,
+            skipped > 0 ? `${skipped} skipped because Church Center is not connected` : "",
+            failed.length > 0
+              ? `${failed.length} failed${failed[0]?.planningCenterSync?.message ? `: ${failed[0].planningCenterSync.message}` : ""}`
+              : "",
+          ].filter(Boolean).join("; ") + ".",
+          variant: failed.length > 0 ? "destructive" : undefined,
+        });
+      } else {
+        const body: Record<string, any> = {
+          moduleIds: [...selectedTrackModuleIds],
+          dueDate: dueDate || null,
+          notifyEmail,
+          resetProgress,
+        };
+        if (assignTo === "user") body.userIds = [selectedUser];
+        else body.groupId = parseInt(selectedGroup);
+        const response = await apiFetch(`/api/admin/tracks/${selectedTrack}/assign`, {
+          method: "POST",
+          body: JSON.stringify(body),
+        });
+        if (!response) throw new Error("Assignment response was empty");
+        const results = await response.json() as Array<{
+          trackPlanningCenterSync?: { status: "synced" | "skipped" | "failed"; message?: string };
+          modules: Array<{ planningCenterSync?: { status: "synced" | "skipped" | "failed" } }>;
+        }>;
+        const trackSynced = results.filter(result => result.trackPlanningCenterSync?.status === "synced").length;
+        const trackSkipped = results.filter(result => result.trackPlanningCenterSync?.status === "skipped").length;
+        const trackFailed = results.filter(result => result.trackPlanningCenterSync?.status === "failed");
+        const moduleSynced = results.flatMap(result => result.modules ?? [])
+          .filter(module => module.planningCenterSync?.status === "synced").length;
+        const trackName = tracks?.find((track: any) => String(track.id) === selectedTrack)?.name ?? "Track";
+        toast({
+          title: `"${trackName}" (${selectedTrackModuleIds.size} module${selectedTrackModuleIds.size === 1 ? "" : "s"}) assigned to ${targetLabel}${extras ? ` — ${extras}` : ""}`,
+          description: [
+            `${trackSynced} track profile${trackSynced === 1 ? "" : "s"} + ${moduleSynced} module profile${moduleSynced === 1 ? "" : "s"} updated in Planning Center`,
+            trackSkipped > 0 ? `${trackSkipped} skipped because Church Center is not connected` : "",
+            trackFailed.length > 0 ? `${trackFailed.length} track sync${trackFailed.length === 1 ? "" : "es"} failed` : "",
+          ].filter(Boolean).join("; ") + ".",
+          variant: trackFailed.length > 0 ? "destructive" : undefined,
+        });
+      }
       setOpen(false);
-      setSelectedUser(""); setSelectedGroup(""); setSelectedModule(""); setDueDate(""); setNotifyEmail(false); setResetProgress(false);
+      resetForm();
     } catch {
-      toast({ title: "Failed to assign module", variant: "destructive" });
+      toast({ title: `Failed to assign ${assignUnit}`, variant: "destructive" });
     } finally {
       setSubmitting(false);
     }
@@ -1223,11 +1295,28 @@ function AssignmentManager() {
     <div>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogTrigger asChild>
-          <Button variant="outline"><Users className="w-4 h-4 mr-2" /> Assign Module</Button>
+          <Button variant="outline"><Users className="w-4 h-4 mr-2" /> Assign Module / Track</Button>
         </DialogTrigger>
         <DialogContent className="max-w-md">
-          <DialogHeader><DialogTitle>Assign Training Module</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>Assign Training {assignUnit === "track" ? "Track" : "Module"}</DialogTitle></DialogHeader>
           <form onSubmit={handleAssign} className="space-y-4">
+            <div className="flex rounded-lg border border-input overflow-hidden">
+              <button
+                type="button"
+                className={`flex-1 py-2 text-sm font-medium transition-colors ${assignUnit === "module" ? "bg-primary text-primary-foreground" : "bg-background text-muted-foreground hover:bg-muted"}`}
+                onClick={() => setAssignUnit("module")}
+              >
+                Module
+              </button>
+              <button
+                type="button"
+                className={`flex-1 py-2 text-sm font-medium transition-colors ${assignUnit === "track" ? "bg-primary text-primary-foreground" : "bg-background text-muted-foreground hover:bg-muted"}`}
+                onClick={() => setAssignUnit("track")}
+              >
+                Track
+              </button>
+            </div>
+
             {/* Assign to: User or Group */}
             <div className="flex rounded-lg border border-input overflow-hidden">
               <button
@@ -1274,21 +1363,55 @@ function AssignmentManager() {
               </FormField>
             )}
 
-            <FormField label="Module">
-              <Select value={selectedModule} onValueChange={setSelectedModule}>
-                <SelectTrigger><SelectValue placeholder="Select a module..." /></SelectTrigger>
-                <SelectContent>
-                  {(modules as any[])?.map((m: any) => (
-                    <SelectItem key={m.id} value={String(m.id)}>
-                      <span className="flex items-center gap-1.5">
-                        {m.isPublic ? <Globe className="w-3 h-3 text-primary" /> : <Lock className="w-3 h-3 text-muted-foreground" />}
-                        {m.title}
-                      </span>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </FormField>
+            {assignUnit === "module" ? (
+              <FormField label="Module">
+                <Select value={selectedModule} onValueChange={setSelectedModule}>
+                  <SelectTrigger><SelectValue placeholder="Select a module..." /></SelectTrigger>
+                  <SelectContent>
+                    {(modules as any[])?.map((module: any) => (
+                      <SelectItem key={module.id} value={String(module.id)}>
+                        <span className="flex items-center gap-1.5">
+                          {module.isPublic ? <Globe className="w-3 h-3 text-primary" /> : <Lock className="w-3 h-3 text-muted-foreground" />}
+                          {module.title}
+                        </span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </FormField>
+            ) : (
+              <>
+                <FormField label="Track">
+                  <Select value={selectedTrack} onValueChange={handleSelectTrack}>
+                    <SelectTrigger><SelectValue placeholder="Select a track..." /></SelectTrigger>
+                    <SelectContent>
+                      {(tracks as any[])?.map((track: any) => (
+                        <SelectItem key={track.id} value={String(track.id)}>{track.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </FormField>
+                {selectedTrack && (
+                  <FormField label="Modules to assign">
+                    {trackModules.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">This track has no modules yet.</p>
+                    ) : (
+                      <div className="space-y-2 max-h-48 overflow-y-auto border border-input rounded-md p-3">
+                        {trackModules.map((module: any) => (
+                          <label key={module.id} className="flex items-center gap-2 text-sm cursor-pointer">
+                            <Checkbox
+                              checked={selectedTrackModuleIds.has(module.id)}
+                              onCheckedChange={() => toggleTrackModule(module.id)}
+                            />
+                            <span className="flex items-center gap-1.5">{module.title}</span>
+                          </label>
+                        ))}
+                      </div>
+                    )}
+                  </FormField>
+                )}
+              </>
+            )}
 
             <FormField label="Due Date (optional)">
               <Input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} />
@@ -1331,7 +1454,7 @@ function AssignmentManager() {
             </div>
 
             <Button type="submit" className="w-full" disabled={submitting}>
-              {submitting ? "Assigning..." : "Assign Module"}
+              {submitting ? "Assigning..." : assignUnit === "track" ? "Assign Track" : "Assign Module"}
             </Button>
           </form>
         </DialogContent>
@@ -2011,12 +2134,29 @@ export default function AdminContent({ section = "modules" }: { section?: AdminC
   const [editTrackName, setEditTrackName] = useState("");
   const [editTrackDesc, setEditTrackDesc] = useState("");
   const [editTrackImageUrl, setEditTrackImageUrl] = useState("");
+  const [editPcoAssignedFieldId, setEditPcoAssignedFieldId] = useState("");
+  const [editPcoCompletedFieldId, setEditPcoCompletedFieldId] = useState("");
+  const [pcoFields, setPcoFields] = useState<Array<{ id: string; label: string }>>([]);
+  const [pcoFieldsError, setPcoFieldsError] = useState<string | null>(null);
+  const [pcoFieldsLoading, setPcoFieldsLoading] = useState(false);
 
   const openEditTrack = (track: any) => {
     setEditingTrack(track);
     setEditTrackName(track.name);
     setEditTrackDesc(track.description ?? "");
     setEditTrackImageUrl(track.imageUrl ?? "");
+    setEditPcoAssignedFieldId(track.pcoAssignedFieldId ?? "");
+    setEditPcoCompletedFieldId(track.pcoCompletedFieldId ?? "");
+    setPcoFieldsError(null);
+    setPcoFieldsLoading(true);
+    apiFetch("/api/admin/planning-center/field-definitions")
+      .then(response => response?.json())
+      .then((data: any) => {
+        if (data?.fields) setPcoFields(data.fields);
+        else setPcoFieldsError(data?.error ?? "Could not load Planning Center fields.");
+      })
+      .catch(() => setPcoFieldsError("Could not load Planning Center fields."))
+      .finally(() => setPcoFieldsLoading(false));
   };
 
   if (isLoading) return <div className="p-8 text-center text-muted-foreground">Loading content...</div>;
@@ -2035,9 +2175,21 @@ export default function AdminContent({ section = "modules" }: { section?: AdminC
   const handleEditTrack = (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingTrack) return;
-    updateTrack({ trackId: editingTrack.id, data: { name: editTrackName, description: editTrackDesc || null, imageUrl: editTrackImageUrl || null } }, {
-      onSuccess: () => {
-        toast({ title: "Track updated" });
+    const trackId = editingTrack.id;
+    updateTrack({ trackId, data: { name: editTrackName, description: editTrackDesc || null, imageUrl: editTrackImageUrl || null } }, {
+      onSuccess: async () => {
+        try {
+          await apiFetch(`/api/admin/tracks/${trackId}/planning-center-fields`, {
+            method: "PATCH",
+            body: JSON.stringify({
+              pcoAssignedFieldId: editPcoAssignedFieldId || null,
+              pcoCompletedFieldId: editPcoCompletedFieldId || null,
+            }),
+          });
+          toast({ title: "Track updated" });
+        } catch {
+          toast({ title: "Track saved, but Planning Center fields failed to save", variant: "destructive" });
+        }
         setEditingTrack(null);
         queryClient.invalidateQueries({ queryKey: getListTracksQueryKey() });
       },
@@ -2087,6 +2239,46 @@ export default function AdminContent({ section = "modules" }: { section?: AdminC
             <FormField label="Track Name"><Input value={editTrackName} onChange={e => setEditTrackName(e.target.value)} required /></FormField>
             <FormField label="Description"><Textarea value={editTrackDesc} onChange={e => setEditTrackDesc(e.target.value)} rows={3} /></FormField>
             <ImageUploadPicker value={editTrackImageUrl} onChange={setEditTrackImageUrl} />
+            <div className="pt-2 border-t border-border space-y-4">
+              <div>
+                <p className="text-sm font-medium">Planning Center sync</p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Update selected Church Center custom fields when this track is assigned or completed.
+                </p>
+              </div>
+              {pcoFieldsLoading ? (
+                <p className="text-xs text-muted-foreground">Loading Planning Center fields...</p>
+              ) : pcoFieldsError ? (
+                <p className="text-xs text-destructive">{pcoFieldsError}</p>
+              ) : (
+                <>
+                  <FormField label="Assigned Date Field">
+                    <Select
+                      value={editPcoAssignedFieldId || "none"}
+                      onValueChange={value => setEditPcoAssignedFieldId(value === "none" ? "" : value)}
+                    >
+                      <SelectTrigger><SelectValue placeholder="Not synced" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Not synced</SelectItem>
+                        {pcoFields.map(field => <SelectItem key={field.id} value={field.id}>{field.label}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </FormField>
+                  <FormField label="Completed Date Field">
+                    <Select
+                      value={editPcoCompletedFieldId || "none"}
+                      onValueChange={value => setEditPcoCompletedFieldId(value === "none" ? "" : value)}
+                    >
+                      <SelectTrigger><SelectValue placeholder="Not synced" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Not synced</SelectItem>
+                        {pcoFields.map(field => <SelectItem key={field.id} value={field.id}>{field.label}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </FormField>
+                </>
+              )}
+            </div>
             <Button type="submit" className="w-full">Save Changes</Button>
           </form>
         </DialogContent>
