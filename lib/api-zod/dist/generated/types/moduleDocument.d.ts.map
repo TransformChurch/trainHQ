@@ -1,1 +1,0 @@
-{"version":3,"file":"moduleDocument.d.ts","sourceRoot":"","sources":["../../../src/generated/types/moduleDocument.ts"],"names":[],"mappings":"AAAA;;;;;;GAMG;AAEH,MAAM,WAAW,cAAc;IAC7B,EAAE,EAAE,MAAM,CAAC;IACX,KAAK,EAAE,MAAM,CAAC;IACd,gBAAgB;IAChB,WAAW,CAAC,EAAE,MAAM,GAAG,IAAI,CAAC;IAC5B,QAAQ,EAAE,MAAM,CAAC;IACjB,gBAAgB;IAChB,QAAQ,EAAE,MAAM,GAAG,IAAI,CAAC;CACzB"}

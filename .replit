@@ -1,0 +1,36 @@
+modules = ["nodejs-22", "python-base-3.13", "postgresql-16"]
+
+[[ports]]
+localPort = 4011
+externalPort = 3001
+
+[[ports]]
+localPort = 8080
+externalPort = 8080
+
+[[ports]]
+localPort = 8081
+externalPort = 80
+
+[[ports]]
+localPort = 25632
+externalPort = 3002
+
+[deployment]
+router = "application"
+deploymentTarget = "autoscale"
+
+[nix]
+channel = "stable-25_05"
+packages = ["libreoffice"]
+
+[userenv]
+
+[userenv.shared]
+
+[userenv.development]
+PCO_REDIRECT_URI = "https://ab094c80-114d-44dd-b12c-b69b2172c9d7-00-h5z4q4nags9z.janeway.replit.dev/api/auth/planning-center/callback"
+
+[userenv.production]
+PCO_REDIRECT_URI = "https://TransformChurch.replit.app/api/auth/planning-center/callback"
+# This project uses the standard npm scripts documented in README.md.
