@@ -1,8 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useAdminListUsers, useGetAuditLog, useListTracks } from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Users, BookOpen, Activity, ShieldCheck, ClipboardList, UserCog } from "lucide-react";
+import { Users, BookOpen, Activity, ShieldCheck, ClipboardList, UserCog, RefreshCw } from "lucide-react";
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -26,7 +26,23 @@ export default function AdminDashboard() {
   const [selectedTrackId, setSelectedTrackId] = useState<string>("all");
 
   const auditParams = selectedTrackId !== "all" ? { trackId: parseInt(selectedTrackId) } : undefined;
-  const { data: auditLog, isLoading: auditLoading } = useGetAuditLog(auditParams);
+  const {
+    data: auditLog,
+    isLoading: auditLoading,
+    isFetching: auditFetching,
+    isError: auditError,
+    refetch: refreshAuditLog,
+    dataUpdatedAt: auditUpdatedAt,
+  } = useGetAuditLog(auditParams);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") {
+        void refreshAuditLog();
+      }
+    }, 15_000);
+    return () => window.clearInterval(timer);
+  }, [refreshAuditLog]);
 
   if (usersLoading) return <div className="p-8 text-center">Loading admin data...</div>;
 
@@ -152,16 +168,29 @@ export default function AdminDashboard() {
         </Card>
       </div>
 
-      {/* Content Change Log */}
+      {/* Live activity log */}
       <Card>
         <CardHeader>
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-            <CardTitle className="flex items-center gap-2">
-              <ClipboardList className="w-5 h-5 text-muted-foreground" /> Content Change Log
-            </CardTitle>
-            <div className="w-full sm:w-64">
+            <div>
+              <CardTitle className="flex items-center gap-2">
+                <ClipboardList className="w-5 h-5 text-muted-foreground" /> Admin Activity Log
+                <Badge variant="outline" className="gap-1.5 border-green-200 bg-green-50 text-green-700">
+                  <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
+                  Live
+                </Badge>
+              </CardTitle>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {auditFetching
+                  ? "Refreshing activity…"
+                  : auditUpdatedAt
+                    ? `Updated ${new Date(auditUpdatedAt).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" })}`
+                    : "Refreshes every 15 seconds"}
+              </p>
+            </div>
+            <div className="flex w-full items-center gap-2 sm:w-auto">
               <Select value={selectedTrackId} onValueChange={setSelectedTrackId}>
-                <SelectTrigger className="h-8 text-sm">
+                <SelectTrigger className="h-9 min-w-0 flex-1 text-sm sm:w-56">
                   <SelectValue placeholder="Filter by track" />
                 </SelectTrigger>
                 <SelectContent>
@@ -171,18 +200,36 @@ export default function AdminDashboard() {
                   ))}
                 </SelectContent>
               </Select>
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                onClick={() => void refreshAuditLog()}
+                disabled={auditFetching}
+                aria-label="Refresh activity log"
+                title="Refresh activity log"
+              >
+                <RefreshCw className={`h-4 w-4 ${auditFetching ? "animate-spin" : ""}`} />
+              </Button>
             </div>
           </div>
         </CardHeader>
         <CardContent>
           {auditLoading ? (
-            <div className="py-8 text-center text-muted-foreground text-sm">Loading change log...</div>
+            <div className="py-8 text-center text-muted-foreground text-sm">Loading activity...</div>
+          ) : auditError ? (
+            <div className="rounded-lg border border-destructive/20 bg-destructive/5 px-4 py-8 text-center">
+              <p className="text-sm font-medium text-destructive">Activity could not be loaded.</p>
+              <Button variant="outline" size="sm" className="mt-3" onClick={() => void refreshAuditLog()}>
+                Try again
+              </Button>
+            </div>
           ) : !auditLog || auditLog.length === 0 ? (
-            <div className="py-8 text-center text-muted-foreground text-sm">No changes recorded yet.</div>
+            <div className="py-8 text-center text-muted-foreground text-sm">No activity recorded yet.</div>
           ) : (
-            <div className="overflow-x-auto">
+            <div className="max-h-[32rem] overflow-auto rounded-md border">
               <table className="w-full text-sm">
-                <thead>
+                <thead className="sticky top-0 z-10 bg-card">
                   <tr className="border-b text-muted-foreground text-xs uppercase tracking-wide">
                     <th className="text-left py-2 pr-4 font-medium">When</th>
                     <th className="text-left py-2 pr-4 font-medium">Who</th>
