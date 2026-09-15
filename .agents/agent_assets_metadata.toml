@@ -1,0 +1,16 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "yiTABoH6W76CkIaDT2xCD"
+uri = "file://attached_assets/wiki-production-import.sql"
+type = "unspecified"
+title = "Production Wiki Import"
+description = "Transactional, repeatable import of 8 Wiki categories, 68 articles, 6 user grants matched by email, and 1 group grant matched by group name."
+logical_id = "e4f0c9b8-fe78-4cb9-8840-e8aade49176d"
+content_hash = "sha256:fbae31dc2cdcd000c17aa570f6fc85f61c5fb0a7d82f0b2dc623668cadfd43ab"
+size = 260159
+mtime_ms = 1789487872847
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ab094c80-114d-44dd-b12c-b69b2172c9d7/e4f0c9b8-fe78-4cb9-8840-e8aade49176d/2f8709e9-cf11-4a93-95f3-aa7a3d6384d4"
+storage_version_token = "1789487902192608"
+content_type = "application/octet-stream"
