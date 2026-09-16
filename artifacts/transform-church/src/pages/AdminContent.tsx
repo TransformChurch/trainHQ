@@ -2258,7 +2258,7 @@ export default function AdminContent({ section = "modules" }: { section?: AdminC
                       onValueChange={value => setEditPcoAssignedFieldId(value === "none" ? "" : value)}
                     >
                       <SelectTrigger><SelectValue placeholder="Not synced" /></SelectTrigger>
-                      <SelectContent>
+                      <SelectContent className="max-h-64 overflow-y-scroll">
                         <SelectItem value="none">Not synced</SelectItem>
                         {pcoFields.map(field => <SelectItem key={field.id} value={field.id}>{field.label}</SelectItem>)}
                       </SelectContent>
@@ -2270,7 +2270,7 @@ export default function AdminContent({ section = "modules" }: { section?: AdminC
                       onValueChange={value => setEditPcoCompletedFieldId(value === "none" ? "" : value)}
                     >
                       <SelectTrigger><SelectValue placeholder="Not synced" /></SelectTrigger>
-                      <SelectContent>
+                      <SelectContent className="max-h-64 overflow-y-scroll">
                         <SelectItem value="none">Not synced</SelectItem>
                         {pcoFields.map(field => <SelectItem key={field.id} value={field.id}>{field.label}</SelectItem>)}
                       </SelectContent>
