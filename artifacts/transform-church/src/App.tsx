@@ -264,6 +264,8 @@ function AppRoutes() {
           <Route path="/documents"><ProtectedRoute component={Documents} /></Route>
           <Route path="/wiki"><ProtectedRoute component={Wiki} /></Route>
           <Route path="/wiki/:slug"><ProtectedRoute component={WikiArticle} /></Route>
+          <Route path="/tc-wiki"><ProtectedRoute component={() => <Wiki wikiKey="tc-wiki" wikiName="TC Wiki" />} /></Route>
+          <Route path="/tc-wiki/:slug"><ProtectedRoute component={() => <WikiArticle wikiKey="tc-wiki" wikiName="TC Wiki" />} /></Route>
           <Route path="/facilities"><ProtectedRoute component={Facilities} /></Route>
           <Route path="/reporting"><ProtectedRoute component={Reporting} managerOrAdmin /></Route>
           <Route path="/admin"><ProtectedRoute component={AdminDashboard} adminOnly /></Route>
@@ -275,6 +277,7 @@ function AppRoutes() {
           <Route path="/admin/settings"><ProtectedRoute component={AdminSettings} adminOnly /></Route>
           <Route path="/admin/facilities"><ProtectedRoute component={AdminFacilities} adminOnly /></Route>
           <Route path="/admin/wiki"><ProtectedRoute component={AdminWiki} adminOnly /></Route>
+          <Route path="/admin/tc-wiki"><ProtectedRoute component={() => <AdminWiki wikiKey="tc-wiki" wikiName="TC Wiki" />} adminOnly /></Route>
           <Route component={NotFound} />
         </Switch>
       </UserSyncProvider>

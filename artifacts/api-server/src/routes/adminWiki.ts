@@ -9,11 +9,9 @@ import {
   wikiCategoriesTable,
   wikiGroupAccessTable,
 } from "@workspace/db";
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { getAuth } from "../middlewares/auth";
 import { requireAdmin } from "../middlewares/requireAuth";
-
-const router = Router();
 
 type WikiImportCategory = {
   slug: string;
@@ -201,10 +199,12 @@ function parseImportBundle(value: unknown): { bundle: WikiImportBundle | null; e
   return { bundle: { categories, articles, userGrants, groupGrants }, errors };
 }
 
-async function previewImport(bundle: WikiImportBundle, validationErrors: string[]): Promise<WikiImportPreview> {
+async function previewImport(bundle: WikiImportBundle, validationErrors: string[], wikiKey: string): Promise<WikiImportPreview> {
   const [categories, articles, users, groups] = await Promise.all([
-    db.select({ slug: wikiCategoriesTable.slug, name: wikiCategoriesTable.name }).from(wikiCategoriesTable),
-    db.select({ slug: wikiArticlesTable.slug }).from(wikiArticlesTable),
+    db.select({ slug: wikiCategoriesTable.slug, name: wikiCategoriesTable.name }).from(wikiCategoriesTable)
+      .where(eq(wikiCategoriesTable.wikiKey, wikiKey)),
+    db.select({ slug: wikiArticlesTable.slug }).from(wikiArticlesTable)
+      .where(eq(wikiArticlesTable.wikiKey, wikiKey)),
     db.select({ email: usersTable.email }).from(usersTable),
     db.select({ name: groupsTable.name }).from(groupsTable),
   ]);
@@ -270,14 +270,16 @@ async function previewImport(bundle: WikiImportBundle, validationErrors: string[
   };
 }
 
-async function listCategories() {
+async function listCategories(wikiKey: string) {
   const categories = await db
     .select()
     .from(wikiCategoriesTable)
+    .where(eq(wikiCategoriesTable.wikiKey, wikiKey))
     .orderBy(asc(wikiCategoriesTable.sortOrder), asc(wikiCategoriesTable.id));
   const articles = await db
     .select()
     .from(wikiArticlesTable)
+    .where(eq(wikiArticlesTable.wikiKey, wikiKey))
     .orderBy(asc(wikiArticlesTable.sortOrder), asc(wikiArticlesTable.id));
   return categories.map((category) => ({
     ...category,
@@ -293,9 +295,12 @@ async function listCategories() {
   }));
 }
 
+export function createAdminWikiRouter(wikiKey: string) {
+const router = Router();
+
 router.get("/", requireAdmin, async (_req, res) => {
   try {
-    res.json(await listCategories());
+    res.json(await listCategories(wikiKey));
   } catch {
     res.status(500).json({ error: "Internal server error" });
   }
@@ -303,7 +308,9 @@ router.get("/", requireAdmin, async (_req, res) => {
 
 router.get("/access", requireAdmin, async (_req, res) => {
   try {
-    const grants = await db.select().from(wikiAccessTable).orderBy(asc(wikiAccessTable.grantedAt));
+    const grants = await db.select().from(wikiAccessTable)
+      .where(eq(wikiAccessTable.wikiKey, wikiKey))
+      .orderBy(asc(wikiAccessTable.grantedAt));
     res.json(grants.map((grant) => ({ ...grant, grantedAt: grant.grantedAt.toISOString() })));
   } catch {
     res.status(500).json({ error: "Internal server error" });
@@ -321,6 +328,7 @@ router.get("/access/groups", requireAdmin, async (_req, res) => {
       grantedAt: wikiGroupAccessTable.grantedAt,
     }).from(wikiGroupAccessTable)
       .innerJoin(groupsTable, eq(wikiGroupAccessTable.groupId, groupsTable.id))
+      .where(eq(wikiGroupAccessTable.wikiKey, wikiKey))
       .orderBy(asc(groupsTable.name));
     res.json(grants.map((grant) => ({ ...grant, grantedAt: grant.grantedAt.toISOString() })));
   } catch {
@@ -339,6 +347,7 @@ router.get("/export", requireAdmin, async (req, res) => {
         sortOrder: wikiCategoriesTable.sortOrder,
         isActive: wikiCategoriesTable.isActive,
       }).from(wikiCategoriesTable)
+        .where(eq(wikiCategoriesTable.wikiKey, wikiKey))
         .orderBy(asc(wikiCategoriesTable.sortOrder), asc(wikiCategoriesTable.id)),
       tx.select({
         categorySlug: wikiCategoriesTable.slug,
@@ -349,19 +358,25 @@ router.get("/export", requireAdmin, async (req, res) => {
         sortOrder: wikiArticlesTable.sortOrder,
         isActive: wikiArticlesTable.isActive,
       }).from(wikiArticlesTable)
-        .innerJoin(wikiCategoriesTable, eq(wikiArticlesTable.categoryId, wikiCategoriesTable.id))
+        .innerJoin(wikiCategoriesTable, and(
+          eq(wikiArticlesTable.categoryId, wikiCategoriesTable.id),
+          eq(wikiCategoriesTable.wikiKey, wikiKey),
+        ))
+        .where(eq(wikiArticlesTable.wikiKey, wikiKey))
         .orderBy(asc(wikiArticlesTable.sortOrder), asc(wikiArticlesTable.id)),
       tx.select({
         userEmail: usersTable.email,
         grantedAt: wikiAccessTable.grantedAt,
       }).from(wikiAccessTable)
         .innerJoin(usersTable, eq(wikiAccessTable.userId, usersTable.id))
+        .where(eq(wikiAccessTable.wikiKey, wikiKey))
         .orderBy(asc(usersTable.email)),
       tx.select({
         groupName: groupsTable.name,
         grantedAt: wikiGroupAccessTable.grantedAt,
       }).from(wikiGroupAccessTable)
         .innerJoin(groupsTable, eq(wikiGroupAccessTable.groupId, groupsTable.id))
+        .where(eq(wikiGroupAccessTable.wikiKey, wikiKey))
         .orderBy(asc(groupsTable.name)),
       ]);
       const duplicateUserEmails = userGrants
@@ -410,7 +425,7 @@ router.post("/import/preview", requireAdmin, wikiImportJson, async (req, res) =>
       } satisfies WikiImportPreview);
       return;
     }
-    res.json(await previewImport(parsed.bundle, parsed.errors));
+    res.json(await previewImport(parsed.bundle, parsed.errors, wikiKey));
   } catch (err) {
     req.log.error({ err }, "Wiki import preview failed");
     res.status(500).json({ error: "Wiki import preview could not be generated." });
@@ -424,7 +439,7 @@ router.post("/import/confirm", requireAdmin, wikiImportJson, async (req, res) =>
       res.status(400).json({ error: parsed.errors.join(" ") });
       return;
     }
-    const preview = await previewImport(parsed.bundle, parsed.errors);
+    const preview = await previewImport(parsed.bundle, parsed.errors, wikiKey);
     if (!preview.canConfirm) {
       res.status(400).json({ error: "The import contains errors. Generate a new preview after fixing the file.", preview });
       return;
@@ -434,10 +449,11 @@ router.post("/import/confirm", requireAdmin, wikiImportJson, async (req, res) =>
       for (const category of parsed.bundle!.categories) {
         await tx.insert(wikiCategoriesTable).values({
           ...category,
+          wikiKey,
           createdByExternalUserId: actorExternalUserId,
           updatedAt: new Date(),
         }).onConflictDoUpdate({
-          target: wikiCategoriesTable.slug,
+          target: [wikiCategoriesTable.wikiKey, wikiCategoriesTable.slug],
           set: {
             name: category.name,
             description: category.description,
@@ -447,12 +463,14 @@ router.post("/import/confirm", requireAdmin, wikiImportJson, async (req, res) =>
           },
         });
       }
-      const categoryRows = await tx.select({ id: wikiCategoriesTable.id, slug: wikiCategoriesTable.slug }).from(wikiCategoriesTable);
+      const categoryRows = await tx.select({ id: wikiCategoriesTable.id, slug: wikiCategoriesTable.slug })
+        .from(wikiCategoriesTable).where(eq(wikiCategoriesTable.wikiKey, wikiKey));
       const categoryIds = new Map(categoryRows.map((item) => [item.slug, item.id]));
       for (const article of parsed.bundle!.articles) {
         const categoryId = categoryIds.get(article.categorySlug);
         if (!categoryId) throw new Error(`Missing category ${article.categorySlug}`);
         await tx.insert(wikiArticlesTable).values({
+          wikiKey,
           categoryId,
           slug: article.slug,
           title: article.title,
@@ -463,7 +481,7 @@ router.post("/import/confirm", requireAdmin, wikiImportJson, async (req, res) =>
           createdByExternalUserId: actorExternalUserId,
           updatedAt: new Date(),
         }).onConflictDoUpdate({
-          target: wikiArticlesTable.slug,
+          target: [wikiArticlesTable.wikiKey, wikiArticlesTable.slug],
           set: {
             categoryId,
             title: article.title,
@@ -497,11 +515,12 @@ router.post("/import/confirm", requireAdmin, wikiImportJson, async (req, res) =>
         if (matchingUserIds.length > 1) throw new Error(`Ambiguous user grant ${grant.userEmail}`);
         const userId = matchingUserIds[0];
         await tx.insert(wikiAccessTable).values({
+          wikiKey,
           userId,
           grantedByExternalUserId: actorExternalUserId,
           grantedAt: new Date(grant.grantedAt),
         }).onConflictDoUpdate({
-          target: wikiAccessTable.userId,
+          target: [wikiAccessTable.wikiKey, wikiAccessTable.userId],
           set: { grantedByExternalUserId: actorExternalUserId, grantedAt: new Date(grant.grantedAt) },
         });
         userGrantsImported += 1;
@@ -512,11 +531,12 @@ router.post("/import/confirm", requireAdmin, wikiImportJson, async (req, res) =>
         if (matchingGroupIds.length > 1) throw new Error(`Ambiguous group grant ${grant.groupName}`);
         const groupId = matchingGroupIds[0];
         await tx.insert(wikiGroupAccessTable).values({
+          wikiKey,
           groupId,
           grantedByExternalUserId: actorExternalUserId,
           grantedAt: new Date(grant.grantedAt),
         }).onConflictDoUpdate({
-          target: wikiGroupAccessTable.groupId,
+          target: [wikiGroupAccessTable.wikiKey, wikiGroupAccessTable.groupId],
           set: { grantedByExternalUserId: actorExternalUserId, grantedAt: new Date(grant.grantedAt) },
         });
         groupGrantsImported += 1;
@@ -550,15 +570,18 @@ router.put("/access/users/:userId", requireAdmin, async (req, res) => {
     if (enabled) {
       const auth = getAuth(req);
       const rows = await db.insert(wikiAccessTable)
-        .values({ userId, grantedByExternalUserId: auth!.userId! })
+        .values({ wikiKey, userId, grantedByExternalUserId: auth!.userId! })
         .onConflictDoUpdate({
-          target: wikiAccessTable.userId,
+          target: [wikiAccessTable.wikiKey, wikiAccessTable.userId],
           set: { grantedByExternalUserId: auth!.userId!, grantedAt: new Date() },
         }).returning();
       res.json({ ...rows[0], grantedAt: rows[0].grantedAt.toISOString(), allowed: true });
       return;
     }
-    await db.delete(wikiAccessTable).where(eq(wikiAccessTable.userId, userId));
+    await db.delete(wikiAccessTable).where(and(
+      eq(wikiAccessTable.wikiKey, wikiKey),
+      eq(wikiAccessTable.userId, userId),
+    ));
     res.json({ userId, allowed: false });
   } catch {
     res.status(500).json({ error: "Internal server error" });
@@ -581,15 +604,18 @@ router.put("/access/groups/:groupId", requireAdmin, async (req, res) => {
     if (enabled) {
       const auth = getAuth(req);
       const rows = await db.insert(wikiGroupAccessTable)
-        .values({ groupId, grantedByExternalUserId: auth!.userId! })
+        .values({ wikiKey, groupId, grantedByExternalUserId: auth!.userId! })
         .onConflictDoUpdate({
-          target: wikiGroupAccessTable.groupId,
+          target: [wikiGroupAccessTable.wikiKey, wikiGroupAccessTable.groupId],
           set: { grantedByExternalUserId: auth!.userId!, grantedAt: new Date() },
         }).returning();
       res.json({ ...rows[0], grantedAt: rows[0].grantedAt.toISOString(), allowed: true });
       return;
     }
-    await db.delete(wikiGroupAccessTable).where(eq(wikiGroupAccessTable.groupId, groupId));
+    await db.delete(wikiGroupAccessTable).where(and(
+      eq(wikiGroupAccessTable.wikiKey, wikiKey),
+      eq(wikiGroupAccessTable.groupId, groupId),
+    ));
     res.json({ groupId, allowed: false });
   } catch {
     res.status(500).json({ error: "Internal server error" });
@@ -603,17 +629,21 @@ router.put("/categories/reorder", requireAdmin, async (req, res) => {
       res.status(400).json({ error: "categoryIds must contain unique category IDs" });
       return;
     }
-    const existing = await db.select({ id: wikiCategoriesTable.id }).from(wikiCategoriesTable);
+    const existing = await db.select({ id: wikiCategoriesTable.id }).from(wikiCategoriesTable)
+      .where(eq(wikiCategoriesTable.wikiKey, wikiKey));
     if (existing.length !== categoryIds.length || existing.some((row) => !categoryIds.includes(row.id))) {
       res.status(400).json({ error: "categoryIds must include every category exactly once" });
       return;
     }
     await db.transaction(async (tx) => {
       for (const [sortOrder, id] of categoryIds.entries()) {
-        await tx.update(wikiCategoriesTable).set({ sortOrder, updatedAt: new Date() }).where(eq(wikiCategoriesTable.id, id));
+        await tx.update(wikiCategoriesTable).set({ sortOrder, updatedAt: new Date() }).where(and(
+          eq(wikiCategoriesTable.wikiKey, wikiKey),
+          eq(wikiCategoriesTable.id, id),
+        ));
       }
     });
-    res.json(await listCategories());
+    res.json(await listCategories(wikiKey));
   } catch {
     res.status(500).json({ error: "Internal server error" });
   }
@@ -628,6 +658,7 @@ router.post("/categories", requireAdmin, async (req, res) => {
     }
     const slug = text(req.body?.slug, 120) ? slugify(text(req.body.slug, 120)) : slugify(name);
     const rows = await db.insert(wikiCategoriesTable).values({
+      wikiKey,
       slug,
       name,
       description: text(req.body?.description, 500) || null,
@@ -637,7 +668,7 @@ router.post("/categories", requireAdmin, async (req, res) => {
     }).returning();
     res.status(201).json(rows[0]);
   } catch (err) {
-    if (String(err).includes("wiki_categories_name_unique") || String(err).includes("wiki_categories_slug_unique")) {
+    if (String(err).includes("wiki_categories_wiki_name_unique") || String(err).includes("wiki_categories_wiki_slug_unique")) {
       res.status(409).json({ error: "A category with this name already exists" });
       return;
     }
@@ -672,14 +703,17 @@ router.patch("/categories/:categoryId", requireAdmin, async (req, res) => {
     if ("description" in req.body) values.description = text(req.body.description, 500) || null;
     if ("sortOrder" in req.body) values.sortOrder = integer(req.body.sortOrder);
     if ("isActive" in req.body && typeof req.body.isActive === "boolean") values.isActive = req.body.isActive;
-    const rows = await db.update(wikiCategoriesTable).set(values).where(eq(wikiCategoriesTable.id, categoryId)).returning();
+    const rows = await db.update(wikiCategoriesTable).set(values).where(and(
+      eq(wikiCategoriesTable.wikiKey, wikiKey),
+      eq(wikiCategoriesTable.id, categoryId),
+    )).returning();
     if (!rows[0]) {
       res.status(404).json({ error: "Category not found" });
       return;
     }
     res.json(rows[0]);
   } catch (err) {
-    if (String(err).includes("wiki_categories_name_unique") || String(err).includes("wiki_categories_slug_unique")) {
+    if (String(err).includes("wiki_categories_wiki_name_unique") || String(err).includes("wiki_categories_wiki_slug_unique")) {
       res.status(409).json({ error: "A category with this name or slug already exists" });
       return;
     }
@@ -694,7 +728,10 @@ router.delete("/categories/:categoryId", requireAdmin, async (req, res) => {
       res.status(400).json({ error: "Invalid category" });
       return;
     }
-    await db.delete(wikiCategoriesTable).where(eq(wikiCategoriesTable.id, categoryId));
+    await db.delete(wikiCategoriesTable).where(and(
+      eq(wikiCategoriesTable.wikiKey, wikiKey),
+      eq(wikiCategoriesTable.id, categoryId),
+    ));
     res.status(204).send();
   } catch {
     res.status(500).json({ error: "Internal server error" });
@@ -710,13 +747,17 @@ router.post("/articles", requireAdmin, async (req, res) => {
       res.status(400).json({ error: "Category, title, and content are required" });
       return;
     }
-    const category = await db.select({ id: wikiCategoriesTable.id }).from(wikiCategoriesTable).where(eq(wikiCategoriesTable.id, categoryId)).limit(1);
+    const category = await db.select({ id: wikiCategoriesTable.id }).from(wikiCategoriesTable).where(and(
+      eq(wikiCategoriesTable.wikiKey, wikiKey),
+      eq(wikiCategoriesTable.id, categoryId),
+    )).limit(1);
     if (!category[0]) {
       res.status(404).json({ error: "Category not found" });
       return;
     }
     const slug = text(req.body?.slug, 160) ? slugify(text(req.body.slug, 160)) : slugify(title);
     const rows = await db.insert(wikiArticlesTable).values({
+      wikiKey,
       categoryId,
       slug,
       title,
@@ -728,7 +769,7 @@ router.post("/articles", requireAdmin, async (req, res) => {
     }).returning();
     res.status(201).json(rows[0]);
   } catch (err) {
-    if (String(err).includes("wiki_articles_slug_unique")) {
+    if (String(err).includes("wiki_articles_wiki_slug_unique")) {
       res.status(409).json({ error: "An article with this slug already exists" });
       return;
     }
@@ -748,6 +789,14 @@ router.patch("/articles/:articleId", requireAdmin, async (req, res) => {
       const categoryId = integer(req.body.categoryId, -1);
       if (categoryId < 1) {
         res.status(400).json({ error: "A valid category is required" });
+        return;
+      }
+      const category = await db.select({ id: wikiCategoriesTable.id }).from(wikiCategoriesTable).where(and(
+        eq(wikiCategoriesTable.wikiKey, wikiKey),
+        eq(wikiCategoriesTable.id, categoryId),
+      )).limit(1);
+      if (!category[0]) {
+        res.status(404).json({ error: "Category not found" });
         return;
       }
       values.categoryId = categoryId;
@@ -779,14 +828,17 @@ router.patch("/articles/:articleId", requireAdmin, async (req, res) => {
     }
     if ("sortOrder" in req.body) values.sortOrder = integer(req.body.sortOrder);
     if ("isActive" in req.body && typeof req.body.isActive === "boolean") values.isActive = req.body.isActive;
-    const rows = await db.update(wikiArticlesTable).set(values).where(eq(wikiArticlesTable.id, articleId)).returning();
+    const rows = await db.update(wikiArticlesTable).set(values).where(and(
+      eq(wikiArticlesTable.wikiKey, wikiKey),
+      eq(wikiArticlesTable.id, articleId),
+    )).returning();
     if (!rows[0]) {
       res.status(404).json({ error: "Article not found" });
       return;
     }
     res.json(rows[0]);
   } catch (err) {
-    if (String(err).includes("wiki_articles_slug_unique")) {
+    if (String(err).includes("wiki_articles_wiki_slug_unique")) {
       res.status(409).json({ error: "An article with this slug already exists" });
       return;
     }
@@ -801,11 +853,17 @@ router.delete("/articles/:articleId", requireAdmin, async (req, res) => {
       res.status(400).json({ error: "Invalid article" });
       return;
     }
-    await db.delete(wikiArticlesTable).where(eq(wikiArticlesTable.id, articleId));
+    await db.delete(wikiArticlesTable).where(and(
+      eq(wikiArticlesTable.wikiKey, wikiKey),
+      eq(wikiArticlesTable.id, articleId),
+    ));
     res.status(204).send();
   } catch {
     res.status(500).json({ error: "Internal server error" });
   }
 });
 
-export default router;
+return router;
+}
+
+export default createAdminWikiRouter("wiki");

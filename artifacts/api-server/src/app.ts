@@ -68,7 +68,7 @@ app.use(cors({
 // Direct object uploads must remain an unread stream, including uploads whose
 // file MIME type happens to be JSON or form data.
 app.use(express.json({
-  type: (req) => !(req.url ?? "").startsWith("/api/admin/wiki/import/")
+  type: (req) => !/^\/api\/admin\/(?:wiki|tc-wiki)\/import\//.test(req.url ?? "")
     && !isObjectUploadRequest(req)
     && hasContentType(req, "application/json"),
 }));

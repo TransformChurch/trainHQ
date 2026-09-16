@@ -15,7 +15,7 @@ import storageRouter from "./storage";
 import growthTracksRouter from "./growthTracks";
 import documentsRouter from "./documents";
 import facilitiesRouter from "./facilities";
-import wikiRouter from "./wiki";
+import wikiRouter, { createWikiRouter } from "./wiki";
 import siteCopyRouter from "./siteCopy";
 import reportsRouter from "./reports";
 
@@ -38,6 +38,7 @@ router.use("/growth-tracks", growthTracksRouter);
 router.use("/documents", documentsRouter);
 router.use("/facilities", facilitiesRouter);
 router.use("/wiki", wikiRouter);
+router.use("/tc-wiki", createWikiRouter("tc-wiki", "TC Wiki"));
 router.use(siteCopyRouter);
 router.use("/reports", reportsRouter);
 

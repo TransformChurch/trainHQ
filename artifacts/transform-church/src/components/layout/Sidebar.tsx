@@ -27,6 +27,7 @@ export function Sidebar() {
   const isManagerOrAdmin = isAdmin || isManager;
   const [facilitiesAllowed, setFacilitiesAllowed] = useState(false);
   const [wikiAllowed, setWikiAllowed] = useState(false);
+  const [tcWikiAllowed, setTcWikiAllowed] = useState(false);
 
   const isProfileIncomplete = user && (!user.phone || !user.firstName || !user.lastName);
 
@@ -34,11 +35,13 @@ export function Sidebar() {
     if (!user) {
       setFacilitiesAllowed(false);
       setWikiAllowed(false);
+      setTcWikiAllowed(false);
       return;
     }
     if (user.role === "admin") {
       setFacilitiesAllowed(true);
       setWikiAllowed(true);
+      setTcWikiAllowed(true);
       return;
     }
     const token = sessionStorage.getItem("auth_bearer_token");
@@ -55,6 +58,12 @@ export function Sidebar() {
       .then((response) => response.ok ? response.json() : { allowed: false })
       .then((result: { allowed?: boolean }) => setWikiAllowed(result.allowed === true))
       .catch(() => setWikiAllowed(false));
+    fetch(`${apiBase}/api/tc-wiki/access`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    })
+      .then((response) => response.ok ? response.json() : { allowed: false })
+      .then((result: { allowed?: boolean }) => setTcWikiAllowed(result.allowed === true))
+      .catch(() => setTcWikiAllowed(false));
   }, [user?.id, user?.role, basePath]);
 
   const learningItems: NavigationItem[] = [
@@ -68,6 +77,7 @@ export function Sidebar() {
   const informationItems: NavigationItem[] = [
     { href: "/documents", label: copy("nav.documents"), icon: FileText },
     ...(wikiAllowed ? [{ href: "/wiki", label: copy("nav.wiki"), icon: Library }] : []),
+    ...(tcWikiAllowed ? [{ href: "/tc-wiki", label: "TC Wiki", icon: Library }] : []),
     ...(facilitiesAllowed ? [{ href: "/facilities", label: copy("nav.requestHub"), icon: Wrench }] : []),
     ...(isManagerOrAdmin ? [{ href: "/reporting", label: "Reporting", icon: BarChart3 }] : []),
   ];
@@ -84,6 +94,7 @@ export function Sidebar() {
     { href: "/admin/settings", label: copy("nav.adminSettings"), icon: Settings },
     { href: "/admin/facilities", label: copy("nav.requestHub"), icon: Wrench },
     { href: "/admin/wiki", label: copy("nav.wiki"), icon: Library },
+    { href: "/admin/tc-wiki", label: "TC Wiki", icon: Library },
   ];
 
   const handleSignOut = () => {

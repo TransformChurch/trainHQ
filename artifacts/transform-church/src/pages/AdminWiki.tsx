@@ -73,7 +73,13 @@ const emptyArticle = (categoryId = 0): ArticleDraft => ({
   isActive: true,
 });
 
-export default function AdminWiki() {
+type AdminWikiProps = {
+  wikiKey?: "wiki" | "tc-wiki";
+  wikiName?: string;
+};
+
+export default function AdminWiki({ wikiKey = "wiki", wikiName = "Wiki" }: AdminWikiProps) {
+  const apiPrefix = `/api/admin/${wikiKey}`;
   const { data: users } = useAdminListUsers();
   const { toast } = useToast();
   const [categories, setCategories] = useState<WikiAdminCategory[]>([]);
@@ -99,9 +105,9 @@ export default function AdminWiki() {
     setLoading(true);
     try {
       const [catalog, directAccess, groupAccess, availableGroups] = await Promise.all([
-        wikiApi<WikiAdminCategory[]>("/api/admin/wiki"),
-        wikiApi<WikiAccessGrant[]>("/api/admin/wiki/access"),
-        wikiApi<WikiGroupAccessGrant[]>("/api/admin/wiki/access/groups"),
+        wikiApi<WikiAdminCategory[]>(apiPrefix),
+        wikiApi<WikiAccessGrant[]>(`${apiPrefix}/access`),
+        wikiApi<WikiGroupAccessGrant[]>(`${apiPrefix}/access/groups`),
         wikiApi<WikiGroup[]>("/api/groups"),
       ]);
       setCategories(catalog);
@@ -133,8 +139,8 @@ export default function AdminWiki() {
 
   const refreshAccess = async () => {
     const [directAccess, groupAccess] = await Promise.all([
-      wikiApi<WikiAccessGrant[]>("/api/admin/wiki/access"),
-      wikiApi<WikiGroupAccessGrant[]>("/api/admin/wiki/access/groups"),
+      wikiApi<WikiAccessGrant[]>(`${apiPrefix}/access`),
+      wikiApi<WikiGroupAccessGrant[]>(`${apiPrefix}/access/groups`),
     ]);
     setAccessGrants(directAccess);
     setGroupAccessGrants(groupAccess);
@@ -144,7 +150,7 @@ export default function AdminWiki() {
     const key = `user:${userId}`;
     setSavingAccess((current) => new Set(current).add(key));
     try {
-      await wikiApi(`/api/admin/wiki/access/users/${userId}`, {
+      await wikiApi(`${apiPrefix}/access/users/${userId}`, {
         method: "PUT",
         body: JSON.stringify({ enabled }),
       });
@@ -165,7 +171,7 @@ export default function AdminWiki() {
     const key = `group:${groupId}`;
     setSavingAccess((current) => new Set(current).add(key));
     try {
-      await wikiApi(`/api/admin/wiki/access/groups/${groupId}`, {
+      await wikiApi(`${apiPrefix}/access/groups/${groupId}`, {
         method: "PUT",
         body: JSON.stringify({ enabled }),
       });
@@ -204,7 +210,7 @@ export default function AdminWiki() {
     setSaving(true);
     try {
       await wikiApi(
-        categoryDraft.id ? `/api/admin/wiki/categories/${categoryDraft.id}` : "/api/admin/wiki/categories",
+        categoryDraft.id ? `${apiPrefix}/categories/${categoryDraft.id}` : `${apiPrefix}/categories`,
         { method: categoryDraft.id ? "PATCH" : "POST", body: JSON.stringify(categoryDraft) },
       );
       toast({ title: categoryDraft.id ? "Category updated" : "Category added" });
@@ -223,7 +229,7 @@ export default function AdminWiki() {
       : `Delete "${category.name}"?`;
     if (!window.confirm(warning)) return;
     try {
-      await wikiApi(`/api/admin/wiki/categories/${category.id}`, { method: "DELETE" });
+      await wikiApi(`${apiPrefix}/categories/${category.id}`, { method: "DELETE" });
       toast({ title: "Category deleted" });
       await load();
     } catch (err) {
@@ -238,7 +244,7 @@ export default function AdminWiki() {
     [reordered[categoryIndex], reordered[targetIndex]] = [reordered[targetIndex], reordered[categoryIndex]];
     setCategories(reordered.map((category, sortOrder) => ({ ...category, sortOrder })));
     try {
-      const next = await wikiApi<WikiAdminCategory[]>("/api/admin/wiki/categories/reorder", {
+      const next = await wikiApi<WikiAdminCategory[]>(`${apiPrefix}/categories/reorder`, {
         method: "PUT",
         body: JSON.stringify({ categoryIds: reordered.map((category) => category.id) }),
       });
@@ -273,7 +279,7 @@ export default function AdminWiki() {
     setSaving(true);
     try {
       await wikiApi(
-        articleDraft.id ? `/api/admin/wiki/articles/${articleDraft.id}` : "/api/admin/wiki/articles",
+        articleDraft.id ? `${apiPrefix}/articles/${articleDraft.id}` : `${apiPrefix}/articles`,
         { method: articleDraft.id ? "PATCH" : "POST", body: JSON.stringify(articleDraft) },
       );
       toast({ title: articleDraft.id ? "Article updated" : "Article added" });
@@ -289,7 +295,7 @@ export default function AdminWiki() {
   const deleteArticle = async (article: WikiAdminArticle) => {
     if (!window.confirm(`Delete "${article.title}"?`)) return;
     try {
-      await wikiApi(`/api/admin/wiki/articles/${article.id}`, { method: "DELETE" });
+      await wikiApi(`${apiPrefix}/articles/${article.id}`, { method: "DELETE" });
       toast({ title: "Article deleted" });
       await load();
     } catch (err) {
@@ -299,12 +305,12 @@ export default function AdminWiki() {
 
   const downloadExport = async () => {
     try {
-      const bundle = await wikiApi<unknown>("/api/admin/wiki/export");
+      const bundle = await wikiApi<unknown>(`${apiPrefix}/export`);
       const blob = new Blob([`${JSON.stringify(bundle, null, 2)}\n`], { type: "application/json" });
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = `wiki-content-${new Date().toISOString().slice(0, 10)}.json`;
+      link.download = `${wikiKey}-content-${new Date().toISOString().slice(0, 10)}.json`;
       document.body.appendChild(link);
       link.click();
       link.remove();
@@ -328,7 +334,7 @@ export default function AdminWiki() {
     setImporting(true);
     try {
       const bundle = JSON.parse(await file.text()) as unknown;
-      const preview = await wikiApi<WikiImportPreview>("/api/admin/wiki/import/preview", {
+      const preview = await wikiApi<WikiImportPreview>(`${apiPrefix}/import/preview`, {
         method: "POST",
         body: JSON.stringify(bundle),
       });
@@ -346,7 +352,7 @@ export default function AdminWiki() {
     setImporting(true);
     try {
       const result = await wikiApi<WikiImportPreview & { userGrantsImported: number; groupGrantsImported: number }>(
-        "/api/admin/wiki/import/confirm",
+        `${apiPrefix}/import/confirm`,
         { method: "POST", body: JSON.stringify(importBundle) },
       );
       toast({
@@ -373,9 +379,9 @@ export default function AdminWiki() {
     <div className="space-y-8 animate-in fade-in duration-500">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold font-serif">Wiki</h1>
+          <h1 className="text-3xl font-bold font-serif">{wikiName}</h1>
           <p className="mt-2 text-muted-foreground">
-            Manage the categories and articles that make up the staff Wiki.
+            Manage the categories, articles, and access for {wikiName}.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -396,7 +402,7 @@ export default function AdminWiki() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2"><Shield className="h-5 w-5" />Wiki Access</CardTitle>
+          <CardTitle className="flex items-center gap-2"><Shield className="h-5 w-5" />{wikiName} Access</CardTitle>
           <p className="text-sm text-muted-foreground">
             Admins always have access. Enable individual people or groups below; every member of an enabled group inherits access.
           </p>
@@ -576,7 +582,7 @@ export default function AdminWiki() {
       }}>
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
-            <DialogTitle>Import Wiki content</DialogTitle>
+            <DialogTitle>Import {wikiName} content</DialogTitle>
           </DialogHeader>
           <div className="space-y-5">
             <div className="space-y-2">

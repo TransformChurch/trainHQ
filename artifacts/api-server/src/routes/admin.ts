@@ -8,7 +8,7 @@ import adminDocumentsRouter from "./adminDocuments";
 import contentGrantsRouter from "./contentGrants";
 import { syncPlanningCenterModuleAssignment } from "../lib/planningCenter";
 import adminFacilitiesRouter from "./adminFacilities";
-import adminWikiRouter from "./adminWiki";
+import adminWikiRouter, { createAdminWikiRouter } from "./adminWiki";
 import adminTracksRouter from "./adminTracks";
 import adminPlanningCenterRouter from "./adminPlanningCenter";
 
@@ -390,6 +390,7 @@ router.use("/documents", adminDocumentsRouter);
 router.use("/content-grants", contentGrantsRouter);
 router.use("/facilities", adminFacilitiesRouter);
 router.use("/wiki", adminWikiRouter);
+router.use("/tc-wiki", createAdminWikiRouter("tc-wiki"));
 router.use("/tracks", adminTracksRouter);
 router.use("/planning-center", adminPlanningCenterRouter);
 

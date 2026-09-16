@@ -27,18 +27,25 @@ const iconMap: Record<string, typeof BookOpen> = {
   "requests-forms": ClipboardList,
 };
 
-export default function Wiki() {
+type WikiProps = {
+  wikiKey?: "wiki" | "tc-wiki";
+  wikiName?: string;
+};
+
+export default function Wiki({ wikiKey = "wiki", wikiName = "Wiki" }: WikiProps) {
+  const apiPrefix = `/api/${wikiKey}`;
+  const routePrefix = `/${wikiKey}`;
   const [categories, setCategories] = useState<WikiCategory[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
 
   useEffect(() => {
-    wikiApi<WikiCategory[]>("/api/wiki")
+    wikiApi<WikiCategory[]>(apiPrefix)
       .then(setCategories)
       .catch((err: Error) => setError(err.message))
       .finally(() => setLoading(false));
-  }, []);
+  }, [apiPrefix]);
 
   const normalizedQuery = query.trim().toLowerCase();
   const filteredCategories = useMemo(() => {
@@ -68,7 +75,7 @@ export default function Wiki() {
     return (
       <div className="mx-auto max-w-xl py-24 text-center">
         <AlertTriangle className="mx-auto mb-4 h-10 w-10 text-amber-500" />
-        <h1 className="text-2xl font-bold">Wiki is not available</h1>
+        <h1 className="text-2xl font-bold">{wikiName} is not available</h1>
         <p className="mt-2 text-muted-foreground">{error}</p>
       </div>
     );
@@ -79,7 +86,7 @@ export default function Wiki() {
       <header className="bg-[#0c0c0c] px-6 py-10 text-white md:px-12 md:py-16 lg:px-16 lg:py-20">
         <div className="mx-auto max-w-5xl">
           <p className="text-sm font-bold uppercase tracking-[0.12em] md:text-base">
-            Transform Church <span className="font-normal text-white/55">Wiki</span>
+            Transform Church <span className="font-normal text-white/55">{wikiName}</span>
           </p>
           <div className="mt-14 max-w-2xl md:mt-20">
             <h1 className="text-4xl font-black uppercase leading-[0.95] tracking-tight sm:text-5xl md:text-6xl">
@@ -150,7 +157,7 @@ export default function Wiki() {
                     {category.articles.map((article) => (
                       <Link
                         key={article.id}
-                        href={`/wiki/${article.slug}`}
+                        href={`${routePrefix}/${article.slug}`}
                         className="group flex min-h-[160px] flex-col justify-between border-b border-r border-black/15 bg-white p-6 transition-colors hover:bg-black hover:text-white md:p-7"
                         data-testid={`wiki-article-${article.id}`}
                       >

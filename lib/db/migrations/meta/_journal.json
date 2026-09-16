@@ -134,6 +134,20 @@
       "when": 1788987560000,
       "tag": "0018_track_progress",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1789593299000,
+      "tag": "0019_multi_wiki",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1789594200000,
+      "tag": "0020_wiki_category_scope_fk",
+      "breakpoints": true
     }
   ]
 }
