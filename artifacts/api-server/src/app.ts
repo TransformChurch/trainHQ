@@ -67,7 +67,11 @@ app.use(cors({
 }));
 // Direct object uploads must remain an unread stream, including uploads whose
 // file MIME type happens to be JSON or form data.
-app.use(express.json({ type: (req) => !isObjectUploadRequest(req) && hasContentType(req, "application/json") }));
+app.use(express.json({
+  type: (req) => !(req.url ?? "").startsWith("/api/admin/wiki/import/")
+    && !isObjectUploadRequest(req)
+    && hasContentType(req, "application/json"),
+}));
 app.use(express.urlencoded({
   extended: true,
   type: (req) => !isObjectUploadRequest(req) && hasContentType(req, "application/x-www-form-urlencoded"),

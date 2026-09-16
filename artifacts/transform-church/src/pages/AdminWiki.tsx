@@ -4,6 +4,7 @@ import {
   BookOpen,
   ChevronDown,
   ChevronUp,
+  Download,
   Eye,
   Loader2,
   Pencil,
@@ -11,6 +12,7 @@ import {
   Search,
   Shield,
   Trash2,
+  Upload,
   UsersRound,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -49,6 +51,15 @@ type ArticleDraft = {
 type WikiAccessGrant = { userId: string };
 type WikiGroupAccessGrant = { groupId: number };
 type WikiGroup = { id: number; name: string; description?: string | null; memberCount: number };
+type WikiImportPreview = {
+  categories: { create: number; update: number };
+  articles: { create: number; update: number };
+  grants: { usersResolved: number; groupsResolved: number };
+  unresolvedUserEmails: string[];
+  unresolvedGroupNames: string[];
+  errors: string[];
+  canConfirm: boolean;
+};
 
 const emptyCategory: CategoryDraft = { name: "", slug: "", description: "", sortOrder: 0, isActive: true };
 
@@ -78,6 +89,11 @@ export default function AdminWiki() {
   const [groups, setGroups] = useState<WikiGroup[]>([]);
   const [accessSearch, setAccessSearch] = useState("");
   const [savingAccess, setSavingAccess] = useState<Set<string>>(new Set());
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
+  const [importFileName, setImportFileName] = useState("");
+  const [importBundle, setImportBundle] = useState<unknown>(null);
+  const [importPreview, setImportPreview] = useState<WikiImportPreview | null>(null);
+  const [importing, setImporting] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -281,6 +297,74 @@ export default function AdminWiki() {
     }
   };
 
+  const downloadExport = async () => {
+    try {
+      const bundle = await wikiApi<unknown>("/api/admin/wiki/export");
+      const blob = new Blob([`${JSON.stringify(bundle, null, 2)}\n`], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `wiki-content-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      toast({ title: "Wiki content downloaded" });
+    } catch (err) {
+      toast({ title: "Wiki content could not be downloaded", description: (err as Error).message, variant: "destructive" });
+    }
+  };
+
+  const chooseImportFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    setImportPreview(null);
+    setImportBundle(null);
+    setImportFileName(file?.name ?? "");
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) {
+      toast({ title: "File is too large", description: "Wiki imports must be 5 MB or smaller.", variant: "destructive" });
+      return;
+    }
+    setImporting(true);
+    try {
+      const bundle = JSON.parse(await file.text()) as unknown;
+      const preview = await wikiApi<WikiImportPreview>("/api/admin/wiki/import/preview", {
+        method: "POST",
+        body: JSON.stringify(bundle),
+      });
+      setImportBundle(bundle);
+      setImportPreview(preview);
+    } catch (err) {
+      toast({ title: "Import file could not be read", description: (err as Error).message, variant: "destructive" });
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const confirmImport = async () => {
+    if (!importBundle || !importPreview?.canConfirm) return;
+    setImporting(true);
+    try {
+      const result = await wikiApi<WikiImportPreview & { userGrantsImported: number; groupGrantsImported: number }>(
+        "/api/admin/wiki/import/confirm",
+        { method: "POST", body: JSON.stringify(importBundle) },
+      );
+      toast({
+        title: "Wiki import complete",
+        description: `${result.categories.create + result.categories.update} categories, ${result.articles.create + result.articles.update} articles, ${result.userGrantsImported} user grants, and ${result.groupGrantsImported} group grants imported.`,
+      });
+      setImportDialogOpen(false);
+      setImportBundle(null);
+      setImportPreview(null);
+      setImportFileName("");
+      await load();
+    } catch (err) {
+      toast({ title: "Wiki import failed", description: (err as Error).message, variant: "destructive" });
+    } finally {
+      setImporting(false);
+    }
+  };
+
   if (loading) {
     return <div className="flex min-h-[50vh] items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>;
   }
@@ -295,6 +379,12 @@ export default function AdminWiki() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <Button variant="outline" onClick={() => void downloadExport()}>
+            <Download className="mr-2 h-4 w-4" />Download JSON
+          </Button>
+          <Button variant="outline" onClick={() => setImportDialogOpen(true)}>
+            <Upload className="mr-2 h-4 w-4" />Import JSON
+          </Button>
           <Button variant="outline" onClick={openNewCategory}>
             <Plus className="mr-2 h-4 w-4" />Add Category
           </Button>
@@ -473,6 +563,103 @@ export default function AdminWiki() {
               <Button type="submit" disabled={saving}>{saving ? "Saving..." : "Save Category"}</Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={importDialogOpen} onOpenChange={(open) => {
+        setImportDialogOpen(open);
+        if (!open) {
+          setImportBundle(null);
+          setImportPreview(null);
+          setImportFileName("");
+        }
+      }}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Import Wiki content</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-5">
+            <div className="space-y-2">
+              <Label htmlFor="wiki-import-file">Wiki JSON file</Label>
+              <Input id="wiki-import-file" type="file" accept=".json,application/json" onChange={(event) => void chooseImportFile(event)} />
+              <p className="text-xs text-muted-foreground">
+                Upload one JSON file containing categories, articles, userGrants, and groupGrants. Previewing does not change the database.
+              </p>
+            </div>
+
+            {importing && (
+              <div className="flex items-center gap-2 rounded-md border p-4 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                {importPreview ? "Importing Wiki content..." : "Checking import file..."}
+              </div>
+            )}
+
+            {importPreview && !importing && (
+              <div className="space-y-4">
+                <div className="rounded-md border p-4">
+                  <p className="font-medium">Preview: {importFileName}</p>
+                  <div className="mt-3 grid gap-3 text-sm sm:grid-cols-2">
+                    <div className="rounded bg-muted p-3">
+                      <p className="font-medium">Categories</p>
+                      <p className="text-muted-foreground">{importPreview.categories.create} create · {importPreview.categories.update} update</p>
+                    </div>
+                    <div className="rounded bg-muted p-3">
+                      <p className="font-medium">Articles</p>
+                      <p className="text-muted-foreground">{importPreview.articles.create} create · {importPreview.articles.update} update</p>
+                    </div>
+                    <div className="rounded bg-muted p-3">
+                      <p className="font-medium">User grants</p>
+                      <p className="text-muted-foreground">{importPreview.grants.usersResolved} resolved · {importPreview.unresolvedUserEmails.length} unresolved</p>
+                    </div>
+                    <div className="rounded bg-muted p-3">
+                      <p className="font-medium">Group grants</p>
+                      <p className="text-muted-foreground">{importPreview.grants.groupsResolved} resolved · {importPreview.unresolvedGroupNames.length} unresolved</p>
+                    </div>
+                  </div>
+                </div>
+
+                {importPreview.errors.length > 0 && (
+                  <div className="rounded-md border border-destructive/50 bg-destructive/5 p-4">
+                    <p className="font-medium text-destructive">Fix these errors before importing</p>
+                    <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-destructive">
+                      {importPreview.errors.map((error, index) => <li key={`${index}-${error}`}>{error}</li>)}
+                    </ul>
+                  </div>
+                )}
+
+                {(importPreview.unresolvedUserEmails.length > 0 || importPreview.unresolvedGroupNames.length > 0) && (
+                  <div className="rounded-md border border-amber-500/50 bg-amber-500/10 p-4">
+                    <p className="font-medium">Unresolved access grants</p>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      These grants will not be imported unless the matching user or group exists in this environment.
+                    </p>
+                    {importPreview.unresolvedUserEmails.length > 0 && (
+                      <div className="mt-3">
+                        <p className="text-sm font-medium">Users</p>
+                        <ul className="list-disc pl-5 text-sm text-muted-foreground">
+                          {importPreview.unresolvedUserEmails.map((email) => <li key={email}>{email}</li>)}
+                        </ul>
+                      </div>
+                    )}
+                    {importPreview.unresolvedGroupNames.length > 0 && (
+                      <div className="mt-3">
+                        <p className="text-sm font-medium">Groups</p>
+                        <ul className="list-disc pl-5 text-sm text-muted-foreground">
+                          {importPreview.unresolvedGroupNames.map((name) => <li key={name}>{name}</li>)}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setImportDialogOpen(false)} disabled={importing}>Cancel</Button>
+            <Button type="button" onClick={() => void confirmImport()} disabled={importing || !importPreview?.canConfirm}>
+              {importing ? "Importing..." : "Confirm Import"}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
