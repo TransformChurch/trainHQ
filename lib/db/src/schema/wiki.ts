@@ -1,4 +1,4 @@
-import { boolean, foreignKey, integer, pgTable, serial, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
+import { boolean, integer, pgTable, serial, text, timestamp, unique, uniqueIndex } from "drizzle-orm/pg-core";
 import { usersTable } from "./users";
 import { groupsTable } from "./groups";
 
@@ -19,7 +19,7 @@ export const wikiCategoriesTable = pgTable(
   (table) => [
     uniqueIndex("wiki_categories_wiki_slug_unique").on(table.wikiKey, table.slug),
     uniqueIndex("wiki_categories_wiki_name_unique").on(table.wikiKey, table.name),
-    uniqueIndex("wiki_categories_wiki_id_unique").on(table.wikiKey, table.id),
+    unique("wiki_categories_wiki_key_id_unique").on(table.wikiKey, table.id),
   ],
 );
 
@@ -28,7 +28,10 @@ export const wikiArticlesTable = pgTable(
   {
     id: serial("id").primaryKey(),
     wikiKey: text("wiki_key").notNull().default("wiki"),
-    categoryId: integer("category_id").notNull(),
+    categoryId: integer("category_id").notNull().references(
+      () => wikiCategoriesTable.id,
+      { onDelete: "cascade" },
+    ),
     slug: text("slug").notNull(),
     title: text("title").notNull(),
     summary: text("summary"),
@@ -41,11 +44,6 @@ export const wikiArticlesTable = pgTable(
   },
   (table) => [
     uniqueIndex("wiki_articles_wiki_slug_unique").on(table.wikiKey, table.slug),
-    foreignKey({
-      columns: [table.wikiKey, table.categoryId],
-      foreignColumns: [wikiCategoriesTable.wikiKey, wikiCategoriesTable.id],
-      name: "wiki_articles_wiki_category_fk",
-    }).onDelete("cascade"),
   ],
 );
 

@@ -148,6 +148,20 @@
       "when": 1789594200000,
       "tag": "0020_wiki_category_scope_fk",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1789595400000,
+      "tag": "0021_wiki_category_scope_unique_constraint",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1789596600000,
+      "tag": "0022_stage_wiki_scope_publish",
+      "breakpoints": true
     }
   ]
 }

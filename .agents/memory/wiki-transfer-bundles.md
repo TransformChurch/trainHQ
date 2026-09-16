@@ -14,3 +14,9 @@ Multiple Wikis are independent permission and content domains. Every category, a
 **Why:** Application-only filtering is not enough: an article attached to another Wiki's category could be hidden inconsistently or cascade-deleted by changes in the wrong Wiki.
 
 **How to apply:** Scope every query and unique constraint by Wiki key, and enforce article/category ownership with a composite database foreign key on Wiki key plus category ID.
+
+When Publish introduces both a composite foreign key and its redundant-looking unique prerequisite, stage them across two publishes if the generated diff orders the foreign key first.
+
+**Why:** PostgreSQL requires an exact unique key for composite foreign-key targets, while schema diff tooling may omit a unique index as logically redundant or emit an explicit unique constraint after the dependent foreign key.
+
+**How to apply:** First publish the new columns and explicit unique constraint while retaining the old foreign key. After production has the prerequisite, restore the composite foreign key in development and publish the focused second diff. Never add deployment-time DDL or mutate production directly.
