@@ -17,3 +17,4 @@
 - [Wiki access policy](wiki-access-policy.md) — admins always have Wiki access; others require a direct or group grant, with existing users grandfathered during rollout.
 - [GitHub connector sync](github-connector-sync.md) — when Git auth is unavailable, integrate remote commits through authenticated API data and a parent-based three-way comparison.
 - [Wiki transfer bundles](wiki-transfer-bundles.md) — JSON exports must round-trip through preview; portable grants use unambiguous case-insensitive email/name matches.
+- [Drive Wiki sync boundary](drive-wiki-sync.md) — OAuth access stays in the Node adapter; the Python engine owns manifest diffing/PDF extraction, while Wiki tables remain the content source.

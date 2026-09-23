@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "wouter";
-import { AlertTriangle, ArrowLeft, Loader2 } from "lucide-react";
+import { AlertTriangle, ArrowLeft, ExternalLink, Loader2 } from "lucide-react";
 import { wikiApi, type WikiArticle as WikiArticleType } from "@/lib/wiki";
 import { WikiMarkdown } from "@/components/wiki/WikiMarkdown";
 
@@ -71,6 +71,22 @@ export default function WikiArticlePage({ wikiKey = "wiki", wikiName = "Wiki" }:
         <article className="border border-black/15 bg-white p-6 md:p-10">
           <WikiMarkdown content={article.content} />
         </article>
+        {article.driveSourceUrl && (
+          <div className="mt-5 flex flex-col gap-2 border-t border-black/15 pt-4 text-sm text-black/60 sm:flex-row sm:items-center sm:justify-between">
+            <a
+              href={article.driveSourceUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center font-semibold text-black hover:underline"
+            >
+              View source PDF in Google Drive
+              <ExternalLink className="ml-1.5 h-4 w-4" />
+            </a>
+            {article.driveModifiedAt && (
+              <span>Drive updated {new Date(article.driveModifiedAt).toLocaleString()}</span>
+            )}
+          </div>
+        )}
       </main>
     </div>
   );

@@ -7,6 +7,7 @@
     "dev": "node --import tsx --watch src/index.ts",
     "build": "node ./build.mjs",
     "start": "node --enable-source-maps ./dist/index.mjs",
+    "sync:wiki-drive": "node --enable-source-maps ./dist/wikiDriveSyncJob.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --import tsx --test src/lib/*.test.ts"
   },
@@ -17,6 +18,7 @@
     "dotenv": "^16.6.1",
     "drizzle-orm": "^0.45.2",
     "express": "^5.2.1",
+    "@replit/connectors-sdk": "^0.4.3",
     "pino": "^9.14.0",
     "pino-http": "^10.5.0"
   },

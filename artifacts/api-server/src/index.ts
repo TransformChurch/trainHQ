@@ -9,6 +9,8 @@ if (rootEnvFile) process.loadEnvFile(rootEnvFile);
 const { default: app } = await import("./app");
 const { startDocumentPdfIndexer } = await import("./lib/documentPdfSearch");
 startDocumentPdfIndexer();
+const { startWikiDriveScheduler } = await import("./lib/wikiDriveSync");
+startWikiDriveScheduler();
 const rawPort = process.env.PORT || "3000";
 const port = Number(rawPort);
 

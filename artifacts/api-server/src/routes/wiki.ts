@@ -87,6 +87,8 @@ export function createWikiRouter(wikiKey: string, wikiName: string) {
         content: wikiArticlesTable.content,
         sortOrder: wikiArticlesTable.sortOrder,
         isActive: wikiArticlesTable.isActive,
+        driveSourceUrl: wikiArticlesTable.driveSourceUrl,
+        driveModifiedAt: wikiArticlesTable.driveModifiedAt,
         categoryName: wikiCategoriesTable.name,
         categorySlug: wikiCategoriesTable.slug,
       }).from(wikiArticlesTable)
@@ -101,7 +103,10 @@ export function createWikiRouter(wikiKey: string, wikiName: string) {
           eq(wikiCategoriesTable.isActive, true),
         )).limit(1);
       if (!rows[0]) return void res.status(404).json({ error: "Article not found" });
-      res.json(rows[0]);
+      res.json({
+        ...rows[0],
+        driveModifiedAt: rows[0].driveModifiedAt?.toISOString() ?? null,
+      });
     } catch {
       res.status(500).json({ error: "Internal server error" });
     }

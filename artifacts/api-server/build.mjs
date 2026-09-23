@@ -15,7 +15,10 @@ async function buildAll() {
   await rm(distDir, { recursive: true, force: true });
 
   await esbuild({
-    entryPoints: [path.resolve(artifactDir, "src/index.ts")],
+    entryPoints: {
+      index: path.resolve(artifactDir, "src/index.ts"),
+      wikiDriveSyncJob: path.resolve(artifactDir, "src/wikiDriveSyncJob.ts"),
+    },
     platform: "node",
     bundle: true,
     format: "esm",
@@ -130,6 +133,10 @@ globalThis.__dirname = __bannerPath.dirname(globalThis.__filename);
     copyFile(
       path.resolve(artifactDir, "../../attached_assets/paste_to_templatev2_1788477465546.py"),
       path.resolve(distDir, "paste_to_template.py"),
+    ),
+    copyFile(
+      path.resolve(artifactDir, "../../scripts/drive_wiki_sync.py"),
+      path.resolve(distDir, "drive_wiki_sync.py"),
     ),
   ]);
 }

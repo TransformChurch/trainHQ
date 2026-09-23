@@ -11,6 +11,7 @@ import adminFacilitiesRouter from "./adminFacilities";
 import adminWikiRouter, { createAdminWikiRouter } from "./adminWiki";
 import adminTracksRouter from "./adminTracks";
 import adminPlanningCenterRouter from "./adminPlanningCenter";
+import adminWikiDriveSyncRouter from "./adminWikiDriveSync";
 
 const router = Router();
 
@@ -393,5 +394,6 @@ router.use("/wiki", adminWikiRouter);
 router.use("/tc-wiki", createAdminWikiRouter("tc-wiki"));
 router.use("/tracks", adminTracksRouter);
 router.use("/planning-center", adminPlanningCenterRouter);
+router.use("/wiki-drive-sync", adminWikiDriveSyncRouter);
 
 export default router;

@@ -30,6 +30,7 @@
     "typescript": "~5.9.3"
   },
   "dependencies": {
+    "@replit/connectors-sdk": "^0.4.3",
     "pdf-parse": "^2.4.5"
   }
 }

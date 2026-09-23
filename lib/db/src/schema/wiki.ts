@@ -15,10 +15,14 @@ export const wikiCategoriesTable = pgTable(
     createdByExternalUserId: text("created_by_external_user_id"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    driveFolderId: text("drive_folder_id"),
+    driveSyncManaged: boolean("drive_sync_managed").notNull().default(false),
+    driveSyncCreated: boolean("drive_sync_created").notNull().default(false),
   },
   (table) => [
     uniqueIndex("wiki_categories_wiki_slug_unique").on(table.wikiKey, table.slug),
     uniqueIndex("wiki_categories_wiki_name_unique").on(table.wikiKey, table.name),
+    uniqueIndex("wiki_categories_drive_folder_unique").on(table.driveFolderId),
     unique("wiki_categories_wiki_key_id_unique").on(table.wikiKey, table.id),
   ],
 );
@@ -41,9 +45,14 @@ export const wikiArticlesTable = pgTable(
     createdByExternalUserId: text("created_by_external_user_id"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    driveFileId: text("drive_file_id"),
+    driveSourceUrl: text("drive_source_url"),
+    driveModifiedAt: timestamp("drive_modified_at", { withTimezone: true }),
+    driveSyncManaged: boolean("drive_sync_managed").notNull().default(false),
   },
   (table) => [
     uniqueIndex("wiki_articles_wiki_slug_unique").on(table.wikiKey, table.slug),
+    uniqueIndex("wiki_articles_drive_file_unique").on(table.driveFileId),
   ],
 );
 

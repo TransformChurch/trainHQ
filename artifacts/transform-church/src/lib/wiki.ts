@@ -16,6 +16,8 @@ export type WikiArticle = {
   content: string;
   sortOrder: number;
   isActive: boolean;
+  driveSourceUrl: string | null;
+  driveModifiedAt: string | null;
   categoryName: string;
   categorySlug: string;
 };

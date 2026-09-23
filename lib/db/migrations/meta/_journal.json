@@ -162,6 +162,20 @@
       "when": 1789596600000,
       "tag": "0022_stage_wiki_scope_publish",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1789597800000,
+      "tag": "0023_wiki_drive_sync_metadata",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1789599000000,
+      "tag": "0024_wiki_drive_category_provenance",
+      "breakpoints": true
     }
   ]
 }
