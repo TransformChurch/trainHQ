@@ -7,6 +7,8 @@ import {
   wikiAccessTable,
   wikiArticlesTable,
   wikiCategoriesTable,
+  wikiCategoryAccessTable,
+  wikiCategoryGroupAccessTable,
   wikiGroupAccessTable,
 } from "@workspace/db";
 import { and, asc, eq } from "drizzle-orm";
@@ -331,6 +333,91 @@ router.get("/access/groups", requireAdmin, async (_req, res) => {
       .where(eq(wikiGroupAccessTable.wikiKey, wikiKey))
       .orderBy(asc(groupsTable.name));
     res.json(grants.map((grant) => ({ ...grant, grantedAt: grant.grantedAt.toISOString() })));
+  } catch {
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.get("/category-access", requireAdmin, async (_req, res) => {
+  try {
+    const [users, groups] = await Promise.all([
+      db.select({ categoryId: wikiCategoryAccessTable.categoryId, userId: wikiCategoryAccessTable.userId })
+        .from(wikiCategoryAccessTable)
+        .innerJoin(wikiCategoriesTable, eq(wikiCategoryAccessTable.categoryId, wikiCategoriesTable.id))
+        .where(eq(wikiCategoriesTable.wikiKey, wikiKey)),
+      db.select({ categoryId: wikiCategoryGroupAccessTable.categoryId, groupId: wikiCategoryGroupAccessTable.groupId })
+        .from(wikiCategoryGroupAccessTable)
+        .innerJoin(wikiCategoriesTable, eq(wikiCategoryGroupAccessTable.categoryId, wikiCategoriesTable.id))
+        .where(eq(wikiCategoriesTable.wikiKey, wikiKey)),
+    ]);
+    res.json({ users, groups });
+  } catch {
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.put("/categories/:categoryId/access/users/:userId", requireAdmin, async (req, res) => {
+  try {
+    const categoryId = Number(req.params.categoryId);
+    const userId = String(req.params.userId);
+    const enabled = req.body?.enabled;
+    if (!Number.isInteger(categoryId) || categoryId < 1 || typeof enabled !== "boolean") {
+      return void res.status(400).json({ error: "Valid category and enabled value are required" });
+    }
+    const [category, user] = await Promise.all([
+      db.select({ id: wikiCategoriesTable.id }).from(wikiCategoriesTable).where(and(
+        eq(wikiCategoriesTable.id, categoryId), eq(wikiCategoriesTable.wikiKey, wikiKey),
+      )).limit(1),
+      db.select({ id: usersTable.id, role: usersTable.role }).from(usersTable).where(eq(usersTable.id, userId)).limit(1),
+    ]);
+    if (!category[0] || !user[0]) return void res.status(404).json({ error: !category[0] ? "Category not found" : "User not found" });
+    if (user[0].role === "admin") return void res.json({ categoryId, userId, allowed: true, inherited: true });
+    if (enabled) {
+      await db.insert(wikiCategoryAccessTable).values({
+        categoryId, userId, grantedByExternalUserId: getAuth(req)!.userId!,
+      }).onConflictDoUpdate({
+        target: [wikiCategoryAccessTable.categoryId, wikiCategoryAccessTable.userId],
+        set: { grantedByExternalUserId: getAuth(req)!.userId!, grantedAt: new Date() },
+      });
+    } else {
+      await db.delete(wikiCategoryAccessTable).where(and(
+        eq(wikiCategoryAccessTable.categoryId, categoryId), eq(wikiCategoryAccessTable.userId, userId),
+      ));
+    }
+    res.json({ categoryId, userId, allowed: enabled });
+  } catch {
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.put("/categories/:categoryId/access/groups/:groupId", requireAdmin, async (req, res) => {
+  try {
+    const categoryId = Number(req.params.categoryId);
+    const groupId = Number(req.params.groupId);
+    const enabled = req.body?.enabled;
+    if (!Number.isInteger(categoryId) || categoryId < 1 || !Number.isInteger(groupId) || groupId < 1 || typeof enabled !== "boolean") {
+      return void res.status(400).json({ error: "Valid category, group, and enabled value are required" });
+    }
+    const [category, group] = await Promise.all([
+      db.select({ id: wikiCategoriesTable.id }).from(wikiCategoriesTable).where(and(
+        eq(wikiCategoriesTable.id, categoryId), eq(wikiCategoriesTable.wikiKey, wikiKey),
+      )).limit(1),
+      db.select({ id: groupsTable.id }).from(groupsTable).where(eq(groupsTable.id, groupId)).limit(1),
+    ]);
+    if (!category[0] || !group[0]) return void res.status(404).json({ error: !category[0] ? "Category not found" : "Group not found" });
+    if (enabled) {
+      await db.insert(wikiCategoryGroupAccessTable).values({
+        categoryId, groupId, grantedByExternalUserId: getAuth(req)!.userId!,
+      }).onConflictDoUpdate({
+        target: [wikiCategoryGroupAccessTable.categoryId, wikiCategoryGroupAccessTable.groupId],
+        set: { grantedByExternalUserId: getAuth(req)!.userId!, grantedAt: new Date() },
+      });
+    } else {
+      await db.delete(wikiCategoryGroupAccessTable).where(and(
+        eq(wikiCategoryGroupAccessTable.categoryId, categoryId), eq(wikiCategoryGroupAccessTable.groupId, groupId),
+      ));
+    }
+    res.json({ categoryId, groupId, allowed: enabled });
   } catch {
     res.status(500).json({ error: "Internal server error" });
   }

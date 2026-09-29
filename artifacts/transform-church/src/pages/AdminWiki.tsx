@@ -50,6 +50,7 @@ type ArticleDraft = {
 
 type WikiAccessGrant = { userId: string };
 type WikiGroupAccessGrant = { groupId: number };
+type CategoryAccess = { users: { categoryId: number; userId: string }[]; groups: { categoryId: number; groupId: number }[] };
 type WikiGroup = { id: number; name: string; description?: string | null; memberCount: number };
 type WikiImportPreview = {
   categories: { create: number; update: number };
@@ -92,6 +93,8 @@ export default function AdminWiki({ wikiKey = "wiki", wikiName = "Wiki" }: Admin
   const [saving, setSaving] = useState(false);
   const [accessGrants, setAccessGrants] = useState<WikiAccessGrant[]>([]);
   const [groupAccessGrants, setGroupAccessGrants] = useState<WikiGroupAccessGrant[]>([]);
+  const [categoryAccess, setCategoryAccess] = useState<CategoryAccess>({ users: [], groups: [] });
+  const [accessScope, setAccessScope] = useState("all");
   const [groups, setGroups] = useState<WikiGroup[]>([]);
   const [accessSearch, setAccessSearch] = useState("");
   const [savingAccess, setSavingAccess] = useState<Set<string>>(new Set());
@@ -104,15 +107,17 @@ export default function AdminWiki({ wikiKey = "wiki", wikiName = "Wiki" }: Admin
   const load = async () => {
     setLoading(true);
     try {
-      const [catalog, directAccess, groupAccess, availableGroups] = await Promise.all([
+      const [catalog, directAccess, groupAccess, scopedAccess, availableGroups] = await Promise.all([
         wikiApi<WikiAdminCategory[]>(apiPrefix),
         wikiApi<WikiAccessGrant[]>(`${apiPrefix}/access`),
         wikiApi<WikiGroupAccessGrant[]>(`${apiPrefix}/access/groups`),
+        wikiApi<CategoryAccess>(`${apiPrefix}/category-access`),
         wikiApi<WikiGroup[]>("/api/groups"),
       ]);
       setCategories(catalog);
       setAccessGrants(directAccess);
       setGroupAccessGrants(groupAccess);
+      setCategoryAccess(scopedAccess);
       setGroups(availableGroups);
     } catch (err) {
       toast({ title: "Wiki could not be loaded", description: (err as Error).message, variant: "destructive" });
@@ -138,24 +143,28 @@ export default function AdminWiki({ wikiKey = "wiki", wikiName = "Wiki" }: Admin
   ), [groups, normalizedAccessSearch]);
 
   const refreshAccess = async () => {
-    const [directAccess, groupAccess] = await Promise.all([
+    const [directAccess, groupAccess, scopedAccess] = await Promise.all([
       wikiApi<WikiAccessGrant[]>(`${apiPrefix}/access`),
       wikiApi<WikiGroupAccessGrant[]>(`${apiPrefix}/access/groups`),
+      wikiApi<CategoryAccess>(`${apiPrefix}/category-access`),
     ]);
     setAccessGrants(directAccess);
     setGroupAccessGrants(groupAccess);
+    setCategoryAccess(scopedAccess);
   };
 
   const setUserAccess = async (userId: string, enabled: boolean) => {
-    const key = `user:${userId}`;
+    const key = `user:${accessScope}:${userId}`;
     setSavingAccess((current) => new Set(current).add(key));
     try {
-      await wikiApi(`${apiPrefix}/access/users/${userId}`, {
+      await wikiApi(accessScope === "all"
+        ? `${apiPrefix}/access/users/${userId}`
+        : `${apiPrefix}/categories/${accessScope}/access/users/${userId}`, {
         method: "PUT",
         body: JSON.stringify({ enabled }),
       });
       await refreshAccess();
-      toast({ title: enabled ? "Wiki access granted" : "Wiki access removed" });
+      toast({ title: enabled ? "Access granted" : "Access removed" });
     } catch (err) {
       toast({ title: "Access could not be updated", description: (err as Error).message, variant: "destructive" });
     } finally {
@@ -168,10 +177,12 @@ export default function AdminWiki({ wikiKey = "wiki", wikiName = "Wiki" }: Admin
   };
 
   const setGroupAccess = async (groupId: number, enabled: boolean) => {
-    const key = `group:${groupId}`;
+    const key = `group:${accessScope}:${groupId}`;
     setSavingAccess((current) => new Set(current).add(key));
     try {
-      await wikiApi(`${apiPrefix}/access/groups/${groupId}`, {
+      await wikiApi(accessScope === "all"
+        ? `${apiPrefix}/access/groups/${groupId}`
+        : `${apiPrefix}/categories/${accessScope}/access/groups/${groupId}`, {
         method: "PUT",
         body: JSON.stringify({ enabled }),
       });
@@ -403,9 +414,19 @@ export default function AdminWiki({ wikiKey = "wiki", wikiName = "Wiki" }: Admin
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2"><Shield className="h-5 w-5" />{wikiName} Access</CardTitle>
-          <p className="text-sm text-muted-foreground">
-            Admins always have access. Enable individual people or groups below; every member of an enabled group inherits access.
-          </p>
+            <p className="text-sm text-muted-foreground">
+              Admins always have access. Choose the entire {wikiName} or a category, then grant access to people or groups. Entire-{wikiName} grants also include every category; group membership may grant access even without a direct user grant.
+            </p>
+            <div className="max-w-sm space-y-2 pt-2">
+              <Label htmlFor="wiki-access-scope">Access for</Label>
+              <Select value={accessScope} onValueChange={setAccessScope}>
+                <SelectTrigger id="wiki-access-scope"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Entire {wikiName}</SelectItem>
+                  {categories.map((category) => <SelectItem key={category.id} value={String(category.id)}>{category.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
           <div className="relative max-w-md pt-2">
             <Search className="absolute left-3 top-5 h-4 w-4 text-muted-foreground" />
             <Input value={accessSearch} onChange={(event) => setAccessSearch(event.target.value)} placeholder="Search users or groups" className="pl-9" />
@@ -418,9 +439,11 @@ export default function AdminWiki({ wikiKey = "wiki", wikiName = "Wiki" }: Admin
           <CardHeader><CardTitle>User Access</CardTitle></CardHeader>
           <CardContent className="max-h-[32rem] divide-y overflow-y-auto p-0">
             {filteredUsers.map((user) => {
-              const inherited = user.role === "admin";
-              const checked = inherited || grantedUserIds.has(user.id);
-              const key = `user:${user.id}`;
+              const inherited = user.role === "admin" || (accessScope !== "all" && grantedUserIds.has(user.id));
+              const checked = inherited || (accessScope === "all"
+                ? grantedUserIds.has(user.id)
+                : categoryAccess.users.some((grant) => grant.categoryId === Number(accessScope) && grant.userId === user.id));
+              const key = `user:${accessScope}:${user.id}`;
               return (
                 <div key={user.id} className="flex items-center justify-between gap-4 px-6 py-4">
                   <div className="min-w-0">
@@ -431,9 +454,9 @@ export default function AdminWiki({ wikiKey = "wiki", wikiName = "Wiki" }: Admin
                     <p className="truncate text-sm text-muted-foreground">{user.email}</p>
                   </div>
                   <div className="flex items-center gap-3">
-                    <span className="hidden text-xs text-muted-foreground sm:inline">{inherited ? "Always allowed" : checked ? "Allowed" : "No access"}</span>
+                    <span className="hidden text-xs text-muted-foreground sm:inline">{inherited ? "Entire Wiki access" : checked ? "Direct grant" : "No direct grant"}</span>
                     {savingAccess.has(key) && <Loader2 className="h-4 w-4 animate-spin" />}
-                    <Switch checked={checked} disabled={inherited || savingAccess.has(key)} onCheckedChange={(enabled) => void setUserAccess(user.id, enabled)} aria-label={`Wiki access for ${user.firstName} ${user.lastName}`} />
+                    <Switch checked={checked} disabled={inherited || savingAccess.has(key)} onCheckedChange={(enabled) => void setUserAccess(user.id, enabled)} aria-label={`${accessScope === "all" ? wikiName : categories.find((category) => category.id === Number(accessScope))?.name} access for ${user.firstName} ${user.lastName}`} />
                   </div>
                 </div>
               );
@@ -446,8 +469,11 @@ export default function AdminWiki({ wikiKey = "wiki", wikiName = "Wiki" }: Admin
           <CardHeader><CardTitle className="flex items-center gap-2"><UsersRound className="h-5 w-5" />Group Access</CardTitle></CardHeader>
           <CardContent className="max-h-[32rem] divide-y overflow-y-auto p-0">
             {filteredGroups.map((group) => {
-              const checked = grantedGroupIds.has(group.id);
-              const key = `group:${group.id}`;
+              const inherited = accessScope !== "all" && grantedGroupIds.has(group.id);
+              const checked = inherited || (accessScope === "all"
+                ? grantedGroupIds.has(group.id)
+                : categoryAccess.groups.some((grant) => grant.categoryId === Number(accessScope) && grant.groupId === group.id));
+              const key = `group:${accessScope}:${group.id}`;
               return (
                 <div key={group.id} className="flex items-center justify-between gap-4 px-6 py-4">
                   <div className="min-w-0">
@@ -458,9 +484,9 @@ export default function AdminWiki({ wikiKey = "wiki", wikiName = "Wiki" }: Admin
                     </p>
                   </div>
                   <div className="flex items-center gap-3">
-                    <span className="hidden text-xs text-muted-foreground sm:inline">{checked ? "Allowed" : "No access"}</span>
+                    <span className="hidden text-xs text-muted-foreground sm:inline">{inherited ? "Entire Wiki access" : checked ? "Allowed" : "No access"}</span>
                     {savingAccess.has(key) && <Loader2 className="h-4 w-4 animate-spin" />}
-                    <Switch checked={checked} disabled={savingAccess.has(key)} onCheckedChange={(enabled) => void setGroupAccess(group.id, enabled)} aria-label={`Wiki access for ${group.name}`} />
+                    <Switch checked={checked} disabled={inherited || savingAccess.has(key)} onCheckedChange={(enabled) => void setGroupAccess(group.id, enabled)} aria-label={`${accessScope === "all" ? wikiName : categories.find((category) => category.id === Number(accessScope))?.name} access for ${group.name}`} />
                   </div>
                 </div>
               );

@@ -80,6 +80,30 @@ export const wikiGroupAccessTable = pgTable(
   (table) => [uniqueIndex("wiki_group_access_wiki_group_unique").on(table.wikiKey, table.groupId)],
 );
 
+export const wikiCategoryAccessTable = pgTable(
+  "wiki_category_access",
+  {
+    id: serial("id").primaryKey(),
+    categoryId: integer("category_id").notNull().references(() => wikiCategoriesTable.id, { onDelete: "cascade" }),
+    userId: text("user_id").notNull().references(() => usersTable.id, { onDelete: "cascade" }),
+    grantedByExternalUserId: text("granted_by_external_user_id").notNull(),
+    grantedAt: timestamp("granted_at").notNull().defaultNow(),
+  },
+  (table) => [uniqueIndex("wiki_category_access_category_user_unique").on(table.categoryId, table.userId)],
+);
+
+export const wikiCategoryGroupAccessTable = pgTable(
+  "wiki_category_group_access",
+  {
+    id: serial("id").primaryKey(),
+    categoryId: integer("category_id").notNull().references(() => wikiCategoriesTable.id, { onDelete: "cascade" }),
+    groupId: integer("group_id").notNull().references(() => groupsTable.id, { onDelete: "cascade" }),
+    grantedByExternalUserId: text("granted_by_external_user_id").notNull(),
+    grantedAt: timestamp("granted_at").notNull().defaultNow(),
+  },
+  (table) => [uniqueIndex("wiki_category_group_access_category_group_unique").on(table.categoryId, table.groupId)],
+);
+
 export type WikiCategory = typeof wikiCategoriesTable.$inferSelect;
 export type WikiArticle = typeof wikiArticlesTable.$inferSelect;
 export type WikiAccess = typeof wikiAccessTable.$inferSelect;

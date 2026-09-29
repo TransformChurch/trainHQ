@@ -176,6 +176,13 @@
       "when": 1789599000000,
       "tag": "0024_wiki_drive_category_provenance",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1790683200000,
+      "tag": "0025_wiki_category_access",
+      "breakpoints": true
     }
   ]
 }

@@ -169,8 +169,8 @@ export default function Wiki({ wikiKey = "wiki", wikiName = "Wiki" }: WikiProps)
                             </p>
                           )}
                         </div>
-                        <span className="mt-4 inline-flex items-center text-xs font-bold uppercase tracking-[0.12em]">
-                          Read article
+                         <span className="mt-4 inline-flex items-center text-xs font-bold tracking-[0.12em]">
+                           read more
                           <ChevronRight className="ml-1 h-3.5 w-3.5" aria-hidden="true" />
                         </span>
                       </Link>
