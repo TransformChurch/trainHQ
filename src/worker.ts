@@ -18,6 +18,11 @@ export interface Env {
   STORAGE_BUCKET: R2Bucket;
   NODE_ENV: string;
   PCO_REDIRECT_URI: string;
+  LOG_LEVEL?: string;
+  CORS_ALLOWED_ORIGINS?: string;
+  CORS_ALLOW_CREDENTIALS?: string;
+  FRAME_ANCESTORS?: string;
+  PUBLIC_API_URL?: string;
   // Secrets -- set with `wrangler secret put <NAME>`, never committed here.
   DATABASE_URL: string;
   AUTH_JWT_SECRET: string;
@@ -25,8 +30,13 @@ export interface Env {
   STORAGE_SIGNING_SECRET: string;
   PCO_CLIENT_ID?: string;
   PCO_CLIENT_SECRET?: string;
+  PCO_MODULE_FIELD_DEFINITION_MAP?: string;
   RESEND_API_KEY?: string;
+  EMAIL_FROM?: string;
   GOOGLE_API_KEY?: string;
+  // Bootstrap-only -- set until the first admin signs in, then unset.
+  INITIAL_ADMIN_EMAIL?: string;
+  INITIAL_ADMIN_EXTERNAL_USER_ID?: string;
 }
 
 // `cloudflare:workers`'s `env` export is typed against the ambient `Env`
@@ -49,6 +59,7 @@ export class TransformChurchContainer extends Container<Env> {
   envVars = {
     NODE_ENV: env.NODE_ENV,
     PORT: "3000",
+    LOG_LEVEL: env.LOG_LEVEL ?? "info",
     STORAGE_BACKEND: "r2",
     STORAGE_R2_HOST: "objects.internal",
     DATABASE_URL: env.DATABASE_URL,
@@ -58,8 +69,21 @@ export class TransformChurchContainer extends Container<Env> {
     PCO_CLIENT_ID: env.PCO_CLIENT_ID ?? "",
     PCO_CLIENT_SECRET: env.PCO_CLIENT_SECRET ?? "",
     PCO_REDIRECT_URI: env.PCO_REDIRECT_URI,
+    PCO_MODULE_FIELD_DEFINITION_MAP: env.PCO_MODULE_FIELD_DEFINITION_MAP ?? "",
     RESEND_API_KEY: env.RESEND_API_KEY ?? "",
+    EMAIL_FROM: env.EMAIL_FROM ?? "",
     GOOGLE_API_KEY: env.GOOGLE_API_KEY ?? "",
+    // CORS defaults match the app's own safe-by-default behavior: blank
+    // origins means same-origin only, credentials off, framing self-only.
+    CORS_ALLOWED_ORIGINS: env.CORS_ALLOWED_ORIGINS ?? "",
+    CORS_ALLOW_CREDENTIALS: env.CORS_ALLOW_CREDENTIALS ?? "false",
+    FRAME_ANCESTORS: env.FRAME_ANCESTORS ?? "'self'",
+    PUBLIC_API_URL: env.PUBLIC_API_URL ?? "",
+    // Bootstrap-only: set these as Worker secrets for the first deploy, then
+    // remove them (via `wrangler secret delete` or the dashboard) once the
+    // first administrator has signed in.
+    INITIAL_ADMIN_EMAIL: env.INITIAL_ADMIN_EMAIL ?? "",
+    INITIAL_ADMIN_EXTERNAL_USER_ID: env.INITIAL_ADMIN_EXTERNAL_USER_ID ?? "",
   };
 
   // Bridges the container's plain-HTTP object-storage calls to the real R2
