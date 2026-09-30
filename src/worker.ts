@@ -10,7 +10,14 @@
 // requests against the real R2 bucket binding.
 //
 // See: https://developers.cloudflare.com/containers/configuration/workers-connections/
-import { Container, getContainer } from "@cloudflare/containers";
+import { Container, ContainerProxy, getContainer } from "@cloudflare/containers";
+
+// Required by Cloudflare: outbound interception (this Worker's
+// `outboundByHost` handler below, which bridges the container's
+// object-storage calls to R2) only works if `ContainerProxy` is exported
+// from the Worker entrypoint. See:
+// https://developers.cloudflare.com/containers/configuration/outbound-traffic/
+export { ContainerProxy };
 import { env as ambientEnv } from "cloudflare:workers";
 
 export interface Env {
