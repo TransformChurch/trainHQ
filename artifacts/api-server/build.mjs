@@ -132,15 +132,15 @@ globalThis.__dirname = __bannerPath.dirname(globalThis.__filename);
       path.resolve(distDir, "cleanup_attendance_all_dates.py"),
     ),
     copyFile(
-      path.resolve(artifactDir, "../../attached_assets/paste_to_templatev2_1788477465546.py"),
-      path.resolve(distDir, "paste_to_template.py"),
-    ),
-    copyFile(
       path.resolve(artifactDir, "../../scripts/drive_wiki_sync.py"),
       path.resolve(distDir, "drive_wiki_sync.py"),
     ),
     // Pure-Python report engine (no Excel/LibreOffice) for the four
     // built-in report kinds -- see reports.ts's REPORT_ENGINES map.
+    // report_youth.py/report_kids.py import report_youth_quarterly/
+    // report_youth_monthly/report_kids_rutherford/report_kids_lyndhurst by
+    // name at runtime, so all 7 files have to land in the same dist/
+    // directory together or those imports ModuleNotFoundError.
     copyFile(
       path.resolve(artifactDir, "../../attached_assets/report_common.py"),
       path.resolve(distDir, "report_common.py"),
@@ -150,8 +150,24 @@ globalThis.__dirname = __bannerPath.dirname(globalThis.__filename);
       path.resolve(distDir, "report_youth.py"),
     ),
     copyFile(
+      path.resolve(artifactDir, "../../attached_assets/report_youth_quarterly.py"),
+      path.resolve(distDir, "report_youth_quarterly.py"),
+    ),
+    copyFile(
+      path.resolve(artifactDir, "../../attached_assets/report_youth_monthly.py"),
+      path.resolve(distDir, "report_youth_monthly.py"),
+    ),
+    copyFile(
       path.resolve(artifactDir, "../../attached_assets/report_kids.py"),
       path.resolve(distDir, "report_kids.py"),
+    ),
+    copyFile(
+      path.resolve(artifactDir, "../../attached_assets/report_kids_rutherford.py"),
+      path.resolve(distDir, "report_kids_rutherford.py"),
+    ),
+    copyFile(
+      path.resolve(artifactDir, "../../attached_assets/report_kids_lyndhurst.py"),
+      path.resolve(distDir, "report_kids_lyndhurst.py"),
     ),
     copyFile(
       path.resolve(artifactDir, "../../attached_assets/transform_youth_logo.png"),

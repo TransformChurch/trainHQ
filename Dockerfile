@@ -2,12 +2,13 @@
 
 ##########################################################################
 # base: OS deps shared by every stage — Node (from the base image),
-# LibreOffice (legacy xlsx report templates), and uv (manages its own
-# Python 3.13 install so we don't depend on Debian's system Python).
+# fonts-dejavu-core (consistent text rendering in the matplotlib report
+# engine), and uv (manages its own Python 3.13 install so we don't depend
+# on Debian's system Python). LibreOffice was removed along with the
+# legacy xlsx-template-upload reporting path -- see reports.ts/Reporting.tsx.
 ##########################################################################
 FROM node:22-bookworm-slim AS base
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      libreoffice \
       fonts-dejavu-core \
       curl \
       ca-certificates \

@@ -4,14 +4,15 @@ import { usersTable } from "./users";
 export const reportTemplatesTable = pgTable("report_templates", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),
-  // Null for a built-in report engine template (see `engine` below) -- those
-  // don't have an admin-uploaded xlsx workbook at all.
+  // Legacy columns from the removed upload-your-own-xlsx-template +
+  // LibreOffice pipeline. Always null for templates created now -- every
+  // template requires a built-in `engine` (see below). Kept (rather than
+  // dropped) only so old rows/migrations don't need a destructive change.
   originalFileName: text("original_file_name"),
   objectPath: text("object_path"),
-  // Set for one of the four built-in pure-Python report renderers
-  // (report_youth.py / report_kids.py, bundled with the API server) instead
-  // of the generic upload-your-own-xlsx-template + LibreOffice pipeline.
-  // Null means "legacy" behavior: originalFileName/objectPath must be set.
+  // One of the four built-in pure-Python report renderers (report_youth.py /
+  // report_kids.py, bundled with the API server). Required for every
+  // template now that the legacy xlsx-upload path has been removed.
   engine: text("engine"),
   pullFields: text("pull_fields").notNull(),
   sessionCount: integer("session_count").notNull().default(5),

@@ -27,6 +27,12 @@ compatibility_flags = ["nodejs_compat"]
 class_name = "TransformChurchContainer"
 image = "./Dockerfile"
 max_instances = 1
+# "lite" (the default) is 1/16 vCPU, 256MiB memory, 2GB disk -- too small on
+# every axis for Node + a Python venv (matplotlib/pandas/numpy) running
+# side by side, even with LibreOffice removed. "basic" (1/4 vCPU, 1GiB
+# memory, 4GB disk) gives comfortable headroom on image size and enough
+# memory for the report engine to run without being killed.
+instance_type = "basic"
 
 [[durable_objects.bindings]]
 name = "API_CONTAINER"

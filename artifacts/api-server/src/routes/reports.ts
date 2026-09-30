@@ -2,7 +2,7 @@ import { Router, type IRouter, type Request, type Response } from "express";
 import { randomUUID } from "crypto";
 import { mkdtemp, readFile, rm, stat, writeFile } from "fs/promises";
 import { tmpdir } from "os";
-import { basename, dirname, join } from "path";
+import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 import { spawn } from "child_process";
 import {
@@ -20,12 +20,15 @@ const router: IRouter = Router();
 const storage = new ObjectStorageService();
 const CHECK_INS_BASE = "https://api.planningcenteronline.com/check-ins/v2";
 const PEOPLE_BASE = "https://api.planningcenteronline.com/people/v2";
-const XLSX_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 const REPORT_TTL_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_SESSION_COUNT = 5;
 const MAX_SESSION_COUNT = 52;
 type CleanupMode = "month_quarter" | "all_dates";
-type ScriptSlot = CleanupMode | "template";
+// Cleanup scripts only -- the third "template" slot (xlsx-template-filling
+// via LibreOffice) was removed along with the legacy upload-your-own-xlsx
+// reporting path. See REPORT_ENGINES: every template is now one of the 4
+// built-in pure-Python engines.
+type ScriptSlot = CleanupMode;
 // The four built-in, pure-Python (no Excel/LibreOffice) report renderers.
 // A template row with one of these set skips the generic
 // upload-your-own-xlsx-workbook pipeline entirely -- see REPORT_ENGINES.
@@ -45,7 +48,6 @@ const MAX_SCRIPT_BYTES = 500_000;
 const SCRIPT_SLOTS: Array<{ slot: ScriptSlot; label: string }> = [
   { slot: "month_quarter", label: "Monthly/Quarterly cleanup" },
   { slot: "all_dates", label: "All Dates cleanup" },
-  { slot: "template", label: "Template population" },
 ];
 const preparationProgress = new Map<string, PreparationProgress>();
 
@@ -420,14 +422,10 @@ async function fetchPeopleDetails(
 function bundledPythonScript(name: ScriptSlot): string {
   const fileName = name === "month_quarter"
     ? "cleanup_attendance_month_quarter.py"
-    : name === "all_dates"
-      ? "cleanup_attendance_all_dates.py"
-      : "paste_to_template.py";
+    : "cleanup_attendance_all_dates.py";
   const sourceFileName = name === "month_quarter"
     ? "cleanup_attendance_MonthQuarterv2_1788478015757.py"
-    : name === "all_dates"
-      ? "cleanup_attendance_all_datesv2_1788477465544.py"
-      : "paste_to_templatev2_1788477465546.py";
+    : "cleanup_attendance_all_datesv2_1788477465544.py";
   const built = join(dirname(fileURLToPath(import.meta.url)), fileName);
   const source = join(
     dirname(fileURLToPath(import.meta.url)),
@@ -641,40 +639,15 @@ router.post("/templates", requireAdmin, async (req, res) => {
       return;
     }
     const engineRaw = text(req.body?.engine);
-    if (engineRaw) {
-      if (!isReportEngine(engineRaw)) {
-        res.status(400).json({ error: "Invalid report engine." });
-        return;
-      }
-      const rows = await db.insert(reportTemplatesTable).values({
-        name,
-        originalFileName: null,
-        objectPath: null,
-        engine: engineRaw,
-        pullFields: JSON.stringify(DEFAULT_PULL_FIELDS),
-        sessionCount: DEFAULT_SESSION_COUNT,
-        cleanupMode: "month_quarter",
-        uploadedByUserId: res.locals.dbUser.id,
-      }).returning();
-      res.status(201).json({
-        ...rows[0],
-        objectPath: undefined,
-        pullFields: normalizePullFields(rows[0].pullFields),
-      });
+    if (!isReportEngine(engineRaw)) {
+      res.status(400).json({ error: "A valid report engine is required." });
       return;
     }
-    const originalFileName = basename(text(req.body?.originalFileName));
-    const objectPath = text(req.body?.objectPath);
-    if (!originalFileName.toLowerCase().endsWith(".xlsx") || !objectPath.startsWith("/objects/")) {
-      res.status(400).json({ error: "Name, uploaded XLSX file, and object path are required." });
-      return;
-    }
-    await storage.getObjectEntityFile(objectPath);
     const rows = await db.insert(reportTemplatesTable).values({
       name,
-      originalFileName,
-      objectPath,
-      engine: null,
+      originalFileName: null,
+      objectPath: null,
+      engine: engineRaw,
       pullFields: JSON.stringify(DEFAULT_PULL_FIELDS),
       sessionCount: DEFAULT_SESSION_COUNT,
       cleanupMode: "month_quarter",
@@ -990,8 +963,8 @@ router.post("/generate", requireManagerOrAdmin, async (req, res) => {
     const runId = text(req.body?.runId);
     const templateId = Number(req.body?.templateId);
     const format = text(req.body?.format).toLowerCase();
-    if (!runId || !Number.isInteger(templateId) || !["xlsx", "pdf"].includes(format)) {
-      res.status(400).json({ error: "Report run, template, and output format are required." });
+    if (!runId || !Number.isInteger(templateId) || format !== "pdf") {
+      res.status(400).json({ error: "Report run, template, and output format (pdf) are required." });
       return;
     }
     const runs = await db.select().from(reportRunsTable).where(and(
@@ -1020,67 +993,34 @@ router.post("/generate", requireManagerOrAdmin, async (req, res) => {
     const pdfPath = join(workDir, "report.pdf");
     await writeFile(cleanedPath, await readFile(cleanedFile.path));
 
-    if (isReportEngine(template.engine)) {
-      if (format !== "pdf") {
-        res.status(400).json({ error: "This report only supports PDF output." });
-        return;
-      }
-      const definition = reportEngineDefinition(template.engine);
-      await runPython([
-        bundledReportEngineScript(definition.script),
-        ...definition.args,
-        "--data", cleanedPath,
-        "--out-pdf", pdfPath,
-      ], 180_000);
-      const engineStats = await stat(pdfPath).catch(() => null);
-      if (!engineStats?.isFile() || engineStats.size === 0) {
-        const error = new Error("The report engine did not create a PDF.") as Error & { status?: number };
-        error.status = 422;
-        throw error;
-      }
-      const engineResult = await readFile(pdfPath);
-      const engineFileName = `${safeFilePart(run.eventName)}-${run.startDate}-to-${run.endDate}.pdf`;
-      res.setHeader("Content-Type", "application/pdf");
-      res.setHeader("Content-Disposition", `attachment; filename="${engineFileName}"`);
-      res.setHeader("Cache-Control", "private, no-store");
-      res.send(engineResult);
-      return;
-    }
-
-    if (!template.objectPath) {
-      res.status(422).json({ error: "This report template has no uploaded workbook." });
-      return;
-    }
-    const templateFile = await storage.getObjectEntityFile(template.objectPath);
-    const templatePath = join(workDir, "template.xlsx");
-    const xlsxPath = join(workDir, "report.xlsx");
-    await writeFile(templatePath, await readFile(templateFile.path));
-    const args = [
-      await pythonScript("template"),
-      "--template", templatePath,
-      "--data", cleanedPath,
-      "--out-xlsx", xlsxPath,
-      "--work-dir", join(workDir, "work"),
-    ];
-    if (format === "pdf") args.push("--out-pdf", pdfPath);
-    await runPython(args, format === "pdf" ? 180_000 : 90_000);
-    const outputPath = format === "pdf" ? pdfPath : xlsxPath;
-    const outputStats = await stat(outputPath).catch(() => null);
-    if (!outputStats?.isFile() || outputStats.size === 0) {
-      const error = new Error(
-        format === "pdf"
-          ? "The template processing script did not create a PDF. Reset or update the Template population script and try again."
-          : "The template processing script did not create an XLSX file.",
-      ) as Error & { status?: number };
+    if (!isReportEngine(template.engine)) {
+      // Every template is created with one of the 4 built-in engines now
+      // (see POST /templates) -- the legacy upload-your-own-xlsx +
+      // LibreOffice pipeline was removed, so a template with no engine set
+      // is just a broken/legacy row that can't be rendered anymore.
+      const error = new Error("This report template has no engine configured.") as Error & { status?: number };
       error.status = 422;
       throw error;
     }
-    const result = await readFile(outputPath);
-    const fileName = `${safeFilePart(run.eventName)}-${run.startDate}-to-${run.endDate}.${format}`;
-    res.setHeader("Content-Type", format === "pdf" ? "application/pdf" : XLSX_TYPE);
-    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+    const definition = reportEngineDefinition(template.engine);
+    await runPython([
+      bundledReportEngineScript(definition.script),
+      ...definition.args,
+      "--data", cleanedPath,
+      "--out-pdf", pdfPath,
+    ], 180_000);
+    const engineStats = await stat(pdfPath).catch(() => null);
+    if (!engineStats?.isFile() || engineStats.size === 0) {
+      const error = new Error("The report engine did not create a PDF.") as Error & { status?: number };
+      error.status = 422;
+      throw error;
+    }
+    const engineResult = await readFile(pdfPath);
+    const engineFileName = `${safeFilePart(run.eventName)}-${run.startDate}-to-${run.endDate}.pdf`;
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${engineFileName}"`);
     res.setHeader("Cache-Control", "private, no-store");
-    res.send(result);
+    res.send(engineResult);
   } catch (error) {
     sendError(req, res, error, "Failed to generate report");
   } finally {
