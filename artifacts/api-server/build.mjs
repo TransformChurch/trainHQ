@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { build as esbuild } from "esbuild";
 import esbuildPluginPino from "esbuild-plugin-pino";
-import { copyFile, rm } from "node:fs/promises";
+import { copyFile, mkdir, rm } from "node:fs/promises";
 
 // Plugins (e.g. 'esbuild-plugin-pino') may use `require` to resolve dependencies
 globalThis.require = createRequire(import.meta.url);
@@ -121,6 +121,7 @@ globalThis.__dirname = __bannerPath.dirname(globalThis.__filename);
     `,
     },
   });
+  await mkdir(path.resolve(distDir, "assets"), { recursive: true });
   await Promise.all([
     copyFile(
       path.resolve(artifactDir, "../../attached_assets/cleanup_attendance_MonthQuarterv2_1788478015757.py"),
@@ -137,6 +138,28 @@ globalThis.__dirname = __bannerPath.dirname(globalThis.__filename);
     copyFile(
       path.resolve(artifactDir, "../../scripts/drive_wiki_sync.py"),
       path.resolve(distDir, "drive_wiki_sync.py"),
+    ),
+    // Pure-Python report engine (no Excel/LibreOffice) for the four
+    // built-in report kinds -- see reports.ts's REPORT_ENGINES map.
+    copyFile(
+      path.resolve(artifactDir, "../../attached_assets/report_common.py"),
+      path.resolve(distDir, "report_common.py"),
+    ),
+    copyFile(
+      path.resolve(artifactDir, "../../attached_assets/report_youth.py"),
+      path.resolve(distDir, "report_youth.py"),
+    ),
+    copyFile(
+      path.resolve(artifactDir, "../../attached_assets/report_kids.py"),
+      path.resolve(distDir, "report_kids.py"),
+    ),
+    copyFile(
+      path.resolve(artifactDir, "../../attached_assets/transform_youth_logo.png"),
+      path.resolve(distDir, "assets", "transform_youth_logo.png"),
+    ),
+    copyFile(
+      path.resolve(artifactDir, "../../attached_assets/tc_kids_logo.png"),
+      path.resolve(distDir, "assets", "tc_kids_logo.png"),
     ),
   ]);
 }

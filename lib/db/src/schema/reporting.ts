@@ -4,8 +4,15 @@ import { usersTable } from "./users";
 export const reportTemplatesTable = pgTable("report_templates", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),
-  originalFileName: text("original_file_name").notNull(),
-  objectPath: text("object_path").notNull(),
+  // Null for a built-in report engine template (see `engine` below) -- those
+  // don't have an admin-uploaded xlsx workbook at all.
+  originalFileName: text("original_file_name"),
+  objectPath: text("object_path"),
+  // Set for one of the four built-in pure-Python report renderers
+  // (report_youth.py / report_kids.py, bundled with the API server) instead
+  // of the generic upload-your-own-xlsx-template + LibreOffice pipeline.
+  // Null means "legacy" behavior: originalFileName/objectPath must be set.
+  engine: text("engine"),
   pullFields: text("pull_fields").notNull(),
   sessionCount: integer("session_count").notNull().default(5),
   cleanupMode: text("cleanup_mode").notNull().default("month_quarter"),

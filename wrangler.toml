@@ -1,0 +1,38 @@
+# Cloudflare Workers + Containers deployment for the Transform Church API
+# server. The Worker itself is a thin router: it forwards every request to
+# the containerized Node/Express app (built from ./Dockerfile) and, via
+# `outboundByHost` on the Container class in src/worker.ts, bridges the
+# container's object-storage calls to this R2 bucket (containers have no
+# direct binding access -- see src/worker.ts for why).
+#
+# Secrets (never put these here -- set with `wrangler secret put <NAME>`,
+# or in the dashboard under Workers & Pages > this Worker > Settings >
+# Variables and Secrets):
+#   DATABASE_URL, AUTH_JWT_SECRET, SESSION_SECRET, STORAGE_SIGNING_SECRET,
+#   PCO_CLIENT_ID, PCO_CLIENT_SECRET, RESEND_API_KEY, GOOGLE_API_KEY
+
+name = "transform-church-api"
+main = "src/worker.ts"
+compatibility_date = "2026-09-30"
+compatibility_flags = ["nodejs_compat"]
+
+[[containers]]
+class_name = "TransformChurchContainer"
+image = "./Dockerfile"
+max_instances = 1
+
+[[durable_objects.bindings]]
+name = "API_CONTAINER"
+class_name = "TransformChurchContainer"
+
+[exports.TransformChurchContainer]
+type = "durable-object"
+storage = "sqlite"
+
+[[r2_buckets]]
+binding = "STORAGE_BUCKET"
+bucket_name = "transform-church-storage"
+
+[vars]
+NODE_ENV = "production"
+PCO_REDIRECT_URI = "https://TransformChurch.replit.app/api/auth/planning-center/callback"

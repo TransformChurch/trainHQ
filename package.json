@@ -18,7 +18,10 @@
     "typecheck": "npm run typecheck:libs && npm run typecheck --workspaces --if-present",
     "db:generate": "npm run generate --workspace=@workspace/db",
     "db:migrate": "npm run migrate --workspace=@workspace/db",
-    "db:seed": "npm run seed --workspace=@workspace/db"
+    "db:seed": "npm run seed --workspace=@workspace/db",
+    "cf:dev": "wrangler dev",
+    "cf:deploy": "wrangler deploy",
+    "cf:types": "wrangler types"
   },
   "private": true,
   "engines": {
@@ -27,7 +30,10 @@
   },
   "devDependencies": {
     "prettier": "^3.8.3",
-    "typescript": "~5.9.3"
+    "typescript": "~5.9.3",
+    "wrangler": "^4.144.0",
+    "@cloudflare/workers-types": "^5.20260930.2",
+    "@cloudflare/containers": "^0.3.7"
   },
   "dependencies": {
     "@replit/connectors-sdk": "^0.4.3",

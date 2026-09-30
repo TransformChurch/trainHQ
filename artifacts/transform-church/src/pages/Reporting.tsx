@@ -15,15 +15,26 @@ type EventOption = { id: string; name: string; frequency: string };
 type ReportFieldKey = string;
 type AvailableField = { key: ReportFieldKey; label: string };
 type CleanupMode = "month_quarter" | "all_dates";
+type ReportEngine = "youth_quarterly" | "youth_monthly" | "kids_rutherford" | "kids_lyndhurst";
 type ReportTemplate = {
   id: number;
   name: string;
-  originalFileName: string;
+  originalFileName: string | null;
+  engine: ReportEngine | null;
   createdAt: string;
   pullFields: ReportFieldKey[];
   sessionCount: number;
   cleanupMode: CleanupMode;
 };
+
+const REPORT_ENGINE_OPTIONS: Array<{ value: ReportEngine; label: string }> = [
+  { value: "youth_quarterly", label: "Youth Quarterly Report" },
+  { value: "youth_monthly", label: "Youth Monthly Report" },
+  { value: "kids_rutherford", label: "Kids Rutherford Report" },
+  { value: "kids_lyndhurst", label: "Kids Lyndhurst Report" },
+];
+const reportEngineLabel = (engine: ReportEngine | null) =>
+  REPORT_ENGINE_OPTIONS.find((option) => option.value === engine)?.label ?? null;
 type PreparedRun = {
   runId: string;
   eventName: string;
@@ -122,6 +133,7 @@ export default function Reporting() {
   const [generating, setGenerating] = useState<"xlsx" | "pdf" | null>(null);
   const [templateName, setTemplateName] = useState("");
   const [templateFile, setTemplateFile] = useState<File | null>(null);
+  const [templateEngine, setTemplateEngine] = useState<ReportEngine | "">("");
   const [savingTemplate, setSavingTemplate] = useState(false);
   const [editingTemplateId, setEditingTemplateId] = useState<number | null>(null);
   const [draftFields, setDraftFields] = useState<ReportFieldKey[]>(["planning_center_id"]);
@@ -284,6 +296,7 @@ export default function Reporting() {
 
   const download = async (format: "xlsx" | "pdf") => {
     if (!prepared || !selectedTemplate) return;
+    if (format === "xlsx" && activeTemplate?.engine) return;
     setGenerating(format);
     try {
       const response = await api("/api/reports/generate", {
@@ -310,24 +323,37 @@ export default function Reporting() {
   };
 
   const addTemplate = async () => {
-    if (!templateName.trim() || !templateFile) return;
+    if (!templateName.trim()) return;
+    if (!templateEngine && !templateFile) return;
     setSavingTemplate(true);
     try {
-      const normalizedFile = templateFile.type === XLSX_TYPE
-        ? templateFile
-        : new File([templateFile], templateFile.name, { type: XLSX_TYPE });
-      const uploaded = await uploadFile(normalizedFile);
-      if (!uploaded) throw new Error("The template upload failed.");
-      await api("/api/reports/templates", {
-        method: "POST",
-        body: JSON.stringify({
-          name: templateName.trim(),
-          originalFileName: templateFile.name,
-          objectPath: uploaded.objectPath,
-        }),
-      });
+      if (templateEngine) {
+        await api("/api/reports/templates", {
+          method: "POST",
+          body: JSON.stringify({
+            name: templateName.trim(),
+            engine: templateEngine,
+          }),
+        });
+      } else {
+        if (!templateFile) return;
+        const normalizedFile = templateFile.type === XLSX_TYPE
+          ? templateFile
+          : new File([templateFile], templateFile.name, { type: XLSX_TYPE });
+        const uploaded = await uploadFile(normalizedFile);
+        if (!uploaded) throw new Error("The template upload failed.");
+        await api("/api/reports/templates", {
+          method: "POST",
+          body: JSON.stringify({
+            name: templateName.trim(),
+            originalFileName: templateFile.name,
+            objectPath: uploaded.objectPath,
+          }),
+        });
+      }
       setTemplateName("");
       setTemplateFile(null);
+      setTemplateEngine("");
       await loadTemplates();
       toast({ title: "Report template added" });
     } catch (error) {
@@ -513,7 +539,7 @@ export default function Reporting() {
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="max-w-lg space-y-2">
-            <Label htmlFor="report-template">Excel template</Label>
+            <Label htmlFor="report-template">Report template</Label>
             <select
               id="report-template"
               className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
@@ -590,10 +616,12 @@ export default function Reporting() {
             <Button variant="outline" onClick={downloadCsv} disabled={!prepared}>
               <Download className="mr-2 h-4 w-4" /> Download CSV
             </Button>
-            <Button onClick={() => download("xlsx")} disabled={!prepared || !selectedTemplate || !!generating}>
-              {generating === "xlsx" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileSpreadsheet className="mr-2 h-4 w-4" />}
-              Download XLSX
-            </Button>
+            {!activeTemplate?.engine && (
+              <Button onClick={() => download("xlsx")} disabled={!prepared || !selectedTemplate || !!generating}>
+                {generating === "xlsx" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileSpreadsheet className="mr-2 h-4 w-4" />}
+                Download XLSX
+              </Button>
+            )}
             <Button variant="outline" onClick={() => download("pdf")} disabled={!prepared || !selectedTemplate || !!generating}>
               {generating === "pdf" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
               Download PDF
@@ -612,13 +640,37 @@ export default function Reporting() {
                 <Input id="template-name" value={templateName} onChange={(event) => setTemplateName(event.target.value)} placeholder="Monthly Youth Report" />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="template-file">XLSX file</Label>
-                <Input id="template-file" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={(event) => setTemplateFile(event.target.files?.[0] ?? null)} />
+                <Label htmlFor="template-engine">Report engine</Label>
+                <select
+                  id="template-engine"
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  value={templateEngine}
+                  onChange={(event) => { setTemplateEngine(event.target.value as ReportEngine | ""); setTemplateFile(null); }}
+                >
+                  <option value="">Upload my own XLSX template…</option>
+                  {REPORT_ENGINE_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
               </div>
-              <Button onClick={addTemplate} disabled={!templateName.trim() || !templateFile || savingTemplate || isUploading}>
+              {!templateEngine && (
+                <div className="space-y-2">
+                  <Label htmlFor="template-file">XLSX file</Label>
+                  <Input id="template-file" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={(event) => setTemplateFile(event.target.files?.[0] ?? null)} />
+                </div>
+              )}
+              <Button
+                onClick={addTemplate}
+                disabled={!templateName.trim() || (!templateEngine && !templateFile) || savingTemplate || isUploading}
+              >
                 {(savingTemplate || isUploading) ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Plus className="mr-2 h-4 w-4" />} Add
               </Button>
             </div>
+            {templateEngine && (
+              <p className="text-xs text-muted-foreground">
+                This report is built by Transform Church&apos;s own pure-Python renderer (PDF only) &mdash; no workbook upload needed.
+              </p>
+            )}
             <div className="divide-y rounded-lg border">
               {!templates.length && <p className="p-4 text-sm text-muted-foreground">No report templates have been added.</p>}
               {templates.map((template) => (
@@ -626,7 +678,9 @@ export default function Reporting() {
                   <div className="flex items-center justify-between gap-4">
                     <div>
                       <p className="font-medium">{template.name}</p>
-                      <p className="text-xs text-muted-foreground">{template.originalFileName}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {template.engine ? `${reportEngineLabel(template.engine)} (built-in, PDF only)` : template.originalFileName}
+                      </p>
                       <p className="mt-1 text-xs text-muted-foreground">
                         {template.pullFields.length} profile fields · {template.cleanupMode === "all_dates" ? "All Dates" : `${template.sessionCount} sessions`}
                       </p>
