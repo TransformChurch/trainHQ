@@ -1,0 +1,23 @@
+# Cloudflare Workers Static Assets deployment for the Transform Church public
+# website/frontend (artifacts/transform-church, a Vite + React SPA). This is
+# a separate Worker from transform-church-api (../../wrangler.toml) so the
+# two deploy and scale independently: this Worker serves only static files
+# (no Worker script/container), while the API's Worker handles the backend.
+#
+# Custom domain: the apex domain (transformchurch.app) should point at THIS
+# Worker; the API Worker is served from api.transformchurch.app instead.
+#
+# Build-time environment variables (set in the Cloudflare dashboard under
+# this Worker's Workers Builds configuration, NOT here, since Vite bakes
+# them into the built JS at build time):
+#   VITE_API_URL = "https://api.transformchurch.app"
+#   VITE_AUTH_LOGIN_URL = "https://api.transformchurch.app/api/auth/planning-center/start"
+# Without these, the built frontend defaults to same-origin API calls, which
+# is wrong now that the API lives on a different subdomain.
+
+name = "transform-church-web"
+compatibility_date = "2026-09-30"
+
+[assets]
+directory = "./dist/public"
+not_found_handling = "single-page-application"
