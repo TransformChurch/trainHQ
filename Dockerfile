@@ -32,6 +32,7 @@ COPY package.json package-lock.json ./
 COPY lib ./lib
 COPY artifacts ./artifacts
 COPY scripts ./scripts
+COPY attached_assets ./attached_assets
 RUN npm ci
 RUN npm run build --workspace=@workspace/api-server
 RUN npm prune --omit=dev
