@@ -1,40 +1,37 @@
-"""
-report_kids_rutherford.py
-===========================
-
-Config for the Rutherford campus Kids report. All the actual rendering
-logic lives in report_kids.py -- this file just supplies the CampusConfig
-that distinguishes Rutherford from Lyndhurst: Rutherford's Kids ministry
-runs through 6th grade (see report_kids.py's module docstring).
-
-age_to_fine_grade only needs entries up through the oldest age that still
-belongs in Kids -- report_kids.py's _fine_grade() falls back to whatever
-grade is mapped at the highest key for any older age, so every age above
-11 also lands on "6th" automatically without needing an explicit entry.
-"""
+"""Campus config for the Kids Rutherford report -- ministry runs through 6th
+grade. See report_kids.py for all the actual rendering logic."""
 
 from report_kids import CampusConfig
 
+_AGE_TO_FINE_GRADE = {
+    0: "Infants", 1: "Infants",
+    2: "Toddler", 3: "Toddler",
+    4: "Pre-K",
+    5: "K",
+    6: "1st",
+    7: "2nd",
+    8: "3rd",
+    9: "4th",
+    10: "5th",
+    11: "6th", 12: "6th", 13: "6th", 14: "6th", 15: "6th",
+}
+
+_FINE_GRADE_ORDER = ["Infants", "Toddler", "Pre-K", "K", "1st", "2nd", "3rd", "4th", "5th", "6th"]
+
+_CHART_BAND_MAP = {
+    "Infants": "Infants/Toddlers", "Toddler": "Infants/Toddlers",
+    "Pre-K": "Preschool",
+    "K": "K-1st Grade", "1st": "K-1st Grade",
+    "2nd": "2nd-4th Grade", "3rd": "2nd-4th Grade", "4th": "2nd-4th Grade",
+    "5th": "5th-6th Grade", "6th": "5th-6th Grade",
+}
+
+_CHART_BAND_ORDER = ["Infants/Toddlers", "Preschool", "K-1st Grade", "2nd-4th Grade", "5th-6th Grade"]
+
 CONFIG = CampusConfig(
     campus_name="Rutherford",
-    age_to_fine_grade={
-        0: "Infants",
-        1: "Toddler", 2: "Toddler",
-        3: "Pre-K", 4: "Pre-K",
-        5: "K",
-        6: "1st",
-        7: "2nd",
-        8: "3rd",
-        9: "4th",
-        10: "5th",
-        11: "6th",  # highest key -- ages above this also fall back to "6th"
-    },
-    fine_grade_order=["Infants", "Toddler", "Pre-K", "K", "1st", "2nd", "3rd", "4th", "5th", "6th"],
-    chart_band_map={
-        "Infants": "Pre-Elementary", "Toddler": "Pre-Elementary", "Pre-K": "Pre-Elementary",
-        "K": "K-1st", "1st": "K-1st",
-        "2nd": "2nd-3rd", "3rd": "2nd-3rd",
-        "4th": "4th-6th", "5th": "4th-6th", "6th": "4th-6th",
-    },
-    chart_band_order=["Pre-Elementary", "K-1st", "2nd-3rd", "4th-6th"],
+    age_to_fine_grade=_AGE_TO_FINE_GRADE,
+    fine_grade_order=_FINE_GRADE_ORDER,
+    chart_band_map=_CHART_BAND_MAP,
+    chart_band_order=_CHART_BAND_ORDER,
 )
