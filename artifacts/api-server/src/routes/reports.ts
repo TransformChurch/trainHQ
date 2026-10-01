@@ -41,7 +41,7 @@ type PreparationProgress = {
   expiresAt: number;
 };
 
-const PEOPLE_BATCH_SIZE = 5;
+const PEOPLE_BATCH_SIZE = 15;
 const PEOPLE_BATCH_DELAY_MS = 2_000;
 const PROGRESS_TTL_MS = 10 * 60 * 1000;
 const MAX_SCRIPT_BYTES = 500_000;
