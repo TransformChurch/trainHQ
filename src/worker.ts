@@ -66,6 +66,14 @@ export class TransformChurchContainer extends Container<Env> {
   envVars = {
     NODE_ENV: env.NODE_ENV,
     PORT: "3000",
+    // Explicit, matching the Dockerfile's runtime-stage
+    // `ENV PATH="/app/.venv/bin:${PATH}"`. Without this key here, whatever
+    // Cloudflare Containers does with an unlisted PATH when envVars is set
+    // is undocumented -- see the 2026-10-01 comment on runPython() in
+    // reports.ts for the "spawn python3 ENOENT" this was found fixing.
+    // That spawn call no longer depends on PATH at all now, but this stays
+    // as defense in depth for anything else in the container that does.
+    PATH: "/app/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
     LOG_LEVEL: env.LOG_LEVEL ?? "info",
     STORAGE_BACKEND: "r2",
     STORAGE_R2_HOST: "objects.internal",

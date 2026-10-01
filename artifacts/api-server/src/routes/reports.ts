@@ -516,9 +516,31 @@ function cleanupScriptTimeoutMs(rowCount: number): number {
   );
 }
 
+// Resolve python3 by its absolute path inside the uv-managed venv rather
+// than relying on a PATH lookup.
+//
+// 2026-10-01: prepare/report runs started failing instantly with
+// "spawn python3 ENOENT". The Dockerfile's runtime stage does
+// `ENV PATH="/app/.venv/bin:${PATH}"` so a bare `spawn("python3", ...)`
+// should resolve -- but src/worker.ts's Container class now sets a fixed
+// `envVars` object on every container start (added 2026-09-30 for the R2
+// storage bridging work), and that object doesn't include PATH. Whether
+// Cloudflare Containers merges that into the image's PATH or replaces it
+// outright isn't documented, and this environment makes it hard to
+// confirm directly -- but the symptom (ENOENT firing immediately, never
+// after real work, only starting right after that change shipped) matches
+// a PATH that no longer has /app/.venv/bin on it. Spawning the venv's
+// python3 by absolute path removes the PATH dependency entirely, so this
+// can't recur regardless of how that env plumbing actually behaves.
+// PYTHON3_BIN lets this be overridden (e.g. for local dev outside the
+// venv) without touching the spawn call itself.
+const PYTHON3_BIN = process.env.PYTHON3_BIN || "/app/.venv/bin/python3";
+
 async function runPython(args: string[], timeoutMs = 120_000): Promise<string> {
   return new Promise((resolve, reject) => {
-    const child = spawn("python3", args, { env: process.env });
+    const child = spawn(PYTHON3_BIN, args, {
+      env: { ...process.env, PATH: `/app/.venv/bin:${process.env.PATH ?? ""}` },
+    });
     let output = "";
     let errorOutput = "";
     const timer = setTimeout(() => {
