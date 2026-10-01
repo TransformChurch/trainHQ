@@ -105,45 +105,73 @@ export class TransformChurchContainer extends Container<Env> {
   // binding. Mirrors the read/write surface objectStorage.ts needs: HEAD
   // (existence + metadata), GET (download), PUT (upload, with content-type
   // and custom metadata carried in headers), DELETE.
-  static outboundByHost = {
-    "objects.internal": async (request: Request, env: Env): Promise<Response> => {
-      const url = new URL(request.url);
-      const key = decodeURIComponent(url.pathname.slice(1));
-      if (!key) return new Response("Missing object key", { status: 400 });
+  //
+  // 2026-10-01: this MUST be a `static { ... }` initializer block that
+  // *assigns* to `TransformChurchContainer.outboundByHost`, not a
+  // `static outboundByHost = { ... }` class field (which is what this was
+  // before this fix, and what Cloudflare's own README example shows).
+  // `@cloudflare/containers`' `Container` base class exposes `outboundByHost`
+  // as a static accessor pair (`static get/set outboundByHost`) whose setter
+  // is what actually records the handler, keyed by class name, in an
+  // internal registry that `ContainerProxy.fetch()` reads from at request
+  // time. A `static outboundByHost = {...}` *class field* of the same name
+  // does not go through that inherited setter at all: per the ECMAScript
+  // class-fields spec, field initializers use [[DefineOwnProperty]], which
+  // creates a new own property directly and never walks the prototype chain
+  // to an inherited accessor -- confirmed with a minimal reproduction in
+  // plain Node 22, no TypeScript/bundler involved. So the setter silently
+  // never ran, the registry stayed empty for this class, and every request
+  // to "objects.internal" fell through past the (absent) handler to a literal
+  // outbound fetch() to that nonexistent host, which fails -- surfacing in
+  // objectStorage.ts as "Storage backend returned 530" (visibly on GETs,
+  // which check response.ok; silently on the PUT in saveObjectEntityBuffer(),
+  // which doesn't -- so report "generation" appeared to succeed with nothing
+  // ever actually written to R2). The R2 bucket's lifetime stats (0 bytes,
+  // 0 Class A/write operations ever recorded) confirm no object had EVER
+  // round-tripped through this bridge since it was introduced (784f6f2,
+  // 2026-09-30). Using a static initializer block instead performs a plain
+  // assignment, which does invoke the inherited setter correctly.
+  static {
+    TransformChurchContainer.outboundByHost = {
+      "objects.internal": async (request: Request, env: Env): Promise<Response> => {
+        const url = new URL(request.url);
+        const key = decodeURIComponent(url.pathname.slice(1));
+        if (!key) return new Response("Missing object key", { status: 400 });
 
-      if (request.method === "HEAD" || request.method === "GET") {
-        const object = await env.STORAGE_BUCKET.get(key);
-        if (!object) return new Response(null, { status: 404 });
-        const headers = new Headers();
-        if (object.httpMetadata?.contentType) headers.set("content-type", object.httpMetadata.contentType);
-        headers.set("content-length", String(object.size));
-        headers.set("etag", object.httpEtag);
-        headers.set("x-object-custom-metadata", JSON.stringify(object.customMetadata ?? {}));
-        return new Response(request.method === "HEAD" ? null : object.body, { headers });
-      }
-
-      if (request.method === "PUT") {
-        const contentType = request.headers.get("content-type") ?? undefined;
-        const customMetadataHeader = request.headers.get("x-object-custom-metadata");
-        let customMetadata: Record<string, string> | undefined;
-        if (customMetadataHeader) {
-          try { customMetadata = JSON.parse(customMetadataHeader); } catch { customMetadata = undefined; }
+        if (request.method === "HEAD" || request.method === "GET") {
+          const object = await env.STORAGE_BUCKET.get(key);
+          if (!object) return new Response(null, { status: 404 });
+          const headers = new Headers();
+          if (object.httpMetadata?.contentType) headers.set("content-type", object.httpMetadata.contentType);
+          headers.set("content-length", String(object.size));
+          headers.set("etag", object.httpEtag);
+          headers.set("x-object-custom-metadata", JSON.stringify(object.customMetadata ?? {}));
+          return new Response(request.method === "HEAD" ? null : object.body, { headers });
         }
-        await env.STORAGE_BUCKET.put(key, request.body, {
-          httpMetadata: contentType ? { contentType } : undefined,
-          customMetadata,
-        });
-        return new Response(null, { status: 204 });
-      }
 
-      if (request.method === "DELETE") {
-        await env.STORAGE_BUCKET.delete(key);
-        return new Response(null, { status: 204 });
-      }
+        if (request.method === "PUT") {
+          const contentType = request.headers.get("content-type") ?? undefined;
+          const customMetadataHeader = request.headers.get("x-object-custom-metadata");
+          let customMetadata: Record<string, string> | undefined;
+          if (customMetadataHeader) {
+            try { customMetadata = JSON.parse(customMetadataHeader); } catch { customMetadata = undefined; }
+          }
+          await env.STORAGE_BUCKET.put(key, request.body, {
+            httpMetadata: contentType ? { contentType } : undefined,
+            customMetadata,
+          });
+          return new Response(null, { status: 204 });
+        }
 
-      return new Response("Method not allowed", { status: 405 });
-    },
-  };
+        if (request.method === "DELETE") {
+          await env.STORAGE_BUCKET.delete(key);
+          return new Response(null, { status: 204 });
+        }
+
+        return new Response("Method not allowed", { status: 405 });
+      },
+    };
+  }
 }
 
 export default {

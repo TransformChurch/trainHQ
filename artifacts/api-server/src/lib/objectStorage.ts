@@ -170,7 +170,13 @@ export class ObjectStorageService {
       const key = this.resolveObjectPath(this.getPrivateObjectDir(), objectName);
       if (await this.r2Exists(key)) throw new Error("Upload destination already exists");
       const buffer = await bufferWithLimit(body, expectedSize);
-      await this.r2Fetch("PUT", key, buffer, { contentType });
+      const response = await this.r2Fetch("PUT", key, buffer, { contentType });
+      // 2026-10-01: every other r2Fetch() call site in this file checks
+      // response.ok (see getObjectEntityFile() below) except the PUT paths,
+      // which is why the R2 bridge being broken (fixed separately, in
+      // src/worker.ts -- see its 2026-10-01 comment) went unnoticed: writes
+      // failed silently and callers believed the upload had succeeded.
+      if (!response.ok) throw new Error(`Storage backend returned ${response.status} for "${key}"`);
       return;
     }
 
@@ -220,7 +226,11 @@ export class ObjectStorageService {
 
     if (STORAGE_BACKEND === "r2") {
       const key = this.resolveObjectPath(this.getPrivateObjectDir(), name);
-      await this.r2Fetch("PUT", key, Buffer.from(data), { contentType });
+      const response = await this.r2Fetch("PUT", key, Buffer.from(data), { contentType });
+      // See the 2026-10-01 comment on the PUT in uploadObject() above: this
+      // check used to be missing here too, so a broken R2 bridge made report
+      // generation silently save nothing instead of failing loudly.
+      if (!response.ok) throw new Error(`Storage backend returned ${response.status} for "${key}"`);
       return `/objects/${name}`;
     }
 
@@ -307,10 +317,12 @@ export class ObjectStorageService {
       const existingMeta = readR2MetaHeaders(existing);
       const merged = { ...parseAclPolicy(existingMeta.customMetadata) ? { aclPolicy: parseAclPolicy(existingMeta.customMetadata) } : {}, ...metadata };
       const buffer = Buffer.from(await existing.arrayBuffer());
-      await this.r2Fetch("PUT", key, buffer, {
+      const response = await this.r2Fetch("PUT", key, buffer, {
         contentType: merged.contentType ?? existingMeta.contentType,
         aclPolicy: merged.aclPolicy,
       });
+      // See the 2026-10-01 comment on the PUT in uploadObject() above.
+      if (!response.ok) throw new Error(`Storage backend returned ${response.status} for "${key}"`);
       return;
     }
 
