@@ -481,9 +481,19 @@ function bundledReportEngineScript(fileName: string): string {
 // count instead: a generous per-row allowance, a floor so small pulls still
 // get a reasonable cushion, and a hard ceiling so a genuinely stuck script
 // can't hold the single shared container hostage indefinitely.
+//
+// 2026-10-01: a ~1,300-row report hit this budget's exact boundary and got
+// killed (193.9s wall, 193,950ms at the old 150ms/row rate) -- the real
+// driver was find_near_matches() in the cleanup script doing an O(n^2)
+// all-pairs fuzzy-name comparison, since fixed there (bucketed by name
+// initial, ~5-20x fewer comparisons, same results -- see that script's
+// comments). Per-row allowance raised here too, as headroom: the
+// algorithmic fix removes the quadratic blowup, but Python startup + CSV
+// I/O + the now-bucketed comparisons still cost more than 150ms/row once
+// bundle sizes get into the thousands.
 const CLEANUP_TIMEOUT_FLOOR_MS = 120_000;
-const CLEANUP_TIMEOUT_PER_ROW_MS = 150;
-const CLEANUP_TIMEOUT_CEILING_MS = 10 * 60_000;
+const CLEANUP_TIMEOUT_PER_ROW_MS = 250;
+const CLEANUP_TIMEOUT_CEILING_MS = 15 * 60_000;
 
 function cleanupScriptTimeoutMs(rowCount: number): number {
   return Math.min(
