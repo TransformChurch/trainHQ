@@ -79,6 +79,9 @@ async function runDocumentPdfIndexer() {
   indexerRunning = true;
   try {
     while (true) {
+      // Note: only indexDocumentPdf() failures are individually caught
+      // below -- the db.select() just above is not. If it throws (e.g. a
+      // dropped pooled connection), it propagates out of this function.
       const retryBefore = new Date(Date.now() - RETRY_DELAY_MS);
       const pending = await db.select().from(documentsTable).where(and(
         eq(documentsTable.resourceType, "file"),
@@ -100,14 +103,26 @@ async function runDocumentPdfIndexer() {
   }
 }
 
+// Fire-and-forget wrapper: runDocumentPdfIndexer() isn't fully try/caught
+// internally (a dropped DB connection mid-loop propagates out of it), and an
+// unhandled rejection on a "void"-called async function crashes the whole
+// Node process by default -- which, on Cloudflare Containers, takes down
+// every route until the container restarts. Logging here instead keeps a
+// transient indexing failure from becoming a site-wide outage.
+function runDocumentPdfIndexerSafely() {
+  void runDocumentPdfIndexer().catch((err) => {
+    console.error("Document PDF indexer run failed (will retry on next tick):", err);
+  });
+}
+
 export function startDocumentPdfIndexer() {
   if (indexerStarted) return;
   indexerStarted = true;
-  void runDocumentPdfIndexer();
-  const timer = setInterval(() => void runDocumentPdfIndexer(), 60_000);
+  runDocumentPdfIndexerSafely();
+  const timer = setInterval(runDocumentPdfIndexerSafely, 60_000);
   timer.unref();
 }
 
 export function queueDocumentPdfIndexing() {
-  void runDocumentPdfIndexer();
+  runDocumentPdfIndexerSafely();
 }
