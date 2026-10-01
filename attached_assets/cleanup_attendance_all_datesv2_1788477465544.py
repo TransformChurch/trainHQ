@@ -421,10 +421,44 @@ def find_near_matches(records, flags):
     def full_name(r):
         return f"{r['First Name']} {r['Last Name']}"
 
-    for i in range(n):
-        for j in range(i + 1, n):
+    keys = [name_key(r["First Name"], r["Last Name"]) for r in records]
+
+    # A plain all-pairs scan here is O(n^2): fine for a couple hundred
+    # records, but it's the one part of this script whose cost grows
+    # faster than the row count -- a ~1,300-person report is already
+    # ~845,000 pairs, each doing up to three difflib comparisons. That's
+    # what blew through the cleanup script's processing-time budget on
+    # the sibling month/quarter script (same find_near_matches logic,
+    # same fix applied there 2026-10-01 -- see website-hosting-deployment
+    # project doc). Bucket candidates by the first letter of last name
+    # and, separately, first name, and only compare within a bucket --
+    # every pair this function can flag shares at least one of those
+    # (same_last, same_first, or a full-name fuzzy match close enough
+    # that both leading letters still match in practice). That cuts
+    # comparisons by roughly the number of buckets in play (names spread
+    # across the alphabet -> on the order of 20-25x fewer pairs) while
+    # catching the same real-world typos/nicknames this function was
+    # already built to catch. The one case it can miss that the old full
+    # scan wouldn't: a near-match where BOTH the first AND last name's
+    # very first letter changed (e.g. "Kristen Oliver" vs "Christen
+    # Olliver") -- rare enough that it's an acceptable trade for not
+    # timing out the whole report.
+    last_initial_buckets = {}
+    first_initial_buckets = {}
+    for idx, (first_k, last_k) in enumerate(keys):
+        last_initial_buckets.setdefault(last_k[:1], []).append(idx)
+        first_initial_buckets.setdefault(first_k[:1], []).append(idx)
+
+    candidate_pairs = set()
+    for bucket in list(last_initial_buckets.values()) + list(first_initial_buckets.values()):
+        for bi in range(len(bucket)):
+            for bj in range(bi + 1, len(bucket)):
+                i, j = bucket[bi], bucket[bj]
+                candidate_pairs.add((i, j) if i < j else (j, i))
+
+    for i, j in candidate_pairs:
             a, b = records[i], records[j]
-            ak, bk = name_key(a["First Name"], a["Last Name"]), name_key(b["First Name"], b["Last Name"])
+            ak, bk = keys[i], keys[j]
             if ak == bk:
                 continue  # already merged
 

@@ -68,6 +68,20 @@ function cleanPreparationProgress() {
     if (progress.expiresAt <= now) preparationProgress.delete(key);
   }
 }
+
+// Belt-and-suspenders against a double-submitted /prepare request (e.g. a
+// fast double-click/double-tap firing two click events before the frontend's
+// own `disabled={preparing}` re-render lands, or a flaky network causing a
+// client-side retry while the first request is still in flight): a second
+// concurrent run is never just wasted work, it's actively harmful. Both runs
+// share this one container instance's single CPU, so instead of one script
+// run finishing comfortably inside its budget, two compete for the same
+// cycles and can each end up slower than the timeout they were each given
+// individually -- turning "redundant" into "both fail." Tracked per-user
+// (not globally) so one admin's long-running pull never blocks another's.
+const activePrepareRuns = new Set<number>();
+const PREPARE_IN_PROGRESS_MESSAGE =
+  "A report is already being prepared for your account -- wait for it to finish (or fail) before starting another.";
 const REPORT_FIELDS = [
   { key: "planning_center_id", label: "Planning Center ID" },
   { key: "first_name", label: "First Name" },
@@ -763,6 +777,11 @@ router.post("/prepare", requireManagerOrAdmin, async (req, res) => {
   let workDir = "";
   const progressId = text(req.body?.progressId);
   const userId = res.locals.dbUser.id;
+  if (activePrepareRuns.has(userId)) {
+    res.status(409).json({ error: PREPARE_IN_PROGRESS_MESSAGE });
+    return;
+  }
+  activePrepareRuns.add(userId);
   try {
     await cleanExpiredRuns();
     cleanPreparationProgress();
@@ -984,6 +1003,7 @@ router.post("/prepare", requireManagerOrAdmin, async (req, res) => {
     }
     sendError(req, res, error, "Failed to prepare report data");
   } finally {
+    activePrepareRuns.delete(userId);
     if (workDir) await rm(workDir, { recursive: true, force: true }).catch(() => undefined);
   }
 });

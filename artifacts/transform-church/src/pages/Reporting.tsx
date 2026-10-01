@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useGetMe } from "@workspace/api-client-react";
 import { useUpload } from "@workspace/object-storage-web";
 import { BarChart3, Check, ChevronDown, ChevronUp, Download, Loader2, Plus, RefreshCw, Settings2, Trash2, Upload } from "lucide-react";
@@ -128,6 +128,17 @@ export default function Reporting() {
   const [eventsLoading, setEventsLoading] = useState(true);
   const [eventsError, setEventsError] = useState("");
   const [preparing, setPreparing] = useState(false);
+  // Belt-and-suspenders against double-submitting "Pull and prepare data":
+  // the button's `disabled={preparing}` doesn't stop two click events that
+  // both fire before React gets a chance to re-render with the updated
+  // state (a fast double-click, or a double-tap on touch) -- each one would
+  // start its own PCO pull + Python cleanup run on the single shared
+  // container, and the two compete for the same CPU/pool, slowing each
+  // other down enough to blow through the cleanup timeout that would have
+  // been comfortably met running alone. A ref is checked synchronously
+  // (unlike state, which only updates on the next render) so the second
+  // call bails out immediately instead of slipping through.
+  const preparingRef = useRef(false);
   const [preparationProgress, setPreparationProgress] = useState<PreparationProgress | null>(null);
   const [generating, setGenerating] = useState<"pdf" | null>(null);
   const [templateName, setTemplateName] = useState("");
@@ -233,6 +244,8 @@ export default function Reporting() {
 
   const prepare = async () => {
     if (!eventId || !endDate || !selectedTemplate || (activeTemplate?.cleanupMode === "all_dates" && !startDate)) return;
+    if (preparingRef.current) return; // already running -- see preparingRef comment above
+    preparingRef.current = true;
     const progressId = crypto.randomUUID();
     let progressTimer: number | undefined;
     setPreparing(true);
@@ -269,6 +282,7 @@ export default function Reporting() {
       toast({ title: "Could not prepare report", description: error instanceof Error ? error.message : "Request failed.", variant: "destructive" });
     } finally {
       if (progressTimer !== undefined) window.clearInterval(progressTimer);
+      preparingRef.current = false;
       setPreparing(false);
       setPreparationProgress(null);
     }
