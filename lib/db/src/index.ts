@@ -10,7 +10,23 @@ if (!process.env.DATABASE_URL) {
   );
 }
 
-export const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+export const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  // Supabase's Nano-tier pooler fronts a pool of 15 real Postgres backend
+  // connections, shared across every route in this app (there's only one
+  // container instance -- wrangler.toml: max_instances = 1). 10 leaves
+  // headroom for other concurrent work (report generation, the PDF indexer)
+  // without this app alone being able to exhaust the pooler's own limit.
+  max: 10,
+  // Previously unset, which means node-postgres's default: a client that
+  // can't get a connection because the pool is full waits *forever*, with
+  // no error, until one frees up. Observed effect of that: a dashboard
+  // request logged at ~0ms CPU time but 1.54 *minutes* of wall time before
+  // its eventual 500 -- all of that time was spent queued for a connection,
+  // not computing. Failing fast here turns pool contention into a quick,
+  // clear, catchable error instead of a multi-minute hang.
+  connectionTimeoutMillis: 10_000,
+});
 
 // node-postgres emits "error" on the Pool itself whenever an *idle* client
 // (one not currently running a query) gets disconnected by the server --

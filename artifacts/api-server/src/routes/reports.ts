@@ -474,6 +474,24 @@ function bundledReportEngineScript(fileName: string): string {
   return process.env.NODE_ENV === "production" ? built : source;
 }
 
+// The cleanup script's runtime scales with how many check-in rows it has to
+// process, which varies a lot by event size -- a fixed timeout either kills
+// a legitimately large pull early or leaves a hung process running far
+// longer than any real cleanup should need. Scale the budget with the row
+// count instead: a generous per-row allowance, a floor so small pulls still
+// get a reasonable cushion, and a hard ceiling so a genuinely stuck script
+// can't hold the single shared container hostage indefinitely.
+const CLEANUP_TIMEOUT_FLOOR_MS = 120_000;
+const CLEANUP_TIMEOUT_PER_ROW_MS = 150;
+const CLEANUP_TIMEOUT_CEILING_MS = 10 * 60_000;
+
+function cleanupScriptTimeoutMs(rowCount: number): number {
+  return Math.min(
+    CLEANUP_TIMEOUT_CEILING_MS,
+    Math.max(CLEANUP_TIMEOUT_FLOOR_MS, rowCount * CLEANUP_TIMEOUT_PER_ROW_MS),
+  );
+}
+
 async function runPython(args: string[], timeoutMs = 120_000): Promise<string> {
   return new Promise((resolve, reject) => {
     const child = spawn("python3", args, { env: process.env });
@@ -902,7 +920,10 @@ router.post("/prepare", requireManagerOrAdmin, async (req, res) => {
     const cleanedPath = join(workDir, "cleaned.csv");
     const flagsPath = join(workDir, "flags.txt");
     await writeFile(rawPath, rawCsv, "utf8");
-    const output = await runPython([await pythonScript(cleanupMode), rawPath, cleanedPath, "--flags-out", flagsPath]);
+    const output = await runPython(
+      [await pythonScript(cleanupMode), rawPath, cleanedPath, "--flags-out", flagsPath],
+      cleanupScriptTimeoutMs(inRange.length),
+    );
     const cleaned = selectCleanedColumns(await readFile(cleanedPath, "utf8"), pullFields, customLabels);
     const flags = await readFile(flagsPath, "utf8").catch(() => "");
     const cleanedObjectPath = await storage.saveObjectEntityBuffer(Buffer.from(cleaned, "utf8"), "text/csv", "reports");
