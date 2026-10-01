@@ -4,8 +4,10 @@ import {
   planningCenterOAuthStatesTable,
   planningCenterTokensTable,
   usersTable,
+  groupsTable,
+  groupMembersTable,
 } from "@workspace/db";
-import { eq, or } from "drizzle-orm";
+import { eq, or, and, inArray, isNotNull } from "drizzle-orm";
 
 const AUTHORIZE_URL = "https://api.planningcenteronline.com/oauth/authorize";
 const TOKEN_URL = "https://api.planningcenteronline.com/oauth/token";
@@ -722,6 +724,91 @@ async function updatePlanningCenterDateField(
 ) {
   const fieldDefinitionId = fieldDefinitionIdForModule(moduleId, dateField);
   return updatePlanningCenterFieldById(user, fieldDefinitionId, date);
+}
+
+type FieldDatumResource = {
+  attributes?: { value?: unknown };
+  relationships?: { field_definition?: { data?: { id?: unknown } } };
+};
+
+/**
+ * Returns a map of field_definition id -> trimmed string value for every
+ * custom field populated on this Planning Center person's profile.
+ * Used to automatically assign a newly signed-in user to groups whose
+ * admin-configured Planning Center field/value rule matches their profile.
+ */
+export async function fetchPlanningCenterFieldValues(
+  personId: string,
+  accessToken: string,
+): Promise<Map<string, string>> {
+  const records = await fetchPeopleCollection<FieldDatumResource>(
+    `/people/${encodeURIComponent(personId)}/field_data`,
+    accessToken,
+  );
+  const values = new Map<string, string>();
+  for (const record of records) {
+    const fieldDefinitionId = record.relationships?.field_definition?.data?.id;
+    const value = record.attributes?.value;
+    if (
+      typeof fieldDefinitionId === "string" && fieldDefinitionId &&
+      typeof value === "string" && value.trim()
+    ) {
+      values.set(fieldDefinitionId, value.trim());
+    }
+  }
+  return values;
+}
+
+/**
+ * Adds the signed-in user to any group whose admin-configured Planning
+ * Center field/value rule matches this person's profile. Safe to call on
+ * every sign-in: it's a no-op when no groups have a rule configured, and
+ * any Planning Center API failure is swallowed so it never blocks login.
+ */
+export async function autoAssignGroupsFromPlanningCenter(
+  user: { id: string },
+  personId: string,
+  accessToken: string,
+): Promise<void> {
+  const rules = await db
+    .select({
+      id: groupsTable.id,
+      pcoFieldDefinitionId: groupsTable.pcoFieldDefinitionId,
+      pcoFieldValue: groupsTable.pcoFieldValue,
+    })
+    .from(groupsTable)
+    .where(isNotNull(groupsTable.pcoFieldDefinitionId));
+
+  const activeRules = rules.filter(
+    (rule): rule is { id: number; pcoFieldDefinitionId: string; pcoFieldValue: string } =>
+      !!rule.pcoFieldDefinitionId && !!rule.pcoFieldValue,
+  );
+  if (activeRules.length === 0) return;
+
+  let fieldValues: Map<string, string>;
+  try {
+    fieldValues = await fetchPlanningCenterFieldValues(personId, accessToken);
+  } catch {
+    return;
+  }
+
+  const matchingGroupIds = activeRules
+    .filter((rule) => fieldValues.get(rule.pcoFieldDefinitionId)?.toLowerCase() === rule.pcoFieldValue.toLowerCase())
+    .map((rule) => rule.id);
+  if (matchingGroupIds.length === 0) return;
+
+  const existingMemberships = await db
+    .select({ groupId: groupMembersTable.groupId })
+    .from(groupMembersTable)
+    .where(and(eq(groupMembersTable.userId, user.id), inArray(groupMembersTable.groupId, matchingGroupIds)));
+  const alreadyMemberOf = new Set(existingMemberships.map((row) => row.groupId));
+
+  const newGroupIds = matchingGroupIds.filter((id) => !alreadyMemberOf.has(id));
+  if (newGroupIds.length === 0) return;
+
+  await db.insert(groupMembersTable).values(
+    newGroupIds.map((groupId) => ({ groupId, userId: user.id })),
+  );
 }
 
 export type PlanningCenterFieldDefinition = { id: string; label: string };

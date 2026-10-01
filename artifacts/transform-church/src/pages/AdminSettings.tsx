@@ -56,7 +56,7 @@ const editableCopyKeys: { key: SiteCopyKey; label: string; group: string }[] = [
   { key: "nav.usersProgress", label: "Users & Progress", group: "Admin navigation" },
   { key: "nav.moduleManager", label: "Module Manager", group: "Admin navigation" },
   { key: "nav.documentManager", label: "Document Manager", group: "Admin navigation" },
-  { key: "nav.growthTracks", label: "Growth Tracks", group: "Admin navigation" },
+  { key: "nav.growthTracks", label: "Development Pathways", group: "Admin navigation" },
   { key: "nav.adminDashboard", label: "Admin Dashboard", group: "Admin navigation" },
   { key: "nav.adminSettings", label: "Admin Settings", group: "Admin navigation" },
   { key: "nav.signOut", label: "Sign out", group: "Navigation" },

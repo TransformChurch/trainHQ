@@ -1,5 +1,6 @@
 import { Router, type Response } from "express";
 import {
+  autoAssignGroupsFromPlanningCenter,
   consumeAuthorizationState,
   createAuthorizationRequest,
   exchangeAuthorizationCode,
@@ -81,6 +82,12 @@ router.get("/planning-center/callback", async (req, res) => {
     const person = await fetchCurrentPerson(tokens.accessToken);
     const user = await upsertPlanningCenterUser(person);
     await savePlanningCenterTokens(user.id, tokens);
+    try {
+      await autoAssignGroupsFromPlanningCenter(user, person.id, tokens.accessToken);
+    } catch (groupErr) {
+      // Group auto-assignment is best-effort and must never block sign-in.
+      req.log.warn({ err: groupErr }, "Planning Center group auto-assignment failed");
+    }
     const appToken = issueAppToken({
       sub: user.externalUserId,
       email: user.email,

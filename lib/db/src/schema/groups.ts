@@ -8,6 +8,11 @@ export const groupsTable = pgTable("groups", {
   name: text("name").notNull(),
   description: text("description"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
+  // When set, a user is automatically added to this group at login if their
+  // Planning Center profile has this custom field equal to pcoFieldValue.
+  pcoFieldDefinitionId: text("pco_field_definition_id"),
+  pcoFieldDefinitionLabel: text("pco_field_definition_label"),
+  pcoFieldValue: text("pco_field_value"),
 });
 
 export const groupMembersTable = pgTable("group_members", {

@@ -161,7 +161,7 @@ function GrowthTrackFormDialog({
           }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["growth-tracks"] });
-      toast({ title: isEdit ? "Growth track updated" : "Growth track created" });
+      toast({ title: isEdit ? "Development pathway updated" : "Development pathway created" });
       onClose();
     },
     onError: () => toast({ title: "Something went wrong", variant: "destructive" }),
@@ -177,7 +177,7 @@ function GrowthTrackFormDialog({
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
-          <DialogTitle>{isEdit ? "Edit Growth Track" : "New Growth Track"}</DialogTitle>
+          <DialogTitle>{isEdit ? "Edit Development Pathway" : "New Development Pathway"}</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
@@ -186,13 +186,13 @@ function GrowthTrackFormDialog({
           </div>
           <div className="space-y-2">
             <Label>Description</Label>
-            <Textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Briefly describe this growth track..." rows={3} />
+            <Textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Briefly describe this development pathway..." rows={3} />
           </div>
           <ImageUploadPicker value={imageUrl} onChange={setImageUrl} />
           <div className="flex justify-end gap-2 pt-2">
             <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
             <Button type="submit" disabled={!name.trim() || mutation.isPending}>
-              {mutation.isPending ? "Saving..." : isEdit ? "Save Changes" : "Create Track"}
+              {mutation.isPending ? "Saving..." : isEdit ? "Save Changes" : "Create Pathway"}
             </Button>
           </div>
         </form>
@@ -443,7 +443,7 @@ function EnrollDialog({
         </DialogHeader>
         {!hasSteps && (
           <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-lg p-3 text-sm">
-            This growth track has no steps yet. Add modules first before enrolling users.
+            This development pathway has no steps yet. Add modules first before enrolling users.
           </div>
         )}
 
@@ -700,7 +700,7 @@ export default function AdminGrowthTracks() {
       apiFetch(`/api/growth-tracks/${id}`, { method: "DELETE" }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["growth-tracks"] });
-      toast({ title: "Growth track deleted" });
+      toast({ title: "Development pathway deleted" });
     },
     onError: () => toast({ title: "Failed to delete", variant: "destructive" }),
   });
@@ -716,28 +716,28 @@ export default function AdminGrowthTracks() {
         <div>
           <h1 className="text-2xl font-bold flex items-center gap-2">
             <TrendingUp className="w-6 h-6 text-primary" />
-            Growth Tracks
+            Development Pathways
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
             Curated sequences of modules that auto-advance as users complete each step.
           </p>
         </div>
         <Button onClick={() => setShowCreate(true)} className="gap-2">
-          <Plus className="w-4 h-4" />New Growth Track
+          <Plus className="w-4 h-4" />New Development Pathway
         </Button>
       </div>
 
       {isLoading ? (
-        <div className="text-sm text-muted-foreground">Loading growth tracks...</div>
+        <div className="text-sm text-muted-foreground">Loading development pathways...</div>
       ) : tracks.length === 0 ? (
         <div className="border border-dashed rounded-xl p-12 text-center space-y-3">
           <TrendingUp className="w-10 h-10 text-muted-foreground mx-auto" />
-          <h3 className="font-semibold text-lg">No growth tracks yet</h3>
+          <h3 className="font-semibold text-lg">No development pathways yet</h3>
           <p className="text-sm text-muted-foreground max-w-xs mx-auto">
-            Create your first growth track — an ordered sequence of modules users move through automatically.
+            Create your first development pathway — an ordered sequence of modules users move through automatically.
           </p>
           <Button onClick={() => setShowCreate(true)} className="gap-2">
-            <Plus className="w-4 h-4" />Create First Track
+            <Plus className="w-4 h-4" />Create First Pathway
           </Button>
         </div>
       ) : (

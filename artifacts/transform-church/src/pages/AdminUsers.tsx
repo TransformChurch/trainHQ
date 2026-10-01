@@ -39,7 +39,11 @@ type Group = {
   createdAt: string;
   memberCount: number;
   pendingRequests: number;
+  pcoFieldDefinitionId?: string | null;
+  pcoFieldDefinitionLabel?: string | null;
+  pcoFieldValue?: string | null;
 };
+type PcoFieldDefinition = { id: string; label: string };
 type GroupMember = {
   id: number;
   groupId: number;
@@ -87,11 +91,16 @@ function GroupsTab() {
   const [addMemberUserId, setAddMemberUserId] = useState("");
   const [addManagerUserId, setAddManagerUserId] = useState("");
   const [manageMembersOpen, setManageMembersOpen] = useState(false);
-  const [manageDialogTab, setManageDialogTab] = useState<"members" | "managers" | "requests" | "documents">("members");
+  const [manageDialogTab, setManageDialogTab] = useState<"members" | "managers" | "requests" | "documents" | "settings">("members");
   const [driveResources, setDriveResources] = useState<DriveResource[]>([]);
   const [newResourceLabel, setNewResourceLabel] = useState("");
   const [newResourceUrl, setNewResourceUrl] = useState("");
   const [addingResource, setAddingResource] = useState(false);
+  const [pcoFieldDefinitions, setPcoFieldDefinitions] = useState<PcoFieldDefinition[]>([]);
+  const [loadingPcoFields, setLoadingPcoFields] = useState(false);
+  const [autoAssignFieldId, setAutoAssignFieldId] = useState("");
+  const [autoAssignValue, setAutoAssignValue] = useState("");
+  const [savingAutoAssign, setSavingAutoAssign] = useState(false);
 
   const loadGroups = async () => {
     try {
@@ -172,6 +181,44 @@ function GroupsTab() {
     }
   };
 
+  const loadPcoFieldDefinitions = async () => {
+    setLoadingPcoFields(true);
+    try {
+      const data = await apiFetch("/api/admin/planning-center/field-definitions");
+      setPcoFieldDefinitions(data.fields ?? []);
+    } catch {
+      // Non-fatal — the admin may not have Church Center connected yet.
+      setPcoFieldDefinitions([]);
+    } finally {
+      setLoadingPcoFields(false);
+    }
+  };
+
+  const handleSaveAutoAssign = async () => {
+    if (!selectedGroup) return;
+    setSavingAutoAssign(true);
+    try {
+      const fieldLabel = pcoFieldDefinitions.find(f => f.id === autoAssignFieldId)?.label ?? null;
+      await apiFetch(`/api/groups/${selectedGroup.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          pcoFieldDefinitionId: autoAssignFieldId || null,
+          pcoFieldDefinitionLabel: autoAssignFieldId ? fieldLabel : null,
+          pcoFieldValue: autoAssignFieldId ? autoAssignValue : null,
+        }),
+      });
+      toast({ title: autoAssignFieldId ? "Auto-assignment rule saved" : "Auto-assignment rule cleared" });
+      await loadGroups();
+      setSelectedGroup(current => current && current.id === selectedGroup.id
+        ? { ...current, pcoFieldDefinitionId: autoAssignFieldId || null, pcoFieldDefinitionLabel: autoAssignFieldId ? fieldLabel : null, pcoFieldValue: autoAssignFieldId ? autoAssignValue : null }
+        : current);
+    } catch {
+      toast({ title: "Failed to save auto-assignment rule", variant: "destructive" });
+    } finally {
+      setSavingAutoAssign(false);
+    }
+  };
+
   useEffect(() => { loadGroups(); }, []);
 
   const handleCreate = async (e: React.FormEvent) => {
@@ -202,15 +249,20 @@ function GroupsTab() {
     }
   };
 
-  const openManageDialog = (group: Group, tab: "members" | "managers" | "requests" | "documents" = "members") => {
+  const openManageDialog = (group: Group, tab: "members" | "managers" | "requests" | "documents" | "settings" = "members") => {
     setSelectedGroup(group);
     setAddMemberUserId("");
     setAddManagerUserId("");
     setNewResourceLabel("");
     setNewResourceUrl("");
     setManageDialogTab(tab);
+    setAutoAssignFieldId(group.pcoFieldDefinitionId ?? "");
+    setAutoAssignValue(group.pcoFieldValue ?? "");
     loadGroupData(group.id);
-    if (isAdmin) loadManagers(group.id);
+    if (isAdmin) {
+      loadManagers(group.id);
+      loadPcoFieldDefinitions();
+    }
     loadDriveResources(group.id);
     setManageMembersOpen(true);
   };
@@ -387,6 +439,16 @@ function GroupsTab() {
                       {group.pendingRequests} request{group.pendingRequests !== 1 ? "s" : ""}
                     </button>
                   )}
+                  {isAdmin && group.pcoFieldDefinitionId && (
+                    <button
+                      className="inline-flex items-center gap-1 rounded-full border border-blue-300 bg-blue-50 px-2 py-0.5 text-xs font-semibold text-blue-700 hover:bg-blue-100 transition-colors"
+                      onClick={() => openManageDialog(group, "settings")}
+                      title={`${group.pcoFieldDefinitionLabel ?? "Planning Center field"} = ${group.pcoFieldValue ?? ""}`}
+                    >
+                      <UserCog className="w-3 h-3" />
+                      Auto-assign
+                    </button>
+                  )}
                 </div>
 
                 <div className="flex flex-wrap gap-1.5">
@@ -453,6 +515,11 @@ function GroupsTab() {
                   <Badge variant="secondary" className="ml-1.5 text-xs h-4 px-1">{driveResources.length}</Badge>
                 )}
               </TabsTrigger>
+              {isAdmin && (
+                <TabsTrigger value="settings" className="flex-1">
+                  Auto-Assign
+                </TabsTrigger>
+              )}
             </TabsList>
 
             {/* Members Tab */}
@@ -678,6 +745,64 @@ function GroupsTab() {
               </div>
             </TabsContent>
 
+            {/* Auto-Assign Tab (admin-only) */}
+            {isAdmin && (
+              <TabsContent value="settings" className="space-y-4 mt-4">
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium">Planning Center Auto-Assignment</label>
+                  <p className="text-xs text-muted-foreground">
+                    When set, anyone who signs in with Church Center and has this profile field equal to the
+                    value below is automatically added to this group — no manual approval needed.
+                  </p>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium">Planning Center field</label>
+                  <select
+                    className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                    value={autoAssignFieldId}
+                    onChange={e => setAutoAssignFieldId(e.target.value)}
+                    disabled={loadingPcoFields}
+                  >
+                    <option value="">No automatic assignment</option>
+                    {pcoFieldDefinitions.map(field => (
+                      <option key={field.id} value={field.id}>{field.label}</option>
+                    ))}
+                  </select>
+                  {loadingPcoFields && (
+                    <p className="text-xs text-muted-foreground">Loading Planning Center fields...</p>
+                  )}
+                  {!loadingPcoFields && pcoFieldDefinitions.length === 0 && (
+                    <p className="text-xs text-muted-foreground">
+                      No Planning Center fields found. Church Center must be connected for an admin before fields are available here.
+                    </p>
+                  )}
+                </div>
+
+                {autoAssignFieldId && (
+                  <div className="space-y-1.5">
+                    <label className="text-sm font-medium">Required value</label>
+                    <Input
+                      value={autoAssignValue}
+                      onChange={e => setAutoAssignValue(e.target.value)}
+                      placeholder="e.g. Youth Volunteer"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Users are added to this group when their Planning Center profile has this field set to this value (not case-sensitive).
+                    </p>
+                  </div>
+                )}
+
+                <Button
+                  size="sm"
+                  onClick={handleSaveAutoAssign}
+                  disabled={savingAutoAssign || (!!autoAssignFieldId && !autoAssignValue.trim())}
+                >
+                  {savingAutoAssign ? "Saving..." : "Save Rule"}
+                </Button>
+              </TabsContent>
+            )}
+
           </Tabs>
         </DialogContent>
       </Dialog>
@@ -743,7 +868,7 @@ export default function AdminUsers() {
         <p className="text-muted-foreground mt-2">Manage users, groups, and monitor training progress.</p>
       </div>
 
-      <Tabs defaultValue="matrix">
+      <Tabs defaultValue="groups">
         <TabsList className="mb-6">
           <TabsTrigger value="matrix">Progress Matrix</TabsTrigger>
           <TabsTrigger value="groups">

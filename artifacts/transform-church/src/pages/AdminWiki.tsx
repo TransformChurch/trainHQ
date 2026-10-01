@@ -94,7 +94,9 @@ export default function AdminWiki({ wikiKey = "wiki", wikiName = "Wiki" }: Admin
   const [accessGrants, setAccessGrants] = useState<WikiAccessGrant[]>([]);
   const [groupAccessGrants, setGroupAccessGrants] = useState<WikiGroupAccessGrant[]>([]);
   const [categoryAccess, setCategoryAccess] = useState<CategoryAccess>({ users: [], groups: [] });
-  const [accessScope, setAccessScope] = useState("all");
+  const [accessManagerScope, setAccessManagerScope] = useState<
+    { type: "all" } | { type: "category"; id: number; name: string } | null
+  >(null);
   const [groups, setGroups] = useState<WikiGroup[]>([]);
   const [accessSearch, setAccessSearch] = useState("");
   const [savingAccess, setSavingAccess] = useState<Set<string>>(new Set());
@@ -153,13 +155,13 @@ export default function AdminWiki({ wikiKey = "wiki", wikiName = "Wiki" }: Admin
     setCategoryAccess(scopedAccess);
   };
 
-  const setUserAccess = async (userId: string, enabled: boolean) => {
-    const key = `user:${accessScope}:${userId}`;
+  const setUserAccess = async (scope: string, userId: string, enabled: boolean) => {
+    const key = `user:${scope}:${userId}`;
     setSavingAccess((current) => new Set(current).add(key));
     try {
-      await wikiApi(accessScope === "all"
+      await wikiApi(scope === "all"
         ? `${apiPrefix}/access/users/${userId}`
-        : `${apiPrefix}/categories/${accessScope}/access/users/${userId}`, {
+        : `${apiPrefix}/categories/${scope}/access/users/${userId}`, {
         method: "PUT",
         body: JSON.stringify({ enabled }),
       });
@@ -176,13 +178,13 @@ export default function AdminWiki({ wikiKey = "wiki", wikiName = "Wiki" }: Admin
     }
   };
 
-  const setGroupAccess = async (groupId: number, enabled: boolean) => {
-    const key = `group:${accessScope}:${groupId}`;
+  const setGroupAccess = async (scope: string, groupId: number, enabled: boolean) => {
+    const key = `group:${scope}:${groupId}`;
     setSavingAccess((current) => new Set(current).add(key));
     try {
-      await wikiApi(accessScope === "all"
+      await wikiApi(scope === "all"
         ? `${apiPrefix}/access/groups/${groupId}`
-        : `${apiPrefix}/categories/${accessScope}/access/groups/${groupId}`, {
+        : `${apiPrefix}/categories/${scope}/access/groups/${groupId}`, {
         method: "PUT",
         body: JSON.stringify({ enabled }),
       });
@@ -396,6 +398,9 @@ export default function AdminWiki({ wikiKey = "wiki", wikiName = "Wiki" }: Admin
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <Button variant="outline" onClick={() => setAccessManagerScope({ type: "all" })}>
+            <Shield className="mr-2 h-4 w-4" />Entire Wiki Access
+          </Button>
           <Button variant="outline" onClick={() => void downloadExport()}>
             <Download className="mr-2 h-4 w-4" />Download JSON
           </Button>
@@ -409,91 +414,6 @@ export default function AdminWiki({ wikiKey = "wiki", wikiName = "Wiki" }: Admin
             <Plus className="mr-2 h-4 w-4" />Add Article
           </Button>
         </div>
-      </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2"><Shield className="h-5 w-5" />{wikiName} Access</CardTitle>
-            <p className="text-sm text-muted-foreground">
-              Admins always have access. Choose the entire {wikiName} or a category, then grant access to people or groups. Entire-{wikiName} grants also include every category; group membership may grant access even without a direct user grant.
-            </p>
-            <div className="max-w-sm space-y-2 pt-2">
-              <Label htmlFor="wiki-access-scope">Access for</Label>
-              <Select value={accessScope} onValueChange={setAccessScope}>
-                <SelectTrigger id="wiki-access-scope"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Entire {wikiName}</SelectItem>
-                  {categories.map((category) => <SelectItem key={category.id} value={String(category.id)}>{category.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-          <div className="relative max-w-md pt-2">
-            <Search className="absolute left-3 top-5 h-4 w-4 text-muted-foreground" />
-            <Input value={accessSearch} onChange={(event) => setAccessSearch(event.target.value)} placeholder="Search users or groups" className="pl-9" />
-          </div>
-        </CardHeader>
-      </Card>
-
-      <div className="grid gap-6 xl:grid-cols-2">
-        <Card>
-          <CardHeader><CardTitle>User Access</CardTitle></CardHeader>
-          <CardContent className="max-h-[32rem] divide-y overflow-y-auto p-0">
-            {filteredUsers.map((user) => {
-              const inherited = user.role === "admin" || (accessScope !== "all" && grantedUserIds.has(user.id));
-              const checked = inherited || (accessScope === "all"
-                ? grantedUserIds.has(user.id)
-                : categoryAccess.users.some((grant) => grant.categoryId === Number(accessScope) && grant.userId === user.id));
-              const key = `user:${accessScope}:${user.id}`;
-              return (
-                <div key={user.id} className="flex items-center justify-between gap-4 px-6 py-4">
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      <p className="truncate font-medium">{user.firstName} {user.lastName}</p>
-                      <Badge variant="outline" className="capitalize">{user.role}</Badge>
-                    </div>
-                    <p className="truncate text-sm text-muted-foreground">{user.email}</p>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <span className="hidden text-xs text-muted-foreground sm:inline">{inherited ? "Entire Wiki access" : checked ? "Direct grant" : "No direct grant"}</span>
-                    {savingAccess.has(key) && <Loader2 className="h-4 w-4 animate-spin" />}
-                    <Switch checked={checked} disabled={inherited || savingAccess.has(key)} onCheckedChange={(enabled) => void setUserAccess(user.id, enabled)} aria-label={`${accessScope === "all" ? wikiName : categories.find((category) => category.id === Number(accessScope))?.name} access for ${user.firstName} ${user.lastName}`} />
-                  </div>
-                </div>
-              );
-            })}
-            {filteredUsers.length === 0 && <p className="px-6 py-10 text-center text-sm text-muted-foreground">No users match your search.</p>}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader><CardTitle className="flex items-center gap-2"><UsersRound className="h-5 w-5" />Group Access</CardTitle></CardHeader>
-          <CardContent className="max-h-[32rem] divide-y overflow-y-auto p-0">
-            {filteredGroups.map((group) => {
-              const inherited = accessScope !== "all" && grantedGroupIds.has(group.id);
-              const checked = inherited || (accessScope === "all"
-                ? grantedGroupIds.has(group.id)
-                : categoryAccess.groups.some((grant) => grant.categoryId === Number(accessScope) && grant.groupId === group.id));
-              const key = `group:${accessScope}:${group.id}`;
-              return (
-                <div key={group.id} className="flex items-center justify-between gap-4 px-6 py-4">
-                  <div className="min-w-0">
-                    <p className="truncate font-medium">{group.name}</p>
-                    <p className="truncate text-sm text-muted-foreground">
-                      {group.memberCount} {group.memberCount === 1 ? "member" : "members"}
-                      {group.description ? ` · ${group.description}` : ""}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <span className="hidden text-xs text-muted-foreground sm:inline">{inherited ? "Entire Wiki access" : checked ? "Allowed" : "No access"}</span>
-                    {savingAccess.has(key) && <Loader2 className="h-4 w-4 animate-spin" />}
-                    <Switch checked={checked} disabled={inherited || savingAccess.has(key)} onCheckedChange={(enabled) => void setGroupAccess(group.id, enabled)} aria-label={`${accessScope === "all" ? wikiName : categories.find((category) => category.id === Number(accessScope))?.name} access for ${group.name}`} />
-                  </div>
-                </div>
-              );
-            })}
-            {filteredGroups.length === 0 && <p className="px-6 py-10 text-center text-sm text-muted-foreground">No groups match your search.</p>}
-          </CardContent>
-        </Card>
       </div>
 
       {categories.length === 0 ? (
@@ -518,6 +438,9 @@ export default function AdminWiki({ wikiKey = "wiki", wikiName = "Wiki" }: Admin
               </Button>
               <Button size="sm" variant="outline" onClick={() => openNewArticle(category.id)}>
                 <Plus className="mr-1 h-4 w-4" />Article
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => setAccessManagerScope({ type: "category", id: category.id, name: category.name })}>
+                <Shield className="mr-1 h-4 w-4" />Access
               </Button>
               <Button size="icon" variant="ghost" aria-label={`Edit ${category.name}`} onClick={() => openEditCategory(category)}>
                 <Pencil className="h-4 w-4" />
@@ -748,6 +671,105 @@ export default function AdminWiki({ wikiKey = "wiki", wikiName = "Wiki" }: Admin
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
           <DialogHeader><DialogTitle>{previewArticle?.title}</DialogTitle></DialogHeader>
           {previewArticle && <WikiMarkdown content={previewArticle.content} />}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={accessManagerScope !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setAccessManagerScope(null);
+            setAccessSearch("");
+          }
+        }}
+      >
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Shield className="h-5 w-5" />
+              {accessManagerScope?.type === "all" ? `Entire ${wikiName} Access` : `${accessManagerScope?.name ?? ""} Access`}
+            </DialogTitle>
+            <p className="text-sm text-muted-foreground">
+              Admins always have access.{" "}
+              {accessManagerScope?.type === "all"
+                ? `Granting access here applies to every category in ${wikiName}. Group membership may grant access even without a direct user grant.`
+                : "Grant access to this category only. Users or groups with entire-wiki access already see every category."}
+            </p>
+          </DialogHeader>
+          {accessManagerScope && (
+            <div className="space-y-4">
+              <div className="relative max-w-md">
+                <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+                <Input value={accessSearch} onChange={(event) => setAccessSearch(event.target.value)} placeholder="Search users or groups" className="pl-9" />
+              </div>
+              <div className="grid gap-6 md:grid-cols-2">
+                <Card>
+                  <CardHeader><CardTitle className="text-base">User Access</CardTitle></CardHeader>
+                  <CardContent className="max-h-96 divide-y overflow-y-auto p-0">
+                    {filteredUsers.map((user) => {
+                      const scope = accessManagerScope.type === "all" ? "all" : String(accessManagerScope.id);
+                      const inherited = user.role === "admin" || (accessManagerScope.type === "category" && grantedUserIds.has(user.id));
+                      const checked = inherited || (accessManagerScope.type === "all"
+                        ? grantedUserIds.has(user.id)
+                        : categoryAccess.users.some((grant) => grant.categoryId === accessManagerScope.id && grant.userId === user.id));
+                      const key = `user:${scope}:${user.id}`;
+                      return (
+                        <div key={user.id} className="flex items-center justify-between gap-4 px-4 py-3">
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2">
+                              <p className="truncate font-medium">{user.firstName} {user.lastName}</p>
+                              <Badge variant="outline" className="capitalize">{user.role}</Badge>
+                            </div>
+                            <p className="truncate text-sm text-muted-foreground">{user.email}</p>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <span className="hidden text-xs text-muted-foreground sm:inline">{inherited ? "Entire Wiki access" : checked ? "Direct grant" : "No direct grant"}</span>
+                            {savingAccess.has(key) && <Loader2 className="h-4 w-4 animate-spin" />}
+                            <Switch checked={checked} disabled={inherited || savingAccess.has(key)} onCheckedChange={(enabled) => void setUserAccess(scope, user.id, enabled)} aria-label={`${accessManagerScope.type === "all" ? wikiName : accessManagerScope.name} access for ${user.firstName} ${user.lastName}`} />
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {filteredUsers.length === 0 && <p className="px-4 py-8 text-center text-sm text-muted-foreground">No users match your search.</p>}
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader><CardTitle className="flex items-center gap-2 text-base"><UsersRound className="h-4 w-4" />Group Access</CardTitle></CardHeader>
+                  <CardContent className="max-h-96 divide-y overflow-y-auto p-0">
+                    {filteredGroups.map((group) => {
+                      const scope = accessManagerScope.type === "all" ? "all" : String(accessManagerScope.id);
+                      const inherited = accessManagerScope.type === "category" && grantedGroupIds.has(group.id);
+                      const checked = inherited || (accessManagerScope.type === "all"
+                        ? grantedGroupIds.has(group.id)
+                        : categoryAccess.groups.some((grant) => grant.categoryId === accessManagerScope.id && grant.groupId === group.id));
+                      const key = `group:${scope}:${group.id}`;
+                      return (
+                        <div key={group.id} className="flex items-center justify-between gap-4 px-4 py-3">
+                          <div className="min-w-0">
+                            <p className="truncate font-medium">{group.name}</p>
+                            <p className="truncate text-sm text-muted-foreground">
+                              {group.memberCount} {group.memberCount === 1 ? "member" : "members"}
+                              {group.description ? ` · ${group.description}` : ""}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <span className="hidden text-xs text-muted-foreground sm:inline">{inherited ? "Entire Wiki access" : checked ? "Allowed" : "No access"}</span>
+                            {savingAccess.has(key) && <Loader2 className="h-4 w-4 animate-spin" />}
+                            <Switch checked={checked} disabled={inherited || savingAccess.has(key)} onCheckedChange={(enabled) => void setGroupAccess(scope, group.id, enabled)} aria-label={`${accessManagerScope.type === "all" ? wikiName : accessManagerScope.name} access for ${group.name}`} />
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {filteredGroups.length === 0 && <p className="px-4 py-8 text-center text-sm text-muted-foreground">No groups match your search.</p>}
+                  </CardContent>
+                </Card>
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => { setAccessManagerScope(null); setAccessSearch(""); }}>Close</Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

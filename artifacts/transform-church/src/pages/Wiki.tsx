@@ -90,11 +90,11 @@ export default function Wiki({ wikiKey = "wiki", wikiName = "Wiki" }: WikiProps)
           </p>
           <div className="mt-14 max-w-2xl md:mt-20">
             <h1 className="text-4xl font-black uppercase leading-[0.95] tracking-tight sm:text-5xl md:text-6xl">
-              Everything staff<br />need to know.
+              Everything you<br />need to know.
             </h1>
             <p className="mt-6 max-w-xl text-base leading-6 text-white/60 md:text-lg md:leading-7">
               Policies, handbooks, guidelines, and the Request Hub directory — all in one searchable
-              place, instead of a folder of PDFs.
+              place.
             </p>
           </div>
           <div className="relative mt-10 max-w-md">
@@ -169,8 +169,8 @@ export default function Wiki({ wikiKey = "wiki", wikiName = "Wiki" }: WikiProps)
                             </p>
                           )}
                         </div>
-                         <span className="mt-4 inline-flex items-center text-xs font-bold tracking-[0.12em]">
-                           read more
+                         <span className="mt-4 inline-flex items-center text-xs font-bold uppercase tracking-[0.12em]">
+                           Read More
                           <ChevronRight className="ml-1 h-3.5 w-3.5" aria-hidden="true" />
                         </span>
                       </Link>

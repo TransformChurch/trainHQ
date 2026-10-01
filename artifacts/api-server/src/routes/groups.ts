@@ -188,7 +188,19 @@ router.get("/available", requireAuth, async (req, res) => {
 router.post("/", requireManagerOrAdmin, async (req, res) => {
   try {
     const dbUser = res.locals.dbUser;
-    const { name, description } = req.body as { name?: string; description?: string | null };
+    const {
+      name,
+      description,
+      pcoFieldDefinitionId,
+      pcoFieldDefinitionLabel,
+      pcoFieldValue,
+    } = req.body as {
+      name?: string;
+      description?: string | null;
+      pcoFieldDefinitionId?: string | null;
+      pcoFieldDefinitionLabel?: string | null;
+      pcoFieldValue?: string | null;
+    };
     if (!name || typeof name !== "string" || !name.trim()) {
       res.status(400).json({ error: "name is required" });
       return;
@@ -196,6 +208,9 @@ router.post("/", requireManagerOrAdmin, async (req, res) => {
     const inserted = await db.insert(groupsTable).values({
       name: name.trim(),
       description: description ?? null,
+      pcoFieldDefinitionId: pcoFieldDefinitionId?.trim() || null,
+      pcoFieldDefinitionLabel: pcoFieldDefinitionLabel?.trim() || null,
+      pcoFieldValue: pcoFieldValue?.trim() || null,
     }).returning();
     const g = inserted[0];
 
@@ -218,10 +233,31 @@ router.patch("/:groupId", requireManagerOrAdmin, async (req, res) => {
     const groupId = parseInt(req.params.groupId as string);
     if (!(await requireGroupAccess(groupId, dbUser, res))) return;
 
-    const { name, description } = req.body as { name?: string; description?: string | null };
-    const updates: Partial<{ name: string; description: string | null }> = {};
+    const {
+      name,
+      description,
+      pcoFieldDefinitionId,
+      pcoFieldDefinitionLabel,
+      pcoFieldValue,
+    } = req.body as {
+      name?: string;
+      description?: string | null;
+      pcoFieldDefinitionId?: string | null;
+      pcoFieldDefinitionLabel?: string | null;
+      pcoFieldValue?: string | null;
+    };
+    const updates: Partial<{
+      name: string;
+      description: string | null;
+      pcoFieldDefinitionId: string | null;
+      pcoFieldDefinitionLabel: string | null;
+      pcoFieldValue: string | null;
+    }> = {};
     if (name && typeof name === "string" && name.trim()) updates.name = name.trim();
     if (description !== undefined) updates.description = description ?? null;
+    if (pcoFieldDefinitionId !== undefined) updates.pcoFieldDefinitionId = pcoFieldDefinitionId?.trim() || null;
+    if (pcoFieldDefinitionLabel !== undefined) updates.pcoFieldDefinitionLabel = pcoFieldDefinitionLabel?.trim() || null;
+    if (pcoFieldValue !== undefined) updates.pcoFieldValue = pcoFieldValue?.trim() || null;
     if (Object.keys(updates).length === 0) {
       res.status(400).json({ error: "No fields to update" });
       return;

@@ -12,7 +12,7 @@ export const SITE_COPY_DEFAULTS = {
   "nav.usersProgress": "Users & Progress",
   "nav.moduleManager": "Module Manager",
   "nav.documentManager": "Document Manager",
-  "nav.growthTracks": "Growth Tracks",
+  "nav.growthTracks": "Development Pathways",
   "nav.adminDashboard": "Admin Dashboard",
   "nav.adminSettings": "Admin Settings",
   "nav.signOut": "Sign out",
