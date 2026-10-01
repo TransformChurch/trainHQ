@@ -467,6 +467,7 @@ function ManageEditorsDialog({ contentType, contentId, contentName }: { contentT
 function EditVideoDialog({ video, moduleId, onSaved }: { video: VideoType; moduleId: number; onSaved: () => void }) {
   const { toast } = useToast();
   const { mutate: updateVideo } = useUpdateVideo();
+  const { data: linkableDocuments = [] } = useLinkableDocuments();
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState(video.title);
   const [url, setUrl] = useState(video.url);
@@ -474,6 +475,7 @@ function EditVideoDialog({ video, moduleId, onSaved }: { video: VideoType; modul
   const [desc, setDesc] = useState(video.description ?? "");
   const [duration, setDuration] = useState(video.durationSeconds ? String(video.durationSeconds) : "");
   const [order, setOrder] = useState(String(video.order));
+  const [documentId, setDocumentId] = useState(video.documentId ? String(video.documentId) : "");
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
@@ -490,6 +492,7 @@ function EditVideoDialog({ video, moduleId, onSaved }: { video: VideoType; modul
         description: desc || null,
         durationSeconds: duration ? parseInt(duration) : null,
         order: parseInt(order),
+        documentId: documentId ? Number(documentId) : null,
       },
     }, {
       onSuccess: () => {
@@ -508,6 +511,7 @@ function EditVideoDialog({ video, moduleId, onSaved }: { video: VideoType; modul
     setDesc(video.description ?? "");
     setDuration(video.durationSeconds ? String(video.durationSeconds) : "");
     setOrder(String(video.order));
+    setDocumentId(video.documentId ? String(video.documentId) : "");
   };
 
   return (
@@ -533,6 +537,20 @@ function EditVideoDialog({ video, moduleId, onSaved }: { video: VideoType; modul
             <FormField label="Duration (seconds)"><Input type="number" value={duration} onChange={e => setDuration(e.target.value)} placeholder="600" /></FormField>
             <FormField label="Order"><Input type="number" value={order} onChange={e => setOrder(e.target.value)} min="1" /></FormField>
           </div>
+          <FormField label="Accompanying File (optional)">
+            <Select value={documentId || "none"} onValueChange={value => setDocumentId(value === "none" ? "" : value)}>
+              <SelectTrigger>
+                <SelectValue placeholder={linkableDocuments.length ? "None" : "No documents in the repository yet"} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">None</SelectItem>
+                {linkableDocuments.map(document => (
+                  <SelectItem key={document.id} value={String(document.id)}>{document.title}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground mt-1">Shown as a link just under the video's description. Add the file to the Documents tab first.</p>
+          </FormField>
           <Button type="submit" className="w-full">Save Changes</Button>
         </form>
       </DialogContent>
@@ -626,6 +644,24 @@ function EditQuestionDialog({ question, moduleId, onSaved }: { question: QuizQue
   );
 }
 
+// Documents available to link elsewhere (a document-type module's content,
+// or a file attached alongside a video) -- anything in the repository with
+// an actual file behind it. Shared so every picker that offers "choose a
+// document from the Documents tab" reads the same cached list instead of
+// each refetching its own copy.
+function useLinkableDocuments() {
+  return useQuery<RepoDoc[]>({
+    queryKey: ["admin", "module-documents"],
+    queryFn: async () => {
+      const tree = await repoFetch("/api/admin/documents");
+      return [
+        ...tree.folders.flatMap((folder: any) => folder.documents ?? []),
+        ...(tree.unfiled ?? []),
+      ].filter((document: RepoDoc) => document.resourceType === "file" && document.driveUrl);
+    },
+  });
+}
+
 // ── Module manager (inside a track) ─────────────────────────────────────────
 
 function ModuleManager({ trackId }: { trackId: number }) {
@@ -636,16 +672,7 @@ function ModuleManager({ trackId }: { trackId: number }) {
   const { mutate: createModule } = useCreateModule();
   const { mutate: updateModule } = useUpdateModule();
   const { mutate: deleteModule } = useDeleteModule();
-  const { data: moduleDocuments = [] } = useQuery<RepoDoc[]>({
-    queryKey: ["admin", "module-documents"],
-    queryFn: async () => {
-      const tree = await repoFetch("/api/admin/documents");
-      return [
-        ...tree.folders.flatMap((folder: any) => folder.documents ?? []),
-        ...(tree.unfiled ?? []),
-      ].filter((document: RepoDoc) => document.resourceType === "file" && document.driveUrl);
-    },
-  });
+  const { data: moduleDocuments = [] } = useLinkableDocuments();
 
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState("");
@@ -961,6 +988,7 @@ function VideoManager({ moduleId }: { moduleId: number }) {
   const { data: videos } = useListVideos({ moduleId }, { query: { queryKey: getListVideosQueryKey({ moduleId }) } });
   const { mutate: createVideo } = useCreateVideo();
   const { mutate: deleteVideo } = useDeleteVideo();
+  const { data: linkableDocuments = [] } = useLinkableDocuments();
 
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState("");
@@ -969,6 +997,7 @@ function VideoManager({ moduleId }: { moduleId: number }) {
   const [desc, setDesc] = useState("");
   const [duration, setDuration] = useState("");
   const [order, setOrder] = useState("1");
+  const [documentId, setDocumentId] = useState("");
 
   const handleCreate = (e: React.FormEvent) => {
     e.preventDefault();
@@ -977,11 +1006,15 @@ function VideoManager({ moduleId }: { moduleId: number }) {
       return;
     }
     createVideo({
-      data: { moduleId, title, url, videoType: sourceType, description: desc, durationSeconds: duration ? parseInt(duration) : undefined, order: parseInt(order) }
+      data: {
+        moduleId, title, url, videoType: sourceType, description: desc,
+        durationSeconds: duration ? parseInt(duration) : undefined, order: parseInt(order),
+        documentId: documentId ? Number(documentId) : null,
+      }
     }, {
       onSuccess: () => {
         toast({ title: "Video added" });
-        setOpen(false); setTitle(""); setUrl(""); setSourceType("embed"); setDesc(""); setDuration(""); setOrder("1");
+        setOpen(false); setTitle(""); setUrl(""); setSourceType("embed"); setDesc(""); setDuration(""); setOrder("1"); setDocumentId("");
         queryClient.invalidateQueries({ queryKey: getListVideosQueryKey({ moduleId }) });
       },
     });
@@ -995,7 +1028,7 @@ function VideoManager({ moduleId }: { moduleId: number }) {
         <span className="text-xs text-muted-foreground flex items-center gap-1">
           <Video className="w-3 h-3" /> Videos ({videos?.length ?? 0})
         </span>
-        <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) { setTitle(""); setUrl(""); setSourceType("embed"); setDesc(""); setDuration(""); setOrder("1"); } }}>
+        <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) { setTitle(""); setUrl(""); setSourceType("embed"); setDesc(""); setDuration(""); setOrder("1"); setDocumentId(""); } }}>
           <DialogTrigger asChild>
             <Button size="sm" variant="ghost" className="h-7 text-xs"><Plus className="w-3 h-3 mr-1" /> Add Video</Button>
           </DialogTrigger>
@@ -1015,6 +1048,20 @@ function VideoManager({ moduleId }: { moduleId: number }) {
                 <FormField label="Duration (seconds)"><Input type="number" value={duration} onChange={e => setDuration(e.target.value)} placeholder="600" /></FormField>
                 <FormField label="Order"><Input type="number" value={order} onChange={e => setOrder(e.target.value)} min="1" /></FormField>
               </div>
+              <FormField label="Accompanying File (optional)">
+                <Select value={documentId || "none"} onValueChange={value => setDocumentId(value === "none" ? "" : value)}>
+                  <SelectTrigger>
+                    <SelectValue placeholder={linkableDocuments.length ? "None" : "No documents in the repository yet"} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">None</SelectItem>
+                    {linkableDocuments.map(document => (
+                      <SelectItem key={document.id} value={String(document.id)}>{document.title}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground mt-1">Shown as a link just under the video's description. Add the file to the Documents tab first.</p>
+              </FormField>
               <Button type="submit" className="w-full">Add Video</Button>
             </form>
           </DialogContent>

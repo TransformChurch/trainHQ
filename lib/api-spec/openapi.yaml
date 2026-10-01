@@ -614,7 +614,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Video"
+                $ref: "#/components/schemas/VideoDetail"
         "404":
           description: Not found
     patch:
@@ -1690,9 +1690,11 @@ components:
         videoType:
           type: string
           enum: [embed, upload, drive]
+        documentId:
+          type: ["integer", "null"]
         createdAt:
           type: string
-      required: [id, moduleId, title, url, order, videoType, createdAt]
+      required: [id, moduleId, title, url, order, videoType, documentId, createdAt]
 
     VideoInput:
       type: object
@@ -1714,6 +1716,8 @@ components:
         videoType:
           type: string
           enum: [embed, upload, drive]
+        documentId:
+          type: ["integer", "null"]
       required: [moduleId, title, url, order]
 
     VideoUpdate:
@@ -1734,6 +1738,40 @@ components:
         videoType:
           type: string
           enum: [embed, upload, drive]
+        documentId:
+          type: ["integer", "null"]
+
+    VideoDetail:
+      type: object
+      properties:
+        id:
+          type: integer
+        moduleId:
+          type: integer
+        title:
+          type: string
+        description:
+          type: ["string", "null"]
+        url:
+          type: string
+        thumbnailUrl:
+          type: ["string", "null"]
+        durationSeconds:
+          type: ["integer", "null"]
+        order:
+          type: integer
+        videoType:
+          type: string
+          enum: [embed, upload, drive]
+        documentId:
+          type: ["integer", "null"]
+        createdAt:
+          type: string
+        document:
+          allOf:
+            - $ref: "#/components/schemas/ModuleDocument"
+          nullable: true
+      required: [id, moduleId, title, url, order, videoType, documentId, createdAt, document]
 
     VideoWithProgress:
       type: object
@@ -1754,6 +1792,8 @@ components:
           type: ["integer", "null"]
         order:
           type: integer
+        documentId:
+          type: ["integer", "null"]
         createdAt:
           type: string
         progressPercent:
@@ -1762,7 +1802,7 @@ components:
           type: boolean
         inQueue:
           type: boolean
-      required: [id, moduleId, title, url, order, createdAt, completed, inQueue]
+      required: [id, moduleId, title, url, order, documentId, createdAt, completed, inQueue]
 
     WatchHistoryEntry:
       type: object

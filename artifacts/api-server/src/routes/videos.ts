@@ -6,6 +6,7 @@ import { requireAuth, requireManagerOrAdmin } from "../middlewares/requireAuth";
 import { CreateVideoBody, UpdateVideoBody } from "@workspace/api-zod";
 import { logContentChange } from "../lib/auditLog";
 import { canEditContent } from "../lib/canEditContent";
+import { resolveLinkedDocument } from "../lib/linkedDocument";
 
 const router = Router();
 
@@ -45,6 +46,10 @@ router.post("/", requireManagerOrAdmin, async (req, res) => {
       res.status(409).json({ error: "Videos can only be added to video modules" });
       return;
     }
+    if (parsed.data.documentId != null && !(await resolveLinkedDocument(parsed.data.documentId))) {
+      res.status(400).json({ error: "The selected file isn't available to link" });
+      return;
+    }
     const inserted = await db.insert(videosTable).values({
       ...parsed.data,
       createdByExternalUserId: auth!.userId!,
@@ -76,7 +81,8 @@ router.get("/:videoId", requireAuth, async (req, res) => {
       return;
     }
     const v = videos[0];
-    res.json({ ...v, createdAt: v.createdAt.toISOString() });
+    const document = await resolveLinkedDocument(v.documentId);
+    res.json({ ...v, createdAt: v.createdAt.toISOString(), document });
   } catch {
     res.status(500).json({ error: "Internal server error" });
   }
@@ -98,6 +104,10 @@ router.patch("/:videoId", requireManagerOrAdmin, async (req, res) => {
     const parsed = UpdateVideoBody.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ error: "Invalid input" });
+      return;
+    }
+    if (parsed.data.documentId != null && !(await resolveLinkedDocument(parsed.data.documentId))) {
+      res.status(400).json({ error: "The selected file isn't available to link" });
       return;
     }
     const updated = await db.update(videosTable).set(parsed.data).where(eq(videosTable.id, videoId)).returning();

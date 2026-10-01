@@ -19,4 +19,6 @@ export interface VideoInput {
   durationSeconds?: number | null;
   order: number;
   videoType?: VideoInputVideoType;
+  /** @nullable */
+  documentId?: number | null;
 }

@@ -72,6 +72,8 @@ export * from './userRole';
 export * from './userWithProgress';
 export * from './userWithProgressRole';
 export * from './video';
+export * from './videoDetail';
+export * from './videoDetailVideoType';
 export * from './videoInput';
 export * from './videoInputVideoType';
 export * from './videoUpdate';

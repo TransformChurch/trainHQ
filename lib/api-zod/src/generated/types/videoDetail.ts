@@ -5,8 +5,10 @@
  * Transform Church Leadership Training Platform API
  * OpenAPI spec version: 0.1.0
  */
+import type { ModuleDocument } from './moduleDocument';
+import type { VideoDetailVideoType } from './videoDetailVideoType';
 
-export interface VideoWithProgress {
+export interface VideoDetail {
   id: number;
   moduleId: number;
   title: string;
@@ -18,11 +20,9 @@ export interface VideoWithProgress {
   /** @nullable */
   durationSeconds?: number | null;
   order: number;
+  videoType: VideoDetailVideoType;
   /** @nullable */
   documentId: number | null;
   createdAt: string;
-  /** @nullable */
-  progressPercent?: number | null;
-  completed: boolean;
-  inQueue: boolean;
+  document: ModuleDocument | null;
 }

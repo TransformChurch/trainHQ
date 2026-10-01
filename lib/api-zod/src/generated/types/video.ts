@@ -20,5 +20,7 @@ export interface Video {
   durationSeconds?: number | null;
   order: number;
   videoType: VideoVideoType;
+  /** @nullable */
+  documentId: number | null;
   createdAt: string;
 }

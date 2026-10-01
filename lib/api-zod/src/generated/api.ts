@@ -431,6 +431,7 @@ export const GetDashboardSummaryResponse = zod.object({
   "durationSeconds": zod.number().int().nullish(),
   "order": zod.number().int(),
   "videoType": zod.enum(['embed', 'upload', 'drive']),
+  "documentId": zod.number().int().nullable(),
   "createdAt": zod.string()
 }),
   "progressPercent": zod.number().int(),
@@ -625,6 +626,7 @@ export const GetModuleResponse = zod.object({
   "thumbnailUrl": zod.string().nullish(),
   "durationSeconds": zod.number().int().nullish(),
   "order": zod.number().int(),
+  "documentId": zod.number().int().nullable(),
   "createdAt": zod.string(),
   "progressPercent": zod.number().int().nullish(),
   "completed": zod.boolean(),
@@ -639,13 +641,13 @@ export const GetModuleResponse = zod.object({
   "passed": zod.boolean(),
   "takenAt": zod.string()
 }).optional(),
-  "document": zod.object({
+  "document": zod.union([zod.object({
   "id": zod.number().int(),
   "title": zod.string(),
   "description": zod.string().nullish(),
   "driveUrl": zod.string(),
   "mimeType": zod.string().nullable()
-}).nullable(),
+}),zod.null()]),
   "quizUnlocked": zod.boolean()
 })
 
@@ -708,6 +710,7 @@ export const ListVideosResponseItem = zod.object({
   "durationSeconds": zod.number().int().nullish(),
   "order": zod.number().int(),
   "videoType": zod.enum(['embed', 'upload', 'drive']),
+  "documentId": zod.number().int().nullable(),
   "createdAt": zod.string()
 })
 export const ListVideosResponse = zod.array(ListVideosResponseItem)
@@ -724,7 +727,8 @@ export const CreateVideoBody = zod.object({
   "thumbnailUrl": zod.string().nullish(),
   "durationSeconds": zod.number().int().nullish(),
   "order": zod.number().int(),
-  "videoType": zod.enum(['embed', 'upload', 'drive']).optional()
+  "videoType": zod.enum(['embed', 'upload', 'drive']).optional(),
+  "documentId": zod.number().int().nullish()
 })
 
 export const CreateVideoResponse = zod.object({
@@ -737,6 +741,7 @@ export const CreateVideoResponse = zod.object({
   "durationSeconds": zod.number().int().nullish(),
   "order": zod.number().int(),
   "videoType": zod.enum(['embed', 'upload', 'drive']),
+  "documentId": zod.number().int().nullable(),
   "createdAt": zod.string()
 })
 
@@ -758,7 +763,15 @@ export const GetVideoResponse = zod.object({
   "durationSeconds": zod.number().int().nullish(),
   "order": zod.number().int(),
   "videoType": zod.enum(['embed', 'upload', 'drive']),
-  "createdAt": zod.string()
+  "documentId": zod.number().int().nullable(),
+  "createdAt": zod.string(),
+  "document": zod.union([zod.object({
+  "id": zod.number().int(),
+  "title": zod.string(),
+  "description": zod.string().nullish(),
+  "driveUrl": zod.string(),
+  "mimeType": zod.string().nullable()
+}),zod.null()])
 })
 
 
@@ -776,7 +789,8 @@ export const UpdateVideoBody = zod.object({
   "thumbnailUrl": zod.string().nullish(),
   "durationSeconds": zod.number().int().nullish(),
   "order": zod.number().int().optional(),
-  "videoType": zod.enum(['embed', 'upload', 'drive']).optional()
+  "videoType": zod.enum(['embed', 'upload', 'drive']).optional(),
+  "documentId": zod.number().int().nullish()
 })
 
 export const UpdateVideoResponse = zod.object({
@@ -789,6 +803,7 @@ export const UpdateVideoResponse = zod.object({
   "durationSeconds": zod.number().int().nullish(),
   "order": zod.number().int(),
   "videoType": zod.enum(['embed', 'upload', 'drive']),
+  "documentId": zod.number().int().nullable(),
   "createdAt": zod.string()
 })
 
@@ -820,6 +835,7 @@ export const ListWatchHistoryResponseItem = zod.object({
   "durationSeconds": zod.number().int().nullish(),
   "order": zod.number().int(),
   "videoType": zod.enum(['embed', 'upload', 'drive']),
+  "documentId": zod.number().int().nullable(),
   "createdAt": zod.string()
 }),
   "progressPercent": zod.number().int(),
@@ -860,6 +876,7 @@ export const UpsertWatchProgressResponse = zod.object({
   "durationSeconds": zod.number().int().nullish(),
   "order": zod.number().int(),
   "videoType": zod.enum(['embed', 'upload', 'drive']),
+  "documentId": zod.number().int().nullable(),
   "createdAt": zod.string()
 }),
   "progressPercent": zod.number().int(),
@@ -885,6 +902,7 @@ export const ListQueueResponseItem = zod.object({
   "durationSeconds": zod.number().int().nullish(),
   "order": zod.number().int(),
   "videoType": zod.enum(['embed', 'upload', 'drive']),
+  "documentId": zod.number().int().nullable(),
   "createdAt": zod.string()
 }),
   "addedAt": zod.string()
@@ -913,6 +931,7 @@ export const AddToQueueResponse = zod.object({
   "durationSeconds": zod.number().int().nullish(),
   "order": zod.number().int(),
   "videoType": zod.enum(['embed', 'upload', 'drive']),
+  "documentId": zod.number().int().nullable(),
   "createdAt": zod.string()
 }),
   "addedAt": zod.string()

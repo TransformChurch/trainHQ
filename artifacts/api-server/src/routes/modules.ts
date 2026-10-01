@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { getAuth } from "../middlewares/auth";
-import { db, modulesTable, videosTable, watchHistoryTable, quizResultsTable, queueTable, quizQuestionsTable, assignmentsTable, moduleCompletionsTable, documentsTable } from "@workspace/db";
+import { db, modulesTable, videosTable, watchHistoryTable, quizResultsTable, queueTable, quizQuestionsTable, assignmentsTable, moduleCompletionsTable } from "@workspace/db";
 import { eq, and, sql, inArray } from "drizzle-orm";
 import { requireAuth, requireManagerOrAdmin, getDbUser } from "../middlewares/requireAuth";
 import { CreateModuleBody, UpdateModuleBody, CreateQuizQuestionBody, SubmitQuizBody, CompleteModuleBody } from "@workspace/api-zod";
@@ -9,33 +9,14 @@ import { checkGrowthTrackProgression } from "../lib/growthTrackProgression";
 import { checkTrackCompletion } from "../lib/trackProgression";
 import { canEditContent } from "../lib/canEditContent";
 import { PlanningCenterError, updatePlanningCenterModuleCompletion } from "../lib/planningCenter";
+import { resolveLinkedDocument } from "../lib/linkedDocument";
 
 const router = Router();
 
-async function getModuleDocument(documentId: number | null | undefined) {
-  if (!documentId) return null;
-  const documents = await db
-    .select({
-      id: documentsTable.id,
-      title: documentsTable.title,
-      description: documentsTable.description,
-      driveUrl: documentsTable.driveUrl,
-      mimeType: documentsTable.mimeType,
-      resourceType: documentsTable.resourceType,
-    })
-    .from(documentsTable)
-    .where(eq(documentsTable.id, documentId))
-    .limit(1);
-  const document = documents[0];
-  if (!document || document.resourceType !== "file" || !document.driveUrl) return null;
-  return {
-    id: document.id,
-    title: document.title,
-    description: document.description,
-    driveUrl: document.driveUrl,
-    mimeType: document.mimeType,
-  };
-}
+// Kept as a local alias so the rest of this file (and its git history) didn't
+// need to change -- the resolver itself now lives in ../lib/linkedDocument so
+// videos.ts can share it for a video's own optional attached file.
+const getModuleDocument = resolveLinkedDocument;
 
 // GET /modules
 // Admins/Managers: see all; Students: see public modules + any private modules they're assigned to

@@ -2,7 +2,7 @@ import { useGetVideo, useUpsertWatchProgress, useAddToQueue, useRemoveFromQueue,
 import { useParams, Link } from "wouter";
 import { useRef } from "react";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, Clock, BookmarkPlus, BookmarkMinus } from "lucide-react";
+import { ArrowLeft, Clock, BookmarkPlus, BookmarkMinus, FileText, ExternalLink } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { useStorageUrl } from "@/lib/storageUrl";
@@ -141,6 +141,19 @@ export default function WatchVideo() {
         <div className="prose max-w-none dark:prose-invert">
           <p>{video.description}</p>
         </div>
+
+        {video.document && (
+          <a
+            href={video.document.driveUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-3 rounded-xl border border-border bg-muted/30 px-4 py-3 text-sm transition-colors hover:bg-muted/50"
+          >
+            <FileText className="h-4 w-4 shrink-0 text-primary" />
+            <span className="min-w-0 flex-1 truncate font-medium text-foreground">{video.document.title}</span>
+            <ExternalLink className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          </a>
+        )}
       </div>
     </div>
   );

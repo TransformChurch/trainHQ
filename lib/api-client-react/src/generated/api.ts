@@ -70,6 +70,7 @@ import type {
   UserInput,
   UserWithProgress,
   Video,
+  VideoDetail,
   VideoInput,
   VideoUpdate,
   VisibilityUpdate,
@@ -274,8 +275,16 @@ export const upsertMe = async (userInput: UserInput, options?: Parameters<typeof
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
     if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
   };
 return customFetch<User>(getUpsertMeUrl(),
   {
@@ -290,11 +299,13 @@ return customFetch<User>(getUpsertMeUrl(),
 
 
 
+export const getUpsertMeMutationKey = () => ['upsertMe'] as const;
+
 export const getUpsertMeMutationOptions = <TError = ErrorType<unknown>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof upsertMe>>, TError,UpsertMeMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof upsertMe>>, TError,UpsertMeMutationVariables, TContext> => {
 
-const mutationKey = ['upsertMe'];
+const mutationKey = getUpsertMeMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -352,8 +363,16 @@ export const patchMe = async (patchMeInput: PatchMeInput, options?: Parameters<t
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
     if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
   };
 return customFetch<User>(getPatchMeUrl(),
   {
@@ -368,11 +387,13 @@ return customFetch<User>(getPatchMeUrl(),
 
 
 
+export const getPatchMeMutationKey = () => ['patchMe'] as const;
+
 export const getPatchMeMutationOptions = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof patchMe>>, TError,PatchMeMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof patchMe>>, TError,PatchMeMutationVariables, TContext> => {
 
-const mutationKey = ['patchMe'];
+const mutationKey = getPatchMeMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -739,8 +760,16 @@ export const updateFacilitiesAccess = async (userId: string,
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
     if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
   };
 return customFetch<FacilitiesAccessStatus>(getUpdateFacilitiesAccessUrl(userId),
   {
@@ -755,11 +784,13 @@ return customFetch<FacilitiesAccessStatus>(getUpdateFacilitiesAccessUrl(userId),
 
 
 
+export const getUpdateFacilitiesAccessMutationKey = () => ['updateFacilitiesAccess'] as const;
+
 export const getUpdateFacilitiesAccessMutationOptions = <TError = ErrorType<unknown>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateFacilitiesAccess>>, TError,UpdateFacilitiesAccessMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof updateFacilitiesAccess>>, TError,UpdateFacilitiesAccessMutationVariables, TContext> => {
 
-const mutationKey = ['updateFacilitiesAccess'];
+const mutationKey = getUpdateFacilitiesAccessMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -895,8 +926,16 @@ export const updateFacilitiesGroupAccess = async (groupId: number,
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
     if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
   };
 return customFetch<FacilitiesGroupAccessStatus>(getUpdateFacilitiesGroupAccessUrl(groupId),
   {
@@ -911,11 +950,13 @@ return customFetch<FacilitiesGroupAccessStatus>(getUpdateFacilitiesGroupAccessUr
 
 
 
+export const getUpdateFacilitiesGroupAccessMutationKey = () => ['updateFacilitiesGroupAccess'] as const;
+
 export const getUpdateFacilitiesGroupAccessMutationOptions = <TError = ErrorType<unknown>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateFacilitiesGroupAccess>>, TError,UpdateFacilitiesGroupAccessMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof updateFacilitiesGroupAccess>>, TError,UpdateFacilitiesGroupAccessMutationVariables, TContext> => {
 
-const mutationKey = ['updateFacilitiesGroupAccess'];
+const mutationKey = getUpdateFacilitiesGroupAccessMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -973,8 +1014,16 @@ export const createFacilitiesCategory = async (facilitiesCategoryInput: Faciliti
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
     if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
   };
 return customFetch<FacilitiesCategory>(getCreateFacilitiesCategoryUrl(),
   {
@@ -989,11 +1038,13 @@ return customFetch<FacilitiesCategory>(getCreateFacilitiesCategoryUrl(),
 
 
 
+export const getCreateFacilitiesCategoryMutationKey = () => ['createFacilitiesCategory'] as const;
+
 export const getCreateFacilitiesCategoryMutationOptions = <TError = ErrorType<unknown>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createFacilitiesCategory>>, TError,CreateFacilitiesCategoryMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createFacilitiesCategory>>, TError,CreateFacilitiesCategoryMutationVariables, TContext> => {
 
-const mutationKey = ['createFacilitiesCategory'];
+const mutationKey = getCreateFacilitiesCategoryMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -1052,8 +1103,16 @@ export const updateFacilitiesCategory = async (categoryId: number,
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
     if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
   };
 return customFetch<FacilitiesCategory>(getUpdateFacilitiesCategoryUrl(categoryId),
   {
@@ -1068,11 +1127,13 @@ return customFetch<FacilitiesCategory>(getUpdateFacilitiesCategoryUrl(categoryId
 
 
 
+export const getUpdateFacilitiesCategoryMutationKey = () => ['updateFacilitiesCategory'] as const;
+
 export const getUpdateFacilitiesCategoryMutationOptions = <TError = ErrorType<unknown>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateFacilitiesCategory>>, TError,UpdateFacilitiesCategoryMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof updateFacilitiesCategory>>, TError,UpdateFacilitiesCategoryMutationVariables, TContext> => {
 
-const mutationKey = ['updateFacilitiesCategory'];
+const mutationKey = getUpdateFacilitiesCategoryMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -1140,11 +1201,13 @@ export const deleteFacilitiesCategory = async (categoryId: number, options?: Par
 
 
 
+export const getDeleteFacilitiesCategoryMutationKey = () => ['deleteFacilitiesCategory'] as const;
+
 export const getDeleteFacilitiesCategoryMutationOptions = <TError = ErrorType<unknown>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteFacilitiesCategory>>, TError,DeleteFacilitiesCategoryMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof deleteFacilitiesCategory>>, TError,DeleteFacilitiesCategoryMutationVariables, TContext> => {
 
-const mutationKey = ['deleteFacilitiesCategory'];
+const mutationKey = getDeleteFacilitiesCategoryMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -1202,8 +1265,16 @@ export const createFacilitiesRequest = async (facilitiesRequestInput: Facilities
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
     if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
   };
 return customFetch<FacilitiesRequest>(getCreateFacilitiesRequestUrl(),
   {
@@ -1218,11 +1289,13 @@ return customFetch<FacilitiesRequest>(getCreateFacilitiesRequestUrl(),
 
 
 
+export const getCreateFacilitiesRequestMutationKey = () => ['createFacilitiesRequest'] as const;
+
 export const getCreateFacilitiesRequestMutationOptions = <TError = ErrorType<unknown>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createFacilitiesRequest>>, TError,CreateFacilitiesRequestMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createFacilitiesRequest>>, TError,CreateFacilitiesRequestMutationVariables, TContext> => {
 
-const mutationKey = ['createFacilitiesRequest'];
+const mutationKey = getCreateFacilitiesRequestMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -1281,8 +1354,16 @@ export const updateFacilitiesRequest = async (requestId: number,
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
     if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
   };
 return customFetch<FacilitiesRequest>(getUpdateFacilitiesRequestUrl(requestId),
   {
@@ -1297,11 +1378,13 @@ return customFetch<FacilitiesRequest>(getUpdateFacilitiesRequestUrl(requestId),
 
 
 
+export const getUpdateFacilitiesRequestMutationKey = () => ['updateFacilitiesRequest'] as const;
+
 export const getUpdateFacilitiesRequestMutationOptions = <TError = ErrorType<unknown>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateFacilitiesRequest>>, TError,UpdateFacilitiesRequestMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof updateFacilitiesRequest>>, TError,UpdateFacilitiesRequestMutationVariables, TContext> => {
 
-const mutationKey = ['updateFacilitiesRequest'];
+const mutationKey = getUpdateFacilitiesRequestMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -1369,11 +1452,13 @@ export const deleteFacilitiesRequest = async (requestId: number, options?: Param
 
 
 
+export const getDeleteFacilitiesRequestMutationKey = () => ['deleteFacilitiesRequest'] as const;
+
 export const getDeleteFacilitiesRequestMutationOptions = <TError = ErrorType<unknown>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteFacilitiesRequest>>, TError,DeleteFacilitiesRequestMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof deleteFacilitiesRequest>>, TError,DeleteFacilitiesRequestMutationVariables, TContext> => {
 
-const mutationKey = ['deleteFacilitiesRequest'];
+const mutationKey = getDeleteFacilitiesRequestMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -1585,8 +1670,16 @@ export const createTrack = async (trackInput: TrackInput, options?: Parameters<t
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
     if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
   };
 return customFetch<Track>(getCreateTrackUrl(),
   {
@@ -1601,11 +1694,13 @@ return customFetch<Track>(getCreateTrackUrl(),
 
 
 
+export const getCreateTrackMutationKey = () => ['createTrack'] as const;
+
 export const getCreateTrackMutationOptions = <TError = ErrorType<unknown>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createTrack>>, TError,CreateTrackMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createTrack>>, TError,CreateTrackMutationVariables, TContext> => {
 
-const mutationKey = ['createTrack'];
+const mutationKey = getCreateTrackMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -1741,8 +1836,16 @@ export const updateTrack = async (trackId: number,
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
     if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
   };
 return customFetch<Track>(getUpdateTrackUrl(trackId),
   {
@@ -1757,11 +1860,13 @@ return customFetch<Track>(getUpdateTrackUrl(trackId),
 
 
 
+export const getUpdateTrackMutationKey = () => ['updateTrack'] as const;
+
 export const getUpdateTrackMutationOptions = <TError = ErrorType<unknown>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateTrack>>, TError,UpdateTrackMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof updateTrack>>, TError,UpdateTrackMutationVariables, TContext> => {
 
-const mutationKey = ['updateTrack'];
+const mutationKey = getUpdateTrackMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -1829,11 +1934,13 @@ export const deleteTrack = async (trackId: number, options?: Parameters<typeof c
 
 
 
+export const getDeleteTrackMutationKey = () => ['deleteTrack'] as const;
+
 export const getDeleteTrackMutationOptions = <TError = ErrorType<unknown>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteTrack>>, TError,DeleteTrackMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof deleteTrack>>, TError,DeleteTrackMutationVariables, TContext> => {
 
-const mutationKey = ['deleteTrack'];
+const mutationKey = getDeleteTrackMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -1975,8 +2082,16 @@ export const createModule = async (moduleInput: ModuleInput, options?: Parameter
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
     if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
   };
 return customFetch<Module>(getCreateModuleUrl(),
   {
@@ -1991,11 +2106,13 @@ return customFetch<Module>(getCreateModuleUrl(),
 
 
 
+export const getCreateModuleMutationKey = () => ['createModule'] as const;
+
 export const getCreateModuleMutationOptions = <TError = ErrorType<unknown>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createModule>>, TError,CreateModuleMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createModule>>, TError,CreateModuleMutationVariables, TContext> => {
 
-const mutationKey = ['createModule'];
+const mutationKey = getCreateModuleMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -2053,8 +2170,16 @@ export const completeModule = async (completeModuleInput: CompleteModuleInput, o
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
     if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
   };
 return customFetch<CompleteModuleResult>(getCompleteModuleUrl(),
   {
@@ -2069,11 +2194,13 @@ return customFetch<CompleteModuleResult>(getCompleteModuleUrl(),
 
 
 
+export const getCompleteModuleMutationKey = () => ['completeModule'] as const;
+
 export const getCompleteModuleMutationOptions = <TError = ErrorType<unknown>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof completeModule>>, TError,CompleteModuleMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof completeModule>>, TError,CompleteModuleMutationVariables, TContext> => {
 
-const mutationKey = ['completeModule'];
+const mutationKey = getCompleteModuleMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -2209,8 +2336,16 @@ export const updateModule = async (moduleId: number,
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
     if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
   };
 return customFetch<Module>(getUpdateModuleUrl(moduleId),
   {
@@ -2225,11 +2360,13 @@ return customFetch<Module>(getUpdateModuleUrl(moduleId),
 
 
 
+export const getUpdateModuleMutationKey = () => ['updateModule'] as const;
+
 export const getUpdateModuleMutationOptions = <TError = ErrorType<unknown>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateModule>>, TError,UpdateModuleMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof updateModule>>, TError,UpdateModuleMutationVariables, TContext> => {
 
-const mutationKey = ['updateModule'];
+const mutationKey = getUpdateModuleMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -2297,11 +2434,13 @@ export const deleteModule = async (moduleId: number, options?: Parameters<typeof
 
 
 
+export const getDeleteModuleMutationKey = () => ['deleteModule'] as const;
+
 export const getDeleteModuleMutationOptions = <TError = ErrorType<unknown>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteModule>>, TError,DeleteModuleMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof deleteModule>>, TError,DeleteModuleMutationVariables, TContext> => {
 
-const mutationKey = ['deleteModule'];
+const mutationKey = getDeleteModuleMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -2443,8 +2582,16 @@ export const createVideo = async (videoInput: VideoInput, options?: Parameters<t
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
     if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
   };
 return customFetch<Video>(getCreateVideoUrl(),
   {
@@ -2459,11 +2606,13 @@ return customFetch<Video>(getCreateVideoUrl(),
 
 
 
+export const getCreateVideoMutationKey = () => ['createVideo'] as const;
+
 export const getCreateVideoMutationOptions = <TError = ErrorType<unknown>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createVideo>>, TError,CreateVideoMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createVideo>>, TError,CreateVideoMutationVariables, TContext> => {
 
-const mutationKey = ['createVideo'];
+const mutationKey = getCreateVideoMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -2516,9 +2665,9 @@ export const getGetVideoUrl = (videoId: number,) => {
 /**
  * @summary Get a single video
  */
-export const getVideo = async (videoId: number, options?: Parameters<typeof customFetch>[1]): Promise<Video> => {
+export const getVideo = async (videoId: number, options?: Parameters<typeof customFetch>[1]): Promise<VideoDetail> => {
 
-  return customFetch<Video>(getGetVideoUrl(videoId),
+  return customFetch<VideoDetail>(getGetVideoUrl(videoId),
   {
     ...options,
     method: 'GET'
@@ -2599,8 +2748,16 @@ export const updateVideo = async (videoId: number,
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
     if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
   };
 return customFetch<Video>(getUpdateVideoUrl(videoId),
   {
@@ -2615,11 +2772,13 @@ return customFetch<Video>(getUpdateVideoUrl(videoId),
 
 
 
+export const getUpdateVideoMutationKey = () => ['updateVideo'] as const;
+
 export const getUpdateVideoMutationOptions = <TError = ErrorType<unknown>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateVideo>>, TError,UpdateVideoMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof updateVideo>>, TError,UpdateVideoMutationVariables, TContext> => {
 
-const mutationKey = ['updateVideo'];
+const mutationKey = getUpdateVideoMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -2687,11 +2846,13 @@ export const deleteVideo = async (videoId: number, options?: Parameters<typeof c
 
 
 
+export const getDeleteVideoMutationKey = () => ['deleteVideo'] as const;
+
 export const getDeleteVideoMutationOptions = <TError = ErrorType<unknown>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteVideo>>, TError,DeleteVideoMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof deleteVideo>>, TError,DeleteVideoMutationVariables, TContext> => {
 
-const mutationKey = ['deleteVideo'];
+const mutationKey = getDeleteVideoMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -2827,8 +2988,16 @@ export const upsertWatchProgress = async (videoId: number,
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
     if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
   };
 return customFetch<WatchHistoryEntry>(getUpsertWatchProgressUrl(videoId),
   {
@@ -2843,11 +3012,13 @@ return customFetch<WatchHistoryEntry>(getUpsertWatchProgressUrl(videoId),
 
 
 
+export const getUpsertWatchProgressMutationKey = () => ['upsertWatchProgress'] as const;
+
 export const getUpsertWatchProgressMutationOptions = <TError = ErrorType<unknown>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof upsertWatchProgress>>, TError,UpsertWatchProgressMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof upsertWatchProgress>>, TError,UpsertWatchProgressMutationVariables, TContext> => {
 
-const mutationKey = ['upsertWatchProgress'];
+const mutationKey = getUpsertWatchProgressMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -2992,11 +3163,13 @@ export const addToQueue = async (videoId: number, options?: Parameters<typeof cu
 
 
 
+export const getAddToQueueMutationKey = () => ['addToQueue'] as const;
+
 export const getAddToQueueMutationOptions = <TError = ErrorType<unknown>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof addToQueue>>, TError,AddToQueueMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof addToQueue>>, TError,AddToQueueMutationVariables, TContext> => {
 
-const mutationKey = ['addToQueue'];
+const mutationKey = getAddToQueueMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -3064,11 +3237,13 @@ export const removeFromQueue = async (videoId: number, options?: Parameters<type
 
 
 
+export const getRemoveFromQueueMutationKey = () => ['removeFromQueue'] as const;
+
 export const getRemoveFromQueueMutationOptions = <TError = ErrorType<unknown>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof removeFromQueue>>, TError,RemoveFromQueueMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof removeFromQueue>>, TError,RemoveFromQueueMutationVariables, TContext> => {
 
-const mutationKey = ['removeFromQueue'];
+const mutationKey = getRemoveFromQueueMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -3204,8 +3379,16 @@ export const createQuizQuestion = async (moduleId: number,
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
     if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
   };
 return customFetch<QuizQuestion>(getCreateQuizQuestionUrl(moduleId),
   {
@@ -3220,11 +3403,13 @@ return customFetch<QuizQuestion>(getCreateQuizQuestionUrl(moduleId),
 
 
 
+export const getCreateQuizQuestionMutationKey = () => ['createQuizQuestion'] as const;
+
 export const getCreateQuizQuestionMutationOptions = <TError = ErrorType<unknown>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createQuizQuestion>>, TError,CreateQuizQuestionMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createQuizQuestion>>, TError,CreateQuizQuestionMutationVariables, TContext> => {
 
-const mutationKey = ['createQuizQuestion'];
+const mutationKey = getCreateQuizQuestionMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -3283,8 +3468,16 @@ export const submitQuiz = async (moduleId: number,
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
     if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
   };
 return customFetch<QuizResult>(getSubmitQuizUrl(moduleId),
   {
@@ -3299,11 +3492,13 @@ return customFetch<QuizResult>(getSubmitQuizUrl(moduleId),
 
 
 
+export const getSubmitQuizMutationKey = () => ['submitQuiz'] as const;
+
 export const getSubmitQuizMutationOptions = <TError = ErrorType<unknown>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof submitQuiz>>, TError,SubmitQuizMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof submitQuiz>>, TError,SubmitQuizMutationVariables, TContext> => {
 
-const mutationKey = ['submitQuiz'];
+const mutationKey = getSubmitQuizMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -3439,8 +3634,16 @@ export const updateQuizQuestion = async (questionId: number,
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
     if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
   };
 return customFetch<QuizQuestion>(getUpdateQuizQuestionUrl(questionId),
   {
@@ -3455,11 +3658,13 @@ return customFetch<QuizQuestion>(getUpdateQuizQuestionUrl(questionId),
 
 
 
+export const getUpdateQuizQuestionMutationKey = () => ['updateQuizQuestion'] as const;
+
 export const getUpdateQuizQuestionMutationOptions = <TError = ErrorType<unknown>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateQuizQuestion>>, TError,UpdateQuizQuestionMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof updateQuizQuestion>>, TError,UpdateQuizQuestionMutationVariables, TContext> => {
 
-const mutationKey = ['updateQuizQuestion'];
+const mutationKey = getUpdateQuizQuestionMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -3527,11 +3732,13 @@ export const deleteQuizQuestion = async (questionId: number, options?: Parameter
 
 
 
+export const getDeleteQuizQuestionMutationKey = () => ['deleteQuizQuestion'] as const;
+
 export const getDeleteQuizQuestionMutationOptions = <TError = ErrorType<unknown>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteQuizQuestion>>, TError,DeleteQuizQuestionMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof deleteQuizQuestion>>, TError,DeleteQuizQuestionMutationVariables, TContext> => {
 
-const mutationKey = ['deleteQuizQuestion'];
+const mutationKey = getDeleteQuizQuestionMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -3666,8 +3873,16 @@ export const createGroup = async (groupInput: GroupInput, options?: Parameters<t
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
     if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
   };
 return customFetch<Group>(getCreateGroupUrl(),
   {
@@ -3682,11 +3897,13 @@ return customFetch<Group>(getCreateGroupUrl(),
 
 
 
+export const getCreateGroupMutationKey = () => ['createGroup'] as const;
+
 export const getCreateGroupMutationOptions = <TError = ErrorType<unknown>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createGroup>>, TError,CreateGroupMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createGroup>>, TError,CreateGroupMutationVariables, TContext> => {
 
-const mutationKey = ['createGroup'];
+const mutationKey = getCreateGroupMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -3745,8 +3962,16 @@ export const updateGroup = async (groupId: number,
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
     if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
   };
 return customFetch<Group>(getUpdateGroupUrl(groupId),
   {
@@ -3761,11 +3986,13 @@ return customFetch<Group>(getUpdateGroupUrl(groupId),
 
 
 
+export const getUpdateGroupMutationKey = () => ['updateGroup'] as const;
+
 export const getUpdateGroupMutationOptions = <TError = ErrorType<unknown>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateGroup>>, TError,UpdateGroupMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof updateGroup>>, TError,UpdateGroupMutationVariables, TContext> => {
 
-const mutationKey = ['updateGroup'];
+const mutationKey = getUpdateGroupMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -3833,11 +4060,13 @@ export const deleteGroup = async (groupId: number, options?: Parameters<typeof c
 
 
 
+export const getDeleteGroupMutationKey = () => ['deleteGroup'] as const;
+
 export const getDeleteGroupMutationOptions = <TError = ErrorType<unknown>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteGroup>>, TError,DeleteGroupMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof deleteGroup>>, TError,DeleteGroupMutationVariables, TContext> => {
 
-const mutationKey = ['deleteGroup'];
+const mutationKey = getDeleteGroupMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -3973,8 +4202,16 @@ export const addGroupMember = async (groupId: number,
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
     if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
   };
 return customFetch<void>(getAddGroupMemberUrl(groupId),
   {
@@ -3989,11 +4226,13 @@ return customFetch<void>(getAddGroupMemberUrl(groupId),
 
 
 
+export const getAddGroupMemberMutationKey = () => ['addGroupMember'] as const;
+
 export const getAddGroupMemberMutationOptions = <TError = ErrorType<unknown>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof addGroupMember>>, TError,AddGroupMemberMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof addGroupMember>>, TError,AddGroupMemberMutationVariables, TContext> => {
 
-const mutationKey = ['addGroupMember'];
+const mutationKey = getAddGroupMemberMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -4063,11 +4302,13 @@ export const removeGroupMember = async (groupId: number,
 
 
 
+export const getRemoveGroupMemberMutationKey = () => ['removeGroupMember'] as const;
+
 export const getRemoveGroupMemberMutationOptions = <TError = ErrorType<unknown>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof removeGroupMember>>, TError,RemoveGroupMemberMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof removeGroupMember>>, TError,RemoveGroupMemberMutationVariables, TContext> => {
 
-const mutationKey = ['removeGroupMember'];
+const mutationKey = getRemoveGroupMemberMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -4280,8 +4521,16 @@ export const updateUserRole = async (userId: string,
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
     if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
   };
 return customFetch<User>(getUpdateUserRoleUrl(userId),
   {
@@ -4296,11 +4545,13 @@ return customFetch<User>(getUpdateUserRoleUrl(userId),
 
 
 
+export const getUpdateUserRoleMutationKey = () => ['updateUserRole'] as const;
+
 export const getUpdateUserRoleMutationOptions = <TError = ErrorType<unknown>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateUserRole>>, TError,UpdateUserRoleMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof updateUserRole>>, TError,UpdateUserRoleMutationVariables, TContext> => {
 
-const mutationKey = ['updateUserRole'];
+const mutationKey = getUpdateUserRoleMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -4358,8 +4609,16 @@ export const createAssignment = async (assignmentInput: AssignmentInput, options
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
     if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
   };
 return customFetch<Assignment[]>(getCreateAssignmentUrl(),
   {
@@ -4374,11 +4633,13 @@ return customFetch<Assignment[]>(getCreateAssignmentUrl(),
 
 
 
+export const getCreateAssignmentMutationKey = () => ['createAssignment'] as const;
+
 export const getCreateAssignmentMutationOptions = <TError = ErrorType<unknown>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createAssignment>>, TError,CreateAssignmentMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createAssignment>>, TError,CreateAssignmentMutationVariables, TContext> => {
 
-const mutationKey = ['createAssignment'];
+const mutationKey = getCreateAssignmentMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -4446,11 +4707,13 @@ export const deleteAssignment = async (assignmentId: number, options?: Parameter
 
 
 
+export const getDeleteAssignmentMutationKey = () => ['deleteAssignment'] as const;
+
 export const getDeleteAssignmentMutationOptions = <TError = ErrorType<unknown>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteAssignment>>, TError,DeleteAssignmentMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof deleteAssignment>>, TError,DeleteAssignmentMutationVariables, TContext> => {
 
-const mutationKey = ['deleteAssignment'];
+const mutationKey = getDeleteAssignmentMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -4509,8 +4772,16 @@ export const updateModuleVisibility = async (moduleId: number,
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
     if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
   };
 return customFetch<Module>(getUpdateModuleVisibilityUrl(moduleId),
   {
@@ -4525,11 +4796,13 @@ return customFetch<Module>(getUpdateModuleVisibilityUrl(moduleId),
 
 
 
+export const getUpdateModuleVisibilityMutationKey = () => ['updateModuleVisibility'] as const;
+
 export const getUpdateModuleVisibilityMutationOptions = <TError = ErrorType<unknown>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateModuleVisibility>>, TError,UpdateModuleVisibilityMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof updateModuleVisibility>>, TError,UpdateModuleVisibilityMutationVariables, TContext> => {
 
-const mutationKey = ['updateModuleVisibility'];
+const mutationKey = getUpdateModuleVisibilityMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -4825,8 +5098,16 @@ export const updateAdminSetting = async (settingInput: SettingInput, options?: P
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
     if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
   };
 return customFetch<Setting>(getUpdateAdminSettingUrl(),
   {
@@ -4841,11 +5122,13 @@ return customFetch<Setting>(getUpdateAdminSettingUrl(),
 
 
 
+export const getUpdateAdminSettingMutationKey = () => ['updateAdminSetting'] as const;
+
 export const getUpdateAdminSettingMutationOptions = <TError = ErrorType<unknown>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateAdminSetting>>, TError,UpdateAdminSettingMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof updateAdminSetting>>, TError,UpdateAdminSettingMutationVariables, TContext> => {
 
-const mutationKey = ['updateAdminSetting'];
+const mutationKey = getUpdateAdminSettingMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -4903,8 +5186,16 @@ export const requestUploadUrl = async (uploadUrlRequest: UploadUrlRequest, optio
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
     if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
   };
 return customFetch<UploadUrlResponse>(getRequestUploadUrlUrl(),
   {
@@ -4919,11 +5210,13 @@ return customFetch<UploadUrlResponse>(getRequestUploadUrlUrl(),
 
 
 
+export const getRequestUploadUrlMutationKey = () => ['requestUploadUrl'] as const;
+
 export const getRequestUploadUrlMutationOptions = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof requestUploadUrl>>, TError,RequestUploadUrlMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof requestUploadUrl>>, TError,RequestUploadUrlMutationVariables, TContext> => {
 
-const mutationKey = ['requestUploadUrl'];
+const mutationKey = getRequestUploadUrlMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options

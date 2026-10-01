@@ -284,6 +284,8 @@ export interface VideoWithProgress {
   /** @nullable */
   durationSeconds?: number | null;
   order: number;
+  /** @nullable */
+  documentId: number | null;
   createdAt: string;
   /** @nullable */
   progressPercent?: number | null;
@@ -365,6 +367,8 @@ export interface Video {
   durationSeconds?: number | null;
   order: number;
   videoType: VideoVideoType;
+  /** @nullable */
+  documentId: number | null;
   createdAt: string;
 }
 
@@ -389,6 +393,8 @@ export interface VideoInput {
   durationSeconds?: number | null;
   order: number;
   videoType?: VideoInputVideoType;
+  /** @nullable */
+  documentId?: number | null;
 }
 
 export type VideoUpdateVideoType = typeof VideoUpdateVideoType[keyof typeof VideoUpdateVideoType];
@@ -411,6 +417,36 @@ export interface VideoUpdate {
   durationSeconds?: number | null;
   order?: number;
   videoType?: VideoUpdateVideoType;
+  /** @nullable */
+  documentId?: number | null;
+}
+
+export type VideoDetailVideoType = typeof VideoDetailVideoType[keyof typeof VideoDetailVideoType];
+
+
+export const VideoDetailVideoType = {
+  embed: 'embed',
+  upload: 'upload',
+  drive: 'drive',
+} as const;
+
+export interface VideoDetail {
+  id: number;
+  moduleId: number;
+  title: string;
+  /** @nullable */
+  description?: string | null;
+  url: string;
+  /** @nullable */
+  thumbnailUrl?: string | null;
+  /** @nullable */
+  durationSeconds?: number | null;
+  order: number;
+  videoType: VideoDetailVideoType;
+  /** @nullable */
+  documentId: number | null;
+  createdAt: string;
+  document: ModuleDocument | null;
 }
 
 export interface WatchHistoryEntry {

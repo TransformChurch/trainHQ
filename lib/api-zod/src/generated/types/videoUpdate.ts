@@ -18,4 +18,6 @@ export interface VideoUpdate {
   durationSeconds?: number | null;
   order?: number;
   videoType?: VideoUpdateVideoType;
+  /** @nullable */
+  documentId?: number | null;
 }
