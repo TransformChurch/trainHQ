@@ -522,11 +522,11 @@ def find_near_matches(records, flags):
 # Output
 # ============================================================================
 
-def compute_attendance_rate(weekly, week_cols):
-    if not week_cols:
+def compute_attendance_rate(weekly, active_weeks):
+    if not active_weeks:
         return 0
-    attended = sum(1 for w in week_cols if weekly.get(w))
-    return round(attended / len(week_cols), 4)
+    attended = sum(1 for w in active_weeks if weekly.get(w))
+    return round(attended / len(active_weeks), 4)
 
 
 def write_output(records, fixed_cols, week_cols, out_path):
@@ -537,6 +537,15 @@ def write_output(records, fixed_cols, week_cols, out_path):
     # hardcoding a fixed-column list here too.
     fieldnames = list(fixed_cols) + week_cols + ["Attendance Rate"]
 
+    # 2026-10-02: a week where NOBODY attended (0 across every record) is
+    # treated as missing/empty data -- e.g. no service that week, or a gap
+    # in the export -- not a week everyone happened to miss. Excluding it
+    # from the rate's denominator is safe and one-directional: a week with
+    # zero total attendance can't contribute to anyone's numerator either,
+    # so dropping it from the denominator only ever raises rates, never
+    # lowers them, and never changes who "attended" a given week.
+    active_weeks = [w for w in week_cols if any(r["_weekly"].get(w) for r in records)]
+
     with open(out_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
@@ -544,7 +553,7 @@ def write_output(records, fixed_cols, week_cols, out_path):
             row = {k: r[k] for k in fieldnames if k in r}
             for w in week_cols:
                 row[w] = "TRUE" if r["_weekly"].get(w) else "FALSE"
-            row["Attendance Rate"] = compute_attendance_rate(r["_weekly"], week_cols)
+            row["Attendance Rate"] = compute_attendance_rate(r["_weekly"], active_weeks)
             writer.writerow(row)
 
 

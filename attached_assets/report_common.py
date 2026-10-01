@@ -573,7 +573,24 @@ def draw_trend_lines(ax: plt.Axes, week_dates: list, series: dict, colors: dict)
     week_labels = [d.strftime("%-m/%-d") if hasattr(d, "strftime") else str(d) for d in week_dates]
     ax.set_xticklabels(week_labels, rotation=30, ha="right", fontsize=7)
     style_axes(ax)
-    ax.legend(loc="upper left", bbox_to_anchor=(1.01, 1.0), fontsize=7.5)
+    # 2026-10-02: the legend used to be placed via bbox_to_anchor=(1.01, 1.0)
+    # -- just outside the axes' own right edge -- sized to whatever margin
+    # the caller's rect happened to leave past that edge. Every call site
+    # across report_kids.py and report_youth.py gives this chart the same
+    # 0.80-wide rect (0.10 of figure width left as margin), which isn't
+    # enough room for the longest series label ("Unknown"): nothing expands
+    # the canvas to fit content placed outside the figure's 0-1 coordinate
+    # range, so pdf.savefig() silently clipped it at the page edge, printing
+    # as "Unknow". Fixed centrally here (rather than at every call site) by
+    # shrinking this axes' own box to physically reserve a legend column,
+    # sized in inches so it holds regardless of the page's portrait/
+    # landscape width.
+    fig = ax.figure
+    fig_width_in = fig.get_size_inches()[0]
+    legend_margin_in = 0.95
+    pos = ax.get_position()
+    ax.set_position([pos.x0, pos.y0, max(pos.width - legend_margin_in / fig_width_in, 0.1), pos.height])
+    ax.legend(loc="upper left", bbox_to_anchor=(1.02, 1.0), fontsize=7.5)
 
 
 def draw_table(fig: plt.Figure, rect: tuple, col_labels: list, rows: list, title: str | None = None) -> None:
