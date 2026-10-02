@@ -137,29 +137,79 @@ router.post("/:trackId/assign", requireManagerOrAdmin, async (req, res) => {
       return;
     }
 
+    const moduleIds = trackModules.map((moduleData) => moduleData.id);
+
+    // Audit findings 1.8/2.5: these three lookups used to run once PER USER
+    // (moduleVideos: once per user PER MODULE) even though none of them
+    // depend on which user is currently being processed, only on
+    // membership in a fixed set. Batched to a handful of queries total
+    // instead of O(userIds.length) / O(userIds.length * trackModules.length)
+    // -- same data, same results, far fewer round trips to the database.
+    const targetUserRows = await db.select().from(usersTable).where(inArray(usersTable.id, userIds));
+    const targetUserById = new Map(targetUserRows.map((user) => [user.id, user]));
+
+    // assignmentsTable has no unique constraint on (userId, moduleId), so in
+    // the (believed impossible in practice, but not DB-enforced) case of
+    // duplicate rows for the same pair, keep the lowest-id row -- the
+    // closest reasonable match to the original per-pair `.limit(1)` query's
+    // likely behavior on an un-ordered scan of a small table.
+    const existingAssignmentRows = await db.select().from(assignmentsTable)
+      .where(and(inArray(assignmentsTable.userId, userIds), inArray(assignmentsTable.moduleId, moduleIds)))
+      .orderBy(assignmentsTable.id);
+    const existingAssignmentByKey = new Map<string, typeof existingAssignmentRows[number]>();
+    for (const row of existingAssignmentRows) {
+      const key = `${row.userId}:${row.moduleId}`;
+      if (!existingAssignmentByKey.has(key)) existingAssignmentByKey.set(key, row);
+    }
+
+    const moduleVideoIdsByModule = new Map<number, number[]>();
+    if (resetProgress) {
+      const videoRows = await db.select({ id: videosTable.id, moduleId: videosTable.moduleId })
+        .from(videosTable)
+        .where(inArray(videosTable.moduleId, moduleIds));
+      for (const video of videoRows) {
+        const list = moduleVideoIdsByModule.get(video.moduleId);
+        if (list) list.push(video.id);
+        else moduleVideoIdsByModule.set(video.moduleId, [video.id]);
+      }
+    }
+
+    // Audit finding 1.7 (Critical): for N users x M modules, this handler
+    // used to fire N*M+N sequential PCO calls (module-assignment sync per
+    // user per module, plus a track-date-field sync per user) with zero
+    // delay between them -- easily hundreds of calls in one HTTP request,
+    // virtually guaranteed to hit Planning Center's rate limit. The
+    // underlying client (planningCenter.ts) now retries a 429 with backoff
+    // on its own, but spacing calls out here avoids burning that retry
+    // budget and spreads the load instead of bursting it.
+    const PCO_SYNC_DELAY_MS = 200;
+    let pcoCallCount = 0;
+    async function pacedPcoSync<T>(run: () => Promise<T>): Promise<T> {
+      if (pcoCallCount > 0) await new Promise((resolve) => setTimeout(resolve, PCO_SYNC_DELAY_MS));
+      pcoCallCount += 1;
+      return run();
+    }
+
     const results = [];
     for (const userId of userIds) {
-      const targetUsers = await db.select().from(usersTable).where(eq(usersTable.id, userId)).limit(1);
-      const targetUser = targetUsers[0];
+      const targetUser = targetUserById.get(userId);
       const moduleResults = [];
       for (const moduleData of trackModules) {
         const moduleId = moduleData.id;
         if (resetProgress) {
           await db.delete(quizResultsTable)
             .where(and(eq(quizResultsTable.userId, userId), eq(quizResultsTable.moduleId, moduleId)));
-          const moduleVideos = await db.select({ id: videosTable.id }).from(videosTable)
-            .where(eq(videosTable.moduleId, moduleId));
-          if (moduleVideos.length > 0) {
+          const moduleVideoIds = moduleVideoIdsByModule.get(moduleId) ?? [];
+          if (moduleVideoIds.length > 0) {
             await db.delete(watchHistoryTable).where(and(
               eq(watchHistoryTable.userId, userId),
-              inArray(watchHistoryTable.videoId, moduleVideos.map((video) => video.id)),
+              inArray(watchHistoryTable.videoId, moduleVideoIds),
             ));
           }
         }
-        const existingAssignment = await db.select().from(assignmentsTable)
-          .where(and(eq(assignmentsTable.userId, userId), eq(assignmentsTable.moduleId, moduleId))).limit(1);
+        const existingAssignment = existingAssignmentByKey.get(`${userId}:${moduleId}`);
         let assignment;
-        if (existingAssignment[0]) {
+        if (existingAssignment) {
           const updateValues: Partial<typeof assignmentsTable.$inferInsert & { seenAt: Date | null; assignedAt: Date }> = {
             assignedBy: actor.id,
             assignedAt: new Date(),
@@ -167,7 +217,7 @@ router.post("/:trackId/assign", requireManagerOrAdmin, async (req, res) => {
           };
           if (resetProgress) updateValues.seenAt = null;
           const updatedRows = await db.update(assignmentsTable).set(updateValues)
-            .where(eq(assignmentsTable.id, existingAssignment[0].id)).returning();
+            .where(eq(assignmentsTable.id, existingAssignment.id)).returning();
           assignment = updatedRows[0];
         } else {
           const insertedRows = await db.insert(assignmentsTable).values({
@@ -179,7 +229,7 @@ router.post("/:trackId/assign", requireManagerOrAdmin, async (req, res) => {
           assignment = insertedRows[0];
         }
         const planningCenterSync = targetUser
-          ? await syncPlanningCenterModuleAssignment(targetUser, moduleId, assignment.assignedAt)
+          ? await pacedPcoSync(() => syncPlanningCenterModuleAssignment(targetUser, moduleId, assignment.assignedAt))
           : { status: "failed" as const, code: "assignment_user_missing", message: "The assigned member could not be found." };
         moduleResults.push({
           moduleId,
@@ -197,7 +247,7 @@ router.post("/:trackId/assign", requireManagerOrAdmin, async (req, res) => {
           set: { assignedBy: actor.id, assignedAt: trackAssignedAt },
         });
       const trackPlanningCenterSync = targetUser
-        ? await syncPlanningCenterTrackDateField(targetUser, track.pcoAssignedFieldId, trackAssignedAt)
+        ? await pacedPcoSync(() => syncPlanningCenterTrackDateField(targetUser, track.pcoAssignedFieldId, trackAssignedAt))
         : { status: "failed" as const, code: "assignment_user_missing", message: "The assigned member could not be found." };
       if (notifyEmail && targetUser) {
         sendTrackAssignmentEmail(

@@ -151,6 +151,47 @@ router.post("/assignments", requireManagerOrAdmin, async (req, res) => {
     const mod = await db.select().from(modulesTable).where(eq(modulesTable.id, moduleId)).limit(1);
     const moduleData = mod[0];
 
+    // Audit findings 1.9/2.5: this loop used to run 3 separate per-user
+    // reads that don't actually depend on which user is being processed
+    // except by membership in a fixed set -- a usersTable select (used
+    // twice: once for the PCO sync, then re-fetched again for the email
+    // notification), an assignmentsTable select, and a moduleVideos select
+    // that only depends on the single fixed `moduleId` for this whole
+    // request. Batched/hoisted so each runs once total instead of once (or
+    // twice) per user.
+    const targetUserRows = await db.select().from(usersTable).where(inArray(usersTable.id, userIds));
+    const targetUserById = new Map(targetUserRows.map((user) => [user.id, user]));
+
+    const existingAssignmentRows = await db.select().from(assignmentsTable)
+      .where(and(inArray(assignmentsTable.userId, userIds), eq(assignmentsTable.moduleId, moduleId)))
+      .orderBy(assignmentsTable.id);
+    // No unique constraint on (userId, moduleId) at the DB level; keep the
+    // lowest-id row per user to match the original per-user `.limit(1)`
+    // query's likely behavior on an un-ordered scan.
+    const existingAssignmentByUserId = new Map<string, typeof existingAssignmentRows[number]>();
+    for (const row of existingAssignmentRows) {
+      if (!existingAssignmentByUserId.has(row.userId)) existingAssignmentByUserId.set(row.userId, row);
+    }
+
+    let moduleVideoIds: number[] = [];
+    if (resetProgress) {
+      const moduleVideos = await db.select({ id: videosTable.id }).from(videosTable)
+        .where(eq(videosTable.moduleId, moduleId));
+      moduleVideoIds = moduleVideos.map((v) => v.id);
+    }
+
+    // Audit finding 1.9 (High): one unpaced PCO call per user in this loop
+    // -- for a module assigned to N users, N sequential requests with no
+    // delay between them. See the identical fix (and fuller explanation)
+    // in adminTracks.ts's /:trackId/assign handler.
+    const PCO_SYNC_DELAY_MS = 200;
+    let pcoCallCount = 0;
+    async function pacedPcoSync<T>(run: () => Promise<T>): Promise<T> {
+      if (pcoCallCount > 0) await new Promise((resolve) => setTimeout(resolve, PCO_SYNC_DELAY_MS));
+      pcoCallCount += 1;
+      return run();
+    }
+
     const inserted = [];
     for (const userId of userIds) {
       // Reset quiz results + watch history if requested
@@ -158,27 +199,19 @@ router.post("/assignments", requireManagerOrAdmin, async (req, res) => {
         await db.delete(quizResultsTable)
           .where(and(eq(quizResultsTable.userId, userId), eq(quizResultsTable.moduleId, moduleId)));
 
-        const moduleVideos = await db
-          .select({ id: videosTable.id })
-          .from(videosTable)
-          .where(eq(videosTable.moduleId, moduleId));
-        if (moduleVideos.length > 0) {
+        if (moduleVideoIds.length > 0) {
           await db.delete(watchHistoryTable)
             .where(and(
               eq(watchHistoryTable.userId, userId),
-              inArray(watchHistoryTable.videoId, moduleVideos.map(v => v.id)),
+              inArray(watchHistoryTable.videoId, moduleVideoIds),
             ));
         }
       }
 
-      const existing = await db
-        .select()
-        .from(assignmentsTable)
-        .where(and(eq(assignmentsTable.userId, userId), eq(assignmentsTable.moduleId, moduleId)))
-        .limit(1);
+      const existing = existingAssignmentByUserId.get(userId);
 
       let a;
-      if (existing[0]) {
+      if (existing) {
         const updateValues: Partial<typeof assignmentsTable.$inferInsert & { seenAt: Date | null; assignedAt: Date }> = {
           assignedBy: actor.id,
           assignedAt: new Date(),
@@ -188,7 +221,7 @@ router.post("/assignments", requireManagerOrAdmin, async (req, res) => {
         const updated = await db
           .update(assignmentsTable)
           .set(updateValues)
-          .where(eq(assignmentsTable.id, existing[0].id))
+          .where(eq(assignmentsTable.id, existing.id))
           .returning();
         a = updated[0];
       } else {
@@ -201,10 +234,9 @@ router.post("/assignments", requireManagerOrAdmin, async (req, res) => {
         a = rows[0];
       }
 
-      const targetUsers = await db.select().from(usersTable).where(eq(usersTable.id, userId)).limit(1);
-      const targetUser = targetUsers[0];
+      const targetUser = targetUserById.get(userId);
       const planningCenterSync = targetUser
-        ? await syncPlanningCenterModuleAssignment(targetUser, moduleId, a.assignedAt)
+        ? await pacedPcoSync(() => syncPlanningCenterModuleAssignment(targetUser, moduleId, a.assignedAt))
         : {
             status: "failed" as const,
             code: "assignment_user_missing",
@@ -227,17 +259,13 @@ router.post("/assignments", requireManagerOrAdmin, async (req, res) => {
       });
 
       // Send email notification for new assignments
-      if (notifyEmail && moduleData) {
-        const userRows = await db.select().from(usersTable).where(eq(usersTable.id, userId)).limit(1);
-        const user = userRows[0];
-        if (user) {
-          sendAssignmentEmail(
-            user.email,
-            `${user.firstName} ${user.lastName}`,
-            moduleData.title,
-            dueDate ?? null,
-          ).catch(() => {});
-        }
+      if (notifyEmail && moduleData && targetUser) {
+        sendAssignmentEmail(
+          targetUser.email,
+          `${targetUser.firstName} ${targetUser.lastName}`,
+          moduleData.title,
+          dueDate ?? null,
+        ).catch(() => {});
       }
     }
 
