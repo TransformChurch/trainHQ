@@ -153,8 +153,78 @@ function normalizeTokens(data: TokenResponse, fallbackRefreshToken?: string) {
   };
 }
 
+// --- Request hardening ---------------------------------------------------
+// Audit finding 1.1: neither the token endpoint call nor the People API
+// call had a timeout, retry/backoff, or 429 handling -- a hung PCO request
+// hung the handling request indefinitely, and a transient 5xx or rate limit
+// immediately failed whatever the user was doing. pcoFetch() centralizes
+// that handling for every PCO HTTP call this module makes. It changes
+// nothing about what counts as success or what's returned on a durable
+// failure -- callers' error handling is unaffected -- it only adds
+// self-healing for the transient case.
+const PCO_REQUEST_TIMEOUT_MS = 15_000;
+const PCO_MAX_RETRIES = 3;
+const PCO_RETRY_BASE_MS = 200;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Exponential backoff with full jitter (AWS's recommended formula): a
+// random delay between 0 and the exponentially-growing ceiling. A 429's own
+// `Retry-After` header, when present, takes priority over the computed
+// backoff since PCO is telling us exactly how long to wait.
+function backoffDelayMs(attempt: number, retryAfterSeconds?: number): number {
+  if (typeof retryAfterSeconds === "number" && Number.isFinite(retryAfterSeconds)) {
+    return Math.max(0, Math.round(retryAfterSeconds * 1000));
+  }
+  const ceiling = PCO_RETRY_BASE_MS * 2 ** attempt;
+  return Math.floor(Math.random() * ceiling);
+}
+
+function parseRetryAfterSeconds(header: string | null): number | undefined {
+  if (!header) return undefined;
+  const asNumber = Number(header);
+  if (Number.isFinite(asNumber)) return asNumber;
+  const asDate = Date.parse(header);
+  if (!Number.isNaN(asDate)) return Math.max(0, (asDate - Date.now()) / 1000);
+  return undefined;
+}
+
+async function pcoFetch(url: string | URL, init: RequestInit, attempt = 0): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), PCO_REQUEST_TIMEOUT_MS);
+  let response: Response;
+  try {
+    response = await fetch(url, { ...init, signal: controller.signal });
+  } catch (err) {
+    clearTimeout(timeout);
+    if (attempt < PCO_MAX_RETRIES) {
+      await sleep(backoffDelayMs(attempt));
+      return pcoFetch(url, init, attempt + 1);
+    }
+    throw new PlanningCenterError(
+      "planning_center_unreachable",
+      "Planning Center did not respond in time.",
+      504,
+    );
+  }
+  clearTimeout(timeout);
+
+  if (response.status === 429 && attempt < PCO_MAX_RETRIES) {
+    const retryAfter = parseRetryAfterSeconds(response.headers.get("retry-after"));
+    await sleep(backoffDelayMs(attempt, retryAfter));
+    return pcoFetch(url, init, attempt + 1);
+  }
+  if (response.status >= 500 && attempt < PCO_MAX_RETRIES) {
+    await sleep(backoffDelayMs(attempt));
+    return pcoFetch(url, init, attempt + 1);
+  }
+  return response;
+}
+
 async function requestTokens(body: URLSearchParams): Promise<TokenResponse> {
-  const response = await fetch(TOKEN_URL, {
+  const response = await pcoFetch(TOKEN_URL, {
     method: "POST",
     headers: {
       Accept: "application/json",
@@ -181,7 +251,7 @@ async function peopleRequest<T>(
   options: RequestInit = {},
 ): Promise<T> {
   const requestUrl = planningCenterPeopleUrl(path);
-  const response = await fetch(requestUrl, {
+  const response = await pcoFetch(requestUrl, {
     ...options,
     headers: {
       Accept: "application/json",
@@ -192,12 +262,19 @@ async function peopleRequest<T>(
   const data = await response.json().catch(() => null) as T | null;
   if (!response.ok) {
     const permissionError = response.status === 401 || response.status === 403;
+    const rateLimited = response.status === 429;
     throw new PlanningCenterError(
-      permissionError ? "planning_center_permission_error" : "planning_center_api_error",
+      permissionError
+        ? "planning_center_permission_error"
+        : rateLimited
+          ? "planning_center_rate_limited"
+          : "planning_center_api_error",
       permissionError
         ? "Planning Center access is missing or expired. Sign in with Church Center again."
-        : "Planning Center could not process this request.",
-      permissionError ? 403 : 502,
+        : rateLimited
+          ? "Planning Center is rate-limiting this request. Try again shortly."
+          : "Planning Center could not process this request.",
+      permissionError ? 403 : rateLimited ? 429 : 502,
     );
   }
   return data as T;
@@ -220,10 +297,21 @@ export function planningCenterPeopleUrl(path: string): URL {
   return requestUrl;
 }
 
+// Audit finding 1.3: the first page of a collection fetch relied on PCO's
+// default page size (25) instead of requesting the maximum (100), costing
+// extra round trips for any resource with more than 25 records. Only the
+// *first* request needs this -- once PCO hands back a `links.next`, that
+// URL already encodes whatever page size produced it.
+function withDefaultPerPage(path: string): string {
+  return /[?&]per_page=/.test(path)
+    ? path
+    : `${path}${path.includes("?") ? "&" : "?"}per_page=100`;
+}
+
 async function fetchPeopleCollection<T>(path: string, accessToken: string): Promise<T[]> {
   const records: T[] = [];
   const visited = new Set<string>();
-  let next: string | null = path;
+  let next: string | null = withDefaultPerPage(path);
 
   while (next && !visited.has(next)) {
     visited.add(next);
@@ -539,6 +627,16 @@ async function refreshAccessToken(userId: string, encryptedRefreshToken: string)
   return tokens.accessToken;
 }
 
+// Audit finding 1.2: two concurrent requests for the same user whose access
+// token has just expired would each independently call refreshAccessToken,
+// racing to redeem the same (single-use, PCO-rotated) refresh token -- the
+// loser gets an invalid_grant error and that user's connection can end up
+// needing a full reconnect. This app runs as a single container instance
+// (wrangler.toml: max_instances = 1), so an in-process, per-user in-flight
+// promise cache fully closes the race: the second caller awaits the same
+// refresh the first one already started instead of starting its own.
+const pendingRefreshes = new Map<string, Promise<string>>();
+
 export async function getValidPlanningCenterAccessToken(userId: string): Promise<string> {
   const rows = await db
     .select()
@@ -556,7 +654,15 @@ export async function getValidPlanningCenterAccessToken(userId: string): Promise
   if (token.accessTokenExpiresAt.getTime() > Date.now() + REFRESH_BUFFER_MS) {
     return decrypt(token.accessTokenEncrypted);
   }
-  return refreshAccessToken(userId, token.refreshTokenEncrypted);
+
+  const inFlight = pendingRefreshes.get(userId);
+  if (inFlight) return inFlight;
+
+  const refreshPromise = refreshAccessToken(userId, token.refreshTokenEncrypted).finally(() => {
+    pendingRefreshes.delete(userId);
+  });
+  pendingRefreshes.set(userId, refreshPromise);
+  return refreshPromise;
 }
 
 export type PlanningCenterDateField = "assigned" | "completed";
