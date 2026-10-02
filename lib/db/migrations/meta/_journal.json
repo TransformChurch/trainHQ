@@ -239,6 +239,13 @@
       "when": 1791058200000,
       "tag": "0033_group_broadcasts",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1791058200001,
+      "tag": "0034_add_missing_fk_indexes",
+      "breakpoints": true
     }
   ]
 }
