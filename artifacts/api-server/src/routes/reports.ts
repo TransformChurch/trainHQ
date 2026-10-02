@@ -859,9 +859,18 @@ router.post("/prepare", requireManagerOrAdmin, async (req, res) => {
       return;
     }
     const accessToken = await getValidPlanningCenterAccessToken(res.locals.dbUser.id);
-    const customFieldDefinitions = await fetchReportFieldDefinitions(accessToken);
-    const customLabels = new Map(customFieldDefinitions.map((field) => [field.key, field.label]));
+    // Audit finding 1.12 (Medium): this always fetched the full, paginated
+    // list of Planning Center custom field definitions, even when the
+    // report template doesn't pull any custom fields -- selectedCustomFields
+    // is computed from the same pullFields list and was already knowable
+    // before paying for that fetch. customLabels stays an empty Map in that
+    // case, which is exactly what it would have evaluated to anyway (no
+    // custom field key in pullFields to look up a label for).
     const selectedCustomFields = pullFields.filter(isCustomFieldKey);
+    const customFieldDefinitions = selectedCustomFields.length
+      ? await fetchReportFieldDefinitions(accessToken)
+      : [];
+    const customLabels = new Map(customFieldDefinitions.map((field) => [field.key, field.label]));
     const eventPage = await planningCenterRequest(`${CHECK_INS_BASE}/events/${encodeURIComponent(eventId)}`, accessToken);
     const eventName = firstValue(eventPage.data?.attributes ?? {}, "name") || `Event ${eventId}`;
     const [periodCollection, collection, firstTimeCollection] = await Promise.all([
