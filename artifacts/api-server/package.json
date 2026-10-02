@@ -9,7 +9,7 @@
     "start": "node --enable-source-maps ./dist/index.mjs",
     "sync:wiki-drive": "node --enable-source-maps ./dist/wikiDriveSyncJob.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --import tsx --test src/lib/*.test.ts"
+    "test": "node --import tsx --test src/lib/*.test.ts src/routes/*.test.ts"
   },
   "dependencies": {
     "@workspace/api-zod": "file:../../lib/api-zod",

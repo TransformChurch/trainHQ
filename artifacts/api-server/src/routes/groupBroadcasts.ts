@@ -123,7 +123,7 @@ export function normalizePhoneToE164(raw: string): string | null {
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-type RawRecipient = { name: string; phone: string | null; email: string | null };
+export type RawRecipient = { name: string; phone: string | null; email: string | null };
 type RecipientPreview = { name: string; contact: string; valid: boolean; reason?: string };
 
 // "contact" is whichever field the chosen channel cares about (phone for
@@ -161,7 +161,9 @@ function dedupeByContact(recipients: RecipientPreview[]): RecipientPreview[] {
   return result;
 }
 
-async function resolveRecipientsFromGroups(groupIds: string[], accessToken: string): Promise<RawRecipient[]> {
+// Exported for testing only (see groupBroadcasts.test.ts) -- not used
+// outside this module otherwise.
+export async function resolveRecipientsFromGroups(groupIds: string[], accessToken: string): Promise<RawRecipient[]> {
   const personIds = new Set<string>();
   for (const groupId of groupIds) {
     const memberships = await fetchCollection(
@@ -193,6 +195,21 @@ async function resolveRecipientsFromGroups(groupIds: string[], accessToken: stri
         const emails = included.filter((item) => item.type === "Email").map((item) => text(item.attributes?.address)).filter(Boolean);
         return { name, phone: mobile || phones[0]?.number || null, email: emails[0] || null };
       } catch (error) {
+        // Audit finding 1.10: an expired/revoked Planning Center access
+        // token (401/403) was being swallowed here along with every other
+        // per-person lookup failure, and reported to the admin as "No
+        // phone number on file" / "No email address on file" -- actively
+        // misleading, and for a broadcast that runs long enough for the
+        // token to expire mid-batch, it silently drops every remaining
+        // recipient instead of failing clearly. Once the token's bad, every
+        // other call in this batch (and every later batch) will fail the
+        // same way, so re-throw rather than keep masking it: the route's
+        // own try/catch turns this into the same "reconnect Church Center"
+        // error GET /sources already surfaces for this exact failure mode.
+        // A genuine per-person issue (e.g. a 404 for a deleted person) is
+        // the only thing this fallback is meant to cover.
+        const status = (error as { status?: number }).status;
+        if (status === 401 || status === 403) throw error;
         return { name: `Person ${id}`, phone: null, email: null };
       }
     }));
