@@ -422,6 +422,30 @@ async function recordRunResult(id: number, result: { sent: boolean; error?: stri
   }).where(eq(weeklyPulseConfigTable.id, id));
 }
 
+// Audit finding 5.1 (High): neither the manual "run now" endpoint nor the
+// Cron-triggered run-scheduled endpoint had any overlap/idempotency guard --
+// if the Worker's Cron Trigger retried, or an admin's manual test happened
+// to overlap with a scheduled run, every enabled config's full attendance
+// email would be sent twice to its recipient list with nothing detecting or
+// preventing it (contrast with wikiDriveSync.ts's lease-based lock for the
+// same kind of risk). This does a fresh, single-row re-check of a config's
+// own lastRunAt immediately before running it -- not the possibly-stale
+// value from an earlier bulk select -- and treats anything that ran within
+// the last 10 minutes as still in flight. 10 minutes is long enough to
+// absorb a near-simultaneous double fire but far shorter than the normal
+// weekly cadence, so it never interferes with a legitimate run, including a
+// deliberate "run now" test more than 10 minutes after the last one.
+const RUN_OVERLAP_GUARD_MS = 10 * 60 * 1000;
+
+async function ranWithinOverlapWindow(id: number): Promise<boolean> {
+  const rows = await db.select({ lastRunAt: weeklyPulseConfigTable.lastRunAt })
+    .from(weeklyPulseConfigTable)
+    .where(eq(weeklyPulseConfigTable.id, id))
+    .limit(1);
+  const lastRunAt = rows[0]?.lastRunAt;
+  return !!lastRunAt && Date.now() - lastRunAt.getTime() < RUN_OVERLAP_GUARD_MS;
+}
+
 // ── GET /api/weekly-pulse/sources ───────────────────────────────────────────
 // Lists Check-Ins events, Groups, and Forms for the admin's picker UI.
 router.get("/sources", requireAdmin, async (req, res) => {
@@ -576,6 +600,10 @@ router.post("/config/:id/run-now", requireAdmin, async (req, res) => {
       res.status(404).json({ error: "Weekly pulse config not found." });
       return;
     }
+    if (await ranWithinOverlapWindow(id)) {
+      res.status(409).json({ error: "This weekly pulse already ran in the last few minutes. Wait a moment before running it again." });
+      return;
+    }
     const result = await runWeeklyPulse({ ...config, createdByUserId: res.locals.dbUser.id });
     await recordRunResult(id, result);
     if (!result.sent) {
@@ -608,6 +636,10 @@ router.post("/run-scheduled", async (req, res) => {
   const results: { id: number; sent: boolean; error?: string }[] = [];
   for (const config of configs) {
     try {
+      if (await ranWithinOverlapWindow(config.id)) {
+        results.push({ id: config.id, sent: false, error: "Skipped: this config already ran within the overlap guard window." });
+        continue;
+      }
       const result = await runWeeklyPulse(config);
       await recordRunResult(config.id, result);
       results.push({ id: config.id, sent: result.sent, error: result.error });

@@ -81,4 +81,24 @@ app.use(authMiddleware);
 app.use("/api/auth", planningCenterAuthRouter);
 app.use("/api", router);
 
+// Audit finding 5.2: there was no catch-all error-handling middleware, so
+// any route that threw without its own try/catch fell through to Express's
+// built-in default handler, which only does a bare `console.error` --
+// bypassing this app's structured pino logging (and anything watching it)
+// entirely. Express 5 auto-forwards a rejected async handler's promise to
+// error-handling middleware (unlike Express 4, where every route had to
+// catch and call next(err) itself), so this one handler now gives every
+// otherwise-uncaught route error -- sync or async -- a consistent,
+// log-correlated response instead of a silent console.error. Routes that
+// already handle their own errors (the large majority) are unaffected;
+// this is only reached when one doesn't.
+app.use((err: unknown, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  if (res.headersSent) {
+    next(err);
+    return;
+  }
+  req.log?.error({ err }, "Unhandled error reached the top-level error handler");
+  res.status(500).json({ error: "Internal server error" });
+});
+
 export default app;
