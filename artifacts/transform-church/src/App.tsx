@@ -34,7 +34,24 @@ import { Button } from "@/components/ui/button";
 import { AlertCircle } from "lucide-react";
 import { SiteCopyProvider } from "@/lib/siteCopy";
 
-const queryClient = new QueryClient();
+// Audit finding 4.1 (High): no defaultOptions meant TanStack Query's own
+// default staleTime of 0 applied everywhere, so every remount of a
+// component using an already-fetched query (useGetMe, above all -- read on
+// nearly every page) was treated as stale and silently refetched,
+// defeating the caching this library would otherwise provide for data that
+// barely changes. A 60s staleTime doesn't change correctness: every
+// explicit queryClient.invalidateQueries()/refetch() call already used
+// throughout this app after a write still forces a fresh fetch immediately,
+// regardless of staleTime -- this only skips a *redundant* background
+// refetch of data that was fetched within the last minute and nothing has
+// invalidated since.
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 60_000,
+    },
+  },
+});
 const TOKEN_STORAGE_KEY = "auth_bearer_token";
 const basePath = import.meta.env.BASE_URL.replace(/\/$/, "");
 const apiUrl = import.meta.env.VITE_API_URL?.replace(/\/$/, "") || null;
