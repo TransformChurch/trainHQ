@@ -225,8 +225,26 @@ Still to do in Phase 2: connection-pooling review (partially covered — `lib/db
 
 ## Phase 6 — Implement Fixes
 
-**Status: NOT STARTED**
+**Status: COMPLETE.** Fixed, in priority order, with a dedicated commit and either new passing tests or an explicit note on why automated coverage wasn't added for that one (see each commit message for full detail):
+
+1. `ebda035` — 2.6 (testability): lazy DB pool/connection creation. Unblocks the entire test suite (0/12 → 12/12 passing immediately after this commit).
+2. `85d820d` — 1.1/1.2/1.3: hardened the core PCO client (timeout, retry+backoff+jitter, 429/Retry-After handling, token-refresh race fix, default per_page=100). 3 new tests (15/15).
+3. `65e8448` — 1.10: stopped masking expired PCO tokens as missing contact info in group broadcasts. 3 new tests (18/18).
+4. `090defc` — 1.7/1.8/1.9/2.5: eliminated N+1 DB reads and added PCO call pacing in both bulk-assignment endpoints (adminTracks.ts, admin.ts). No new automated test (no DB-mocking infra exists); verified by typecheck + full existing suite passing + careful manual preservation of response shape and write behavior.
+5. `0d76a95` — 1.12: skip the custom-field-definitions PCO fetch when a report needs no custom fields.
+6. `6516200` — 5.2/5.1: catch-all Express error handler; Weekly Pulse overlap/idempotency guard.
+7. `1a88e1a` — 2.1: new (unapplied) migration for the 3 missing FK indexes; documented the deeper migration-tooling drift found while writing it.
+8. `d193629` — 4.1: gave the frontend QueryClient a real staleTime.
+
+**Deliberately not fixed**, with reasoning (see AUDIT_REPORT.md's "manual action items" and "remaining recommendations" for the full write-up of each):
+- 1.11 (unbounded check-in fetch in reports.ts/weeklyPulse.ts): fixing this safely requires confirming Planning Center's exact Check-Ins date-filter query syntax against primary documentation, which this audit could not do with full confidence (developer.planning.center resists automated fetching; best available secondary evidence is noted in the report). Changing a PCO query's filter semantics based on unconfirmed syntax risks a silent correctness regression in a user-facing weekly email and admin reports — too risky to guess at per ground rule 5.
+- 2.2 (RLS disabled): correctly Low severity today (Assumption 4) and enabling RLS blind, with no application-specific policies, on a database that's never had any would deny-all for any future PostgREST/client-side consumer rather than help — this needs deliberate per-table policy design, not a generic migration.
+- 2.3/migration-tracking drift (Critical): by definition cannot be fixed without running something against the production database, which ground rule 2 prohibits outright. Flagged as the top manual action item.
+- 2.4 (orphaned columns): trivial but DROP COLUMN is the exact operation documented to hang 180s+ against this Supabase project; not worth the risk for dead columns that aren't hurting anything.
+- 3.1 (PII in the app's own bearer token): fixing this touches the auth/session contract (what's embedded in every issued token, what the frontend decodes) — explicitly the kind of "auth flow change" the mission says to flag for the user rather than do unilaterally.
+- 3.2/3.3 (report over-collection; stale contact info): each requires a product decision (which fields reports should request; how/when to re-sync a user's PCO profile) beyond what "preserve existing behavior" supports fixing unilaterally.
+- 4.2–4.8 (remaining frontend caching/bundle-size/pagination findings): real, but fixing them means touching many page components with no frontend test coverage in this codebase to catch a regression — flagged as recommendations rather than risked blind.
 
 ## Phase 7 — Measure & Report
 
-**Status: NOT STARTED**
+**Status: COMPLETE.** See `AUDIT_REPORT.md` at the repo root for the full write-up (executive summary, architecture overview, every finding, before/after metrics, commit mapping, manual action items, and remaining recommendations).
