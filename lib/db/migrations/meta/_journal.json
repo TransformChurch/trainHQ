@@ -225,6 +225,20 @@
       "when": 1790970600000,
       "tag": "0031_weekly_pulse_multi_form",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1791057000000,
+      "tag": "0032_sms_broadcasts",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1791058200000,
+      "tag": "0033_group_broadcasts",
+      "breakpoints": true
     }
   ]
 }

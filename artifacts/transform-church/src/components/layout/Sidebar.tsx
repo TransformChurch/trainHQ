@@ -2,7 +2,7 @@ import { Link, useLocation } from "wouter";
 import { useGetMe } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/App";
-import { BookOpen, LayoutDashboard, Settings, Video, ShieldCheck, LogOut, Menu, UserCircle, Users, TrendingUp, UsersRound, FileText, Wrench, BarChart3, Library, type LucideIcon } from "lucide-react";
+import { BookOpen, LayoutDashboard, Settings, Video, ShieldCheck, LogOut, Menu, UserCircle, Users, TrendingUp, UsersRound, FileText, Wrench, BarChart3, Library, MessageSquare, type LucideIcon } from "lucide-react";
 import wordmark from "@assets/TC_Black_Wordmark_1782833324395.png";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { useEffect, useState } from "react";
@@ -74,12 +74,13 @@ export function Sidebar() {
     { href: "/profile", label: copy("nav.myProfile"), icon: UserCircle, badge: isProfileIncomplete ? "!" : undefined },
   ];
 
-  const informationItems: NavigationItem[] = [
+  const toolsItems: NavigationItem[] = [
     { href: "/documents", label: copy("nav.documents"), icon: FileText },
     ...(wikiAllowed ? [{ href: "/wiki", label: copy("nav.wiki"), icon: Library }] : []),
     ...(tcWikiAllowed ? [{ href: "/tc-wiki", label: "TC Wiki", icon: Library }] : []),
     ...(facilitiesAllowed ? [{ href: "/facilities", label: copy("nav.requestHub"), icon: Wrench }] : []),
-    ...(isManagerOrAdmin ? [{ href: "/reporting", label: "Reporting", icon: BarChart3 }] : []),
+    ...(isAdmin ? [{ href: "/reporting", label: "Reporting", icon: BarChart3 }] : []),
+    ...(isAdmin ? [{ href: "/messaging", label: "Messaging", icon: MessageSquare }] : []),
   ];
 
   const managerItems: NavigationItem[] = [
@@ -111,7 +112,7 @@ export function Sidebar() {
       <nav className="flex-1 overflow-y-auto px-4 space-y-1">
         {[
           { label: "Learning", items: learningItems },
-          { label: "Information", items: informationItems },
+          { label: "Tools", items: toolsItems },
           ...(isManagerOrAdmin
             ? [{ label: "Admin", items: [...(isAdmin ? adminOnlyItems : []), ...managerItems] }]
             : []),

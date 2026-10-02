@@ -13,6 +13,14 @@
 #   WEEKLY_PULSE_RUN_SECRET (any long random string -- generate with e.g.
 #   `openssl rand -hex 32`; authenticates the Monday Cron Trigger's call to
 #   the container, see src/worker.ts's scheduled() and routes/weeklyPulse.ts)
+#   TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN (from the Twilio console) plus
+#   EITHER TWILIO_MESSAGING_SERVICE_SID (preferred) OR TWILIO_FROM_NUMBER (a
+#   single E.164 number) -- powers "Group Texting" (routes/groupBroadcasts.ts,
+#   lib/sms.ts). None of this is wired to a cron trigger -- it's an
+#   admin-triggered send, not scheduled. Sending real volume to US numbers
+#   also requires Twilio's A2P 10DLC registration (brand + campaign), a
+#   one-time step done in the Twilio console, outside what these secrets
+#   alone cover.
 #   Bootstrap-only (set for the first deploy, then remove):
 #   INITIAL_ADMIN_EMAIL or INITIAL_ADMIN_EXTERNAL_USER_ID
 #
