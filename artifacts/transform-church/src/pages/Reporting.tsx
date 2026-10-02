@@ -69,8 +69,11 @@ type WeeklyPulseSources = {
   checkinsEvents: WeeklyPulseSourceOption[];
   groups: WeeklyPulseSourceOption[];
   forms: WeeklyPulseSourceOption[];
+  groupsError?: string;
+  formsError?: string;
 };
 type WeeklyPulseFormField = { id: string; label: string };
+type WeeklyPulseFormEntry = { formId: string; fieldId: string | null };
 type WeeklyPulseConfig = {
   id: number;
   name: string;
@@ -78,8 +81,7 @@ type WeeklyPulseConfig = {
   recipientEmails: string[];
   checkinsEventIds: string[];
   groupIds: string[];
-  pcoFormId: string | null;
-  pcoFormFieldId: string | null;
+  pcoForms: WeeklyPulseFormEntry[];
   lastRunAt: string | null;
   lastRunStatus: "success" | "error" | null;
   lastRunError: string | null;
@@ -188,15 +190,18 @@ export default function Reporting() {
   const [weeklyPulseSources, setWeeklyPulseSources] = useState<WeeklyPulseSources | null>(null);
   const [weeklyPulseSourcesLoading, setWeeklyPulseSourcesLoading] = useState(false);
   const [weeklyPulseSourcesError, setWeeklyPulseSourcesError] = useState("");
-  const [weeklyPulseFormFields, setWeeklyPulseFormFields] = useState<WeeklyPulseFormField[]>([]);
+  // Keyed by form id so each row in the "multiple forms" picker below can
+  // show its own field dropdown without refetching one already looked up.
+  const [weeklyPulseFormFieldsByForm, setWeeklyPulseFormFieldsByForm] = useState<Record<string, WeeklyPulseFormField[]>>({});
   const [editingPulseId, setEditingPulseId] = useState<number | "new" | null>(null);
   const [pulseDraftName, setPulseDraftName] = useState("Weekly Attendance Pulse");
   const [pulseDraftEnabled, setPulseDraftEnabled] = useState(true);
   const [pulseDraftRecipients, setPulseDraftRecipients] = useState("");
   const [pulseDraftCheckinsEventIds, setPulseDraftCheckinsEventIds] = useState<string[]>([]);
   const [pulseDraftGroupIds, setPulseDraftGroupIds] = useState<string[]>([]);
-  const [pulseDraftFormId, setPulseDraftFormId] = useState("");
-  const [pulseDraftFormFieldId, setPulseDraftFormFieldId] = useState("");
+  // { formId: "", fieldId: "" } entries are in-progress rows (form not yet
+  // picked); savePulseConfig filters those out before submitting.
+  const [pulseDraftForms, setPulseDraftForms] = useState<{ formId: string; fieldId: string }[]>([]);
   const [savingPulse, setSavingPulse] = useState(false);
   const [runningPulseId, setRunningPulseId] = useState<number | null>(null);
 
@@ -282,15 +287,12 @@ export default function Reporting() {
   };
 
   const loadWeeklyPulseFormFields = async (formId: string) => {
-    if (!formId) {
-      setWeeklyPulseFormFields([]);
-      return;
-    }
+    if (!formId || weeklyPulseFormFieldsByForm[formId]) return;
     try {
       const response = await api(`/api/weekly-pulse/forms/${encodeURIComponent(formId)}/fields`);
-      setWeeklyPulseFormFields(await response.json() as WeeklyPulseFormField[]);
+      const fields = await response.json() as WeeklyPulseFormField[];
+      setWeeklyPulseFormFieldsByForm((current) => ({ ...current, [formId]: fields }));
     } catch (error) {
-      setWeeklyPulseFormFields([]);
       toast({ title: "Could not load form fields", description: error instanceof Error ? error.message : "Request failed.", variant: "destructive" });
     }
   };
@@ -314,11 +316,6 @@ export default function Reporting() {
       loadWeeklyPulseSources();
     }
   }, [isAdmin]);
-
-  useEffect(() => {
-    if (editingPulseId === null) return;
-    loadWeeklyPulseFormFields(pulseDraftFormId);
-  }, [pulseDraftFormId, editingPulseId]);
 
   const { uploadFile, isUploading } = useUpload({
     basePath: `${BASE}/api/storage`,
@@ -494,8 +491,7 @@ export default function Reporting() {
     setPulseDraftRecipients("");
     setPulseDraftCheckinsEventIds([]);
     setPulseDraftGroupIds([]);
-    setPulseDraftFormId("");
-    setPulseDraftFormFieldId("");
+    setPulseDraftForms([]);
   };
 
   const startNewPulseConfig = () => {
@@ -513,8 +509,8 @@ export default function Reporting() {
     setPulseDraftRecipients(config.recipientEmails.join(", "));
     setPulseDraftCheckinsEventIds(config.checkinsEventIds);
     setPulseDraftGroupIds(config.groupIds);
-    setPulseDraftFormId(config.pcoFormId ?? "");
-    setPulseDraftFormFieldId(config.pcoFormFieldId ?? "");
+    setPulseDraftForms(config.pcoForms.map((form) => ({ formId: form.formId, fieldId: form.fieldId ?? "" })));
+    config.pcoForms.forEach((form) => loadWeeklyPulseFormFields(form.formId));
     setEditingPulseId(config.id);
   };
 
@@ -530,11 +526,31 @@ export default function Reporting() {
     );
   };
 
+  const addPulseFormRow = () => {
+    setPulseDraftForms((current) => [...current, { formId: "", fieldId: "" }]);
+  };
+
+  const removePulseFormRow = (index: number) => {
+    setPulseDraftForms((current) => current.filter((_, i) => i !== index));
+  };
+
+  const updatePulseFormRowFormId = (index: number, formId: string) => {
+    setPulseDraftForms((current) => current.map((row, i) => (i === index ? { formId, fieldId: "" } : row)));
+    loadWeeklyPulseFormFields(formId);
+  };
+
+  const updatePulseFormRowFieldId = (index: number, fieldId: string) => {
+    setPulseDraftForms((current) => current.map((row, i) => (i === index ? { ...row, fieldId } : row)));
+  };
+
   const savePulseConfig = async () => {
     const recipientEmails = pulseDraftRecipients
       .split(/[,\n]/)
       .map((email) => email.trim())
       .filter(Boolean);
+    const pcoForms = pulseDraftForms
+      .filter((row) => row.formId)
+      .map((row) => ({ formId: row.formId, fieldId: row.fieldId || null }));
     setSavingPulse(true);
     try {
       await api("/api/weekly-pulse/config", {
@@ -546,8 +562,7 @@ export default function Reporting() {
           recipientEmails,
           checkinsEventIds: pulseDraftCheckinsEventIds,
           groupIds: pulseDraftGroupIds,
-          pcoFormId: pulseDraftFormId || null,
-          pcoFormFieldId: pulseDraftFormId ? (pulseDraftFormFieldId || null) : null,
+          pcoForms,
         }),
       });
       await loadWeeklyPulseConfigs();
@@ -1082,7 +1097,7 @@ export default function Reporting() {
                         {config.checkinsEventIds.length} Check-Ins event{config.checkinsEventIds.length === 1 ? "" : "s"}
                         {" · "}
                         {config.groupIds.length} group{config.groupIds.length === 1 ? "" : "s"}
-                        {config.pcoFormId ? " · 1 form" : ""}
+                        {config.pcoForms.length ? ` · ${config.pcoForms.length} form${config.pcoForms.length === 1 ? "" : "s"}` : ""}
                       </p>
                       <p className="mt-1 text-xs text-muted-foreground">
                         {config.lastRunAt
@@ -1124,14 +1139,17 @@ export default function Reporting() {
                       onToggleCheckinsEvent={togglePulseCheckinsEvent}
                       groupIds={pulseDraftGroupIds}
                       onToggleGroup={togglePulseGroup}
-                      formId={pulseDraftFormId}
-                      setFormId={setPulseDraftFormId}
-                      formFieldId={pulseDraftFormFieldId}
-                      setFormFieldId={setPulseDraftFormFieldId}
-                      formFields={weeklyPulseFormFields}
+                      forms={pulseDraftForms}
+                      onAddForm={addPulseFormRow}
+                      onRemoveForm={removePulseFormRow}
+                      onFormIdChange={updatePulseFormRowFormId}
+                      onFieldIdChange={updatePulseFormRowFieldId}
+                      formFieldsByForm={weeklyPulseFormFieldsByForm}
                       saving={savingPulse}
                       onSave={savePulseConfig}
                       onCancel={() => setEditingPulseId(null)}
+                      reconnectUrl={reconnectUrl}
+                      onRetrySources={loadWeeklyPulseSources}
                     />
                   )}
                 </div>
@@ -1154,14 +1172,17 @@ export default function Reporting() {
                   onToggleCheckinsEvent={togglePulseCheckinsEvent}
                   groupIds={pulseDraftGroupIds}
                   onToggleGroup={togglePulseGroup}
-                  formId={pulseDraftFormId}
-                  setFormId={setPulseDraftFormId}
-                  formFieldId={pulseDraftFormFieldId}
-                  setFormFieldId={setPulseDraftFormFieldId}
-                  formFields={weeklyPulseFormFields}
+                  forms={pulseDraftForms}
+                  onAddForm={addPulseFormRow}
+                  onRemoveForm={removePulseFormRow}
+                  onFormIdChange={updatePulseFormRowFormId}
+                  onFieldIdChange={updatePulseFormRowFieldId}
+                  formFieldsByForm={weeklyPulseFormFieldsByForm}
                   saving={savingPulse}
                   onSave={savePulseConfig}
                   onCancel={() => setEditingPulseId(null)}
+                  reconnectUrl={reconnectUrl}
+                  onRetrySources={loadWeeklyPulseSources}
                 />
               </div>
             ) : (
@@ -1190,14 +1211,17 @@ function PulseConfigForm({
   onToggleCheckinsEvent,
   groupIds,
   onToggleGroup,
-  formId,
-  setFormId,
-  formFieldId,
-  setFormFieldId,
-  formFields,
+  forms,
+  onAddForm,
+  onRemoveForm,
+  onFormIdChange,
+  onFieldIdChange,
+  formFieldsByForm,
   saving,
   onSave,
   onCancel,
+  reconnectUrl,
+  onRetrySources,
 }: {
   idPrefix: string;
   name: string;
@@ -1212,16 +1236,19 @@ function PulseConfigForm({
   onToggleCheckinsEvent: (id: string, checked: boolean) => void;
   groupIds: string[];
   onToggleGroup: (id: string, checked: boolean) => void;
-  formId: string;
-  setFormId: (value: string) => void;
-  formFieldId: string;
-  setFormFieldId: (value: string) => void;
-  formFields: WeeklyPulseFormField[];
+  forms: { formId: string; fieldId: string }[];
+  onAddForm: () => void;
+  onRemoveForm: (index: number) => void;
+  onFormIdChange: (index: number, formId: string) => void;
+  onFieldIdChange: (index: number, fieldId: string) => void;
+  formFieldsByForm: Record<string, WeeklyPulseFormField[]>;
   saving: boolean;
   onSave: () => void;
   onCancel: () => void;
+  reconnectUrl: string;
+  onRetrySources: () => void;
 }) {
-  const hasAnySource = checkinsEventIds.length > 0 || groupIds.length > 0 || Boolean(formId);
+  const hasAnySource = checkinsEventIds.length > 0 || groupIds.length > 0 || forms.some((row) => row.formId);
   const hasRecipients = recipients.split(/[,\n]/).map((email) => email.trim()).some(Boolean);
   return (
     <div className="mt-4 space-y-4 rounded-lg border bg-muted/20 p-4">
@@ -1271,7 +1298,17 @@ function PulseConfigForm({
 
           <div className="space-y-2">
             <Label>Groups</Label>
-            {!sources.groups.length && <p className="text-xs text-muted-foreground">No Planning Center groups found.</p>}
+            {sources.groupsError ? (
+              <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-xs text-amber-950">
+                <p>{sources.groupsError}</p>
+                <div className="mt-2 flex gap-2">
+                  <Button type="button" size="sm" onClick={() => window.location.assign(reconnectUrl)}>Reconnect Church Center</Button>
+                  <Button type="button" size="sm" variant="outline" onClick={onRetrySources}>Retry</Button>
+                </div>
+              </div>
+            ) : (
+              !sources.groups.length && <p className="text-xs text-muted-foreground">No Planning Center groups found.</p>
+            )}
             <div className="max-h-48 space-y-1 overflow-y-auto rounded-md border p-2">
               {sources.groups.map((group) => (
                 <label key={group.id} className="flex items-center gap-2 rounded px-2 py-1 text-sm hover:bg-background">
@@ -1287,40 +1324,53 @@ function PulseConfigForm({
             </div>
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className="space-y-2">
-              <Label htmlFor={`${idPrefix}-form`}>Planning Center form (optional)</Label>
-              <select
-                id={`${idPrefix}-form`}
-                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                value={formId}
-                onChange={(event) => {
-                  setFormId(event.target.value);
-                  setFormFieldId("");
-                }}
-              >
-                <option value="">No form</option>
-                {sources.forms.map((form) => (
-                  <option key={form.id} value={form.id}>{form.name}</option>
-                ))}
-              </select>
-            </div>
-            {formId && (
-              <div className="space-y-2">
-                <Label htmlFor={`${idPrefix}-form-field`}>Breakdown field (optional)</Label>
-                <select
-                  id={`${idPrefix}-form-field`}
-                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                  value={formFieldId}
-                  onChange={(event) => setFormFieldId(event.target.value)}
-                >
-                  <option value="">Just a total count</option>
-                  {formFields.map((field) => (
-                    <option key={field.id} value={field.id}>{field.label}</option>
-                  ))}
-                </select>
-              </div>
+          <div className="space-y-3">
+            <Label>Planning Center forms (optional)</Label>
+            {sources.formsError && <p className="text-xs text-amber-800">{sources.formsError}</p>}
+            {forms.length === 0 && (
+              <p className="text-xs text-muted-foreground">No forms added. A form contributes a submission count, optionally broken down by one field.</p>
             )}
+            <div className="space-y-3">
+              {forms.map((row, index) => (
+                <div key={index} className="grid items-end gap-3 rounded-md border p-3 sm:grid-cols-[1fr_1fr_auto]">
+                  <div className="space-y-2">
+                    <Label htmlFor={`${idPrefix}-form-${index}`}>Form</Label>
+                    <select
+                      id={`${idPrefix}-form-${index}`}
+                      className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                      value={row.formId}
+                      onChange={(event) => onFormIdChange(index, event.target.value)}
+                    >
+                      <option value="">Select a form</option>
+                      {sources.forms.map((form) => (
+                        <option key={form.id} value={form.id}>{form.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor={`${idPrefix}-form-field-${index}`}>Breakdown field (optional)</Label>
+                    <select
+                      id={`${idPrefix}-form-field-${index}`}
+                      className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                      value={row.fieldId}
+                      onChange={(event) => onFieldIdChange(index, event.target.value)}
+                      disabled={!row.formId}
+                    >
+                      <option value="">Just a total count</option>
+                      {(formFieldsByForm[row.formId] ?? []).map((field) => (
+                        <option key={field.id} value={field.id}>{field.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <Button type="button" size="icon" variant="ghost" onClick={() => onRemoveForm(index)} aria-label="Remove form">
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+            <Button type="button" size="sm" variant="outline" onClick={onAddForm}>
+              <Plus className="mr-2 h-4 w-4" /> Add form
+            </Button>
           </div>
         </>
       )}

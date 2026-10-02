@@ -2,8 +2,8 @@
 // fired every Monday morning by the Worker's Cron Trigger (see
 // src/worker.ts's scheduled() handler, which POSTs to /run-scheduled below).
 // Pulls a simple attendance count from one or more Check-Ins events and
-// Groups, plus an optional count (and optional single-field breakdown) from a
-// Planning Center Form -- all admin-configurable via weeklyPulseConfigTable
+// Groups, plus a count (and optional single-field breakdown) from any number
+// of Planning Center Forms -- all admin-configurable via weeklyPulseConfigTable
 // rather than hardcoded, per the "a specific list I'll choose" requirement.
 //
 // Reuses the proven Check-Ins/PCO-fetch helpers already exported from
@@ -53,6 +53,28 @@ function parseJsonArray(raw: string | null | undefined): string[] {
   try {
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed) ? parsed.filter((value): value is string => typeof value === "string" && value.length > 0) : [];
+  } catch {
+    return [];
+  }
+}
+
+type WeeklyPulseFormEntry = { formId: string; fieldId: string | null };
+
+// A config can pull from any number of forms (widened 2026-10-02 from a
+// single optional form) -- stored the same JSON-text-column way as the other
+// variable-length lists on this table.
+function parsePcoForms(raw: string | null | undefined): WeeklyPulseFormEntry[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((value): value is Record<string, unknown> => typeof value === "object" && value !== null)
+      .map((value) => ({
+        formId: text(value.formId),
+        fieldId: text(value.fieldId) || null,
+      }))
+      .filter((entry) => entry.formId.length > 0);
   } catch {
     return [];
   }
@@ -262,6 +284,7 @@ type FormSummary = {
   totalSubmissions: number;
   fieldLabel?: string;
   fieldBreakdown?: Record<string, number> | null;
+  warning?: string;
 };
 
 function buildEmailHtml(
@@ -269,7 +292,7 @@ function buildEmailHtml(
   weekRange: { start: string; end: string },
   checkins: NamedCount[],
   groups: NamedCount[],
-  form: FormSummary | null,
+  forms: FormSummary[],
 ): string {
   const fmt = (iso: string) =>
     new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
@@ -296,7 +319,7 @@ function buildEmailHtml(
         .map((item) => row(item.name, item.count, item.warning))
         .join("")}</table>`);
   }
-  if (form) {
+  for (const form of forms) {
     const breakdownRows = form.fieldBreakdown
       ? Object.entries(form.fieldBreakdown)
           .sort((a, b) => b[1] - a[1])
@@ -306,7 +329,7 @@ function buildEmailHtml(
     sections.push(`
       <h3 style="margin:20px 0 4px;font-size:14px;color:#374151;">${escapeHtml(form.name)}</h3>
       <table style="width:100%;border-collapse:collapse;font-size:14px;">
-        ${row("Total submissions this week", form.totalSubmissions)}
+        ${row("Total submissions this week", form.totalSubmissions, form.warning)}
         ${form.fieldLabel ? row(`Breakdown by "${form.fieldLabel}"`, "") : ""}
         ${breakdownRows}
       </table>`);
@@ -360,33 +383,29 @@ async function runWeeklyPulse(config: WeeklyPulseConfig): Promise<{ sent: boolea
     }
   }
 
-  let formResult: FormSummary | null = null;
-  if (config.pcoFormId) {
+  const formResults: FormSummary[] = [];
+  for (const { formId, fieldId } of parsePcoForms(config.pcoForms)) {
     try {
-      const formPage = await planningCenterRequest(`${PEOPLE_BASE}/forms/${encodeURIComponent(config.pcoFormId)}`, accessToken);
-      const name = firstValue(formPage.data?.attributes ?? {}, "name", "title") || `Form ${config.pcoFormId}`;
-      const stats = await fetchFormWeeklyStats(config.pcoFormId, config.pcoFormFieldId, accessToken, weekRange.start, weekRange.end);
+      const formPage = await planningCenterRequest(`${PEOPLE_BASE}/forms/${encodeURIComponent(formId)}`, accessToken);
+      const name = firstValue(formPage.data?.attributes ?? {}, "name", "title") || `Form ${formId}`;
+      const stats = await fetchFormWeeklyStats(formId, fieldId, accessToken, weekRange.start, weekRange.end);
       let fieldLabel: string | undefined;
-      if (config.pcoFormFieldId) {
-        const fields = await fetchFormFields(config.pcoFormId, accessToken);
-        fieldLabel = fields.find((field) => field.id === config.pcoFormFieldId)?.label;
+      if (fieldId) {
+        const fields = await fetchFormFields(formId, accessToken);
+        fieldLabel = fields.find((field) => field.id === fieldId)?.label;
       }
-      formResult = { name, totalSubmissions: stats.totalSubmissions, fieldLabel, fieldBreakdown: stats.fieldBreakdown };
+      formResults.push({ name, totalSubmissions: stats.totalSubmissions, fieldLabel, fieldBreakdown: stats.fieldBreakdown });
     } catch (error) {
-      formResult = {
-        name: `Form ${config.pcoFormId}`,
+      formResults.push({
+        name: `Form ${formId}`,
         totalSubmissions: 0,
         fieldBreakdown: null,
-      };
-      checkinsResults.push({
-        name: "Form lookup",
-        count: 0,
         warning: error instanceof Error ? error.message : String(error),
       });
     }
   }
 
-  const html = buildEmailHtml(config, weekRange, checkinsResults, groupsResults, formResult);
+  const html = buildEmailHtml(config, weekRange, checkinsResults, groupsResults, formResults);
   const subjectDate = new Date(weekRange.end).toLocaleDateString("en-US", { month: "short", day: "numeric" });
   return sendEmail({
     to: recipientEmails,
@@ -408,14 +427,24 @@ async function recordRunResult(id: number, result: { sent: boolean; error?: stri
 router.get("/sources", requireAdmin, async (req, res) => {
   try {
     const accessToken = await getValidPlanningCenterAccessToken(res.locals.dbUser.id);
+    let groupsError: string | undefined;
+    let formsError: string | undefined;
     const [eventsCollection, groupsCollection, formsCollection] = await Promise.all([
       fetchCollection(`${CHECK_INS_BASE}/events?filter=not_archived&order=name&per_page=100`, accessToken),
       fetchCollection(`${GROUPS_BASE}/groups?per_page=100`, accessToken).catch((error) => {
         req.log.warn({ err: error }, "Failed to load Planning Center groups for weekly pulse picker");
+        // Surfaced to the admin UI below -- this used to be swallowed
+        // entirely (just an empty list with no visible reason), which made
+        // the 2026-10-02 missing-OAuth-scope bug look like groups simply
+        // "didn't populate" with nothing to go on.
+        groupsError = (error as Error & { status?: number }).status === 403
+          ? "Reconnect Church Center to grant Groups access (the current connection predates it)."
+          : error instanceof Error ? error.message : String(error);
         return { data: [] as JsonApiResource[], included: [] as JsonApiResource[] };
       }),
       fetchCollection(`${PEOPLE_BASE}/forms?per_page=100`, accessToken).catch((error) => {
         req.log.warn({ err: error }, "Failed to load Planning Center forms for weekly pulse picker");
+        formsError = error instanceof Error ? error.message : String(error);
         return { data: [] as JsonApiResource[], included: [] as JsonApiResource[] };
       }),
     ]);
@@ -432,6 +461,8 @@ router.get("/sources", requireAdmin, async (req, res) => {
         id: form.id,
         name: firstValue(form.attributes ?? {}, "name", "title") || `Form ${form.id}`,
       })),
+      groupsError,
+      formsError,
     });
   } catch (error) {
     sendError(req, res, error, "Failed to load Planning Center sources");
@@ -457,6 +488,7 @@ router.get("/config", requireAdmin, async (_req, res) => {
     recipientEmails: parseJsonArray(row.recipientEmails),
     checkinsEventIds: parseJsonArray(row.checkinsEventIds),
     groupIds: parseJsonArray(row.groupIds),
+    pcoForms: parsePcoForms(row.pcoForms),
   })));
 });
 
@@ -477,14 +509,18 @@ router.post("/config", requireAdmin, async (req, res) => {
     const groupIds = Array.isArray(req.body?.groupIds)
       ? req.body.groupIds.filter((value: unknown): value is string => typeof value === "string" && value.length > 0)
       : [];
-    const pcoFormId = text(req.body?.pcoFormId) || null;
-    const pcoFormFieldId = pcoFormId ? (text(req.body?.pcoFormFieldId) || null) : null;
+    const pcoForms: WeeklyPulseFormEntry[] = Array.isArray(req.body?.pcoForms)
+      ? req.body.pcoForms
+          .filter((value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null)
+          .map((value: Record<string, unknown>) => ({ formId: text(value.formId), fieldId: text(value.fieldId) || null }))
+          .filter((entry: WeeklyPulseFormEntry) => entry.formId.length > 0)
+      : [];
 
     if (!recipientEmails.length) {
       res.status(400).json({ error: "Add at least one valid recipient email." });
       return;
     }
-    if (!checkinsEventIds.length && !groupIds.length && !pcoFormId) {
+    if (!checkinsEventIds.length && !groupIds.length && !pcoForms.length) {
       res.status(400).json({ error: "Select at least one Check-Ins event, group, or form." });
       return;
     }
@@ -495,8 +531,7 @@ router.post("/config", requireAdmin, async (req, res) => {
       recipientEmails: JSON.stringify(recipientEmails),
       checkinsEventIds: JSON.stringify(checkinsEventIds),
       groupIds: JSON.stringify(groupIds),
-      pcoFormId,
-      pcoFormFieldId,
+      pcoForms: JSON.stringify(pcoForms),
       updatedAt: new Date(),
     };
 
@@ -508,7 +543,7 @@ router.post("/config", requireAdmin, async (req, res) => {
       res.status(404).json({ error: "Weekly pulse config not found." });
       return;
     }
-    res.json({ ...rows[0], recipientEmails, checkinsEventIds, groupIds });
+    res.json({ ...rows[0], recipientEmails, checkinsEventIds, groupIds, pcoForms });
   } catch (error) {
     sendError(req, res, error, "Failed to save weekly pulse config");
   }

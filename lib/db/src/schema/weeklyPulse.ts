@@ -10,10 +10,10 @@ import { usersTable } from "./users";
 // single automated job per row -- no "prepare" step, no cleanup script, no
 // chart rendering.
 //
-// checkinsEventIds / groupIds / recipientEmails are stored as JSON-encoded
-// text arrays, matching reportTemplatesTable.pullFields' existing convention
-// for a variable-length list in a single column rather than a join table --
-// consistent with how that neighboring table already does it.
+// checkinsEventIds / groupIds / recipientEmails / pcoForms are stored as
+// JSON-encoded text, matching reportTemplatesTable.pullFields' existing
+// convention for a variable-length list in a single column rather than a
+// join table -- consistent with how that neighboring table already does it.
 export const weeklyPulseConfigTable = pgTable("weekly_pulse_config", {
   id: serial("id").primaryKey(),
   name: text("name").notNull().default("Weekly Attendance Pulse"),
@@ -21,11 +21,12 @@ export const weeklyPulseConfigTable = pgTable("weekly_pulse_config", {
   recipientEmails: text("recipient_emails").notNull(),
   checkinsEventIds: text("checkins_event_ids").notNull().default("[]"),
   groupIds: text("group_ids").notNull().default("[]"),
-  // Both nullable: the form is optional (a config can be check-ins/groups
-  // only), and the field is optional even when a form is set (falls back to
-  // a plain submission count for the week -- see routes/weeklyPulse.ts).
-  pcoFormId: text("pco_form_id"),
-  pcoFormFieldId: text("pco_form_field_id"),
+  // JSON array of { formId: string, fieldId: string | null } -- a config can
+  // pull from any number of forms (2026-10-02: originally a single optional
+  // pcoFormId/pcoFormFieldId pair, widened to a list per request). fieldId is
+  // per-entry and optional even when a form is set (falls back to a plain
+  // submission count for that form -- see routes/weeklyPulse.ts).
+  pcoForms: text("pco_forms").notNull().default("[]"),
   createdByUserId: text("created_by_user_id").notNull().references(() => usersTable.id),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),

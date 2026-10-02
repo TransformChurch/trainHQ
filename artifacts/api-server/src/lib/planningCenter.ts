@@ -257,7 +257,13 @@ export async function createAuthorizationRequest(returnToValue: unknown): Promis
   url.searchParams.set("client_id", settings.clientId);
   url.searchParams.set("redirect_uri", settings.redirectUri);
   url.searchParams.set("response_type", "code");
-  url.searchParams.set("scope", "people check_ins");
+  // "groups" added 2026-10-02 for the Weekly Pulse feature's Groups
+  // attendance pull (routes/weeklyPulse.ts). PCO scopes which product APIs a
+  // token can call at ISSUANCE time -- adding a scope here does nothing for
+  // tokens already stored in planning_center_tokens; every already-connected
+  // user (admins included) needs to reconnect via "Reconnect Church Center"
+  // before Groups calls will stop 401/403ing for them.
+  url.searchParams.set("scope", "people check_ins groups");
   url.searchParams.set("state", state);
   url.searchParams.set("code_challenge", codeChallenge);
   url.searchParams.set("code_challenge_method", "S256");
