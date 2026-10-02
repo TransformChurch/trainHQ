@@ -17,3 +17,4 @@ export * from "./facilities";
 export * from "./reporting";
 export * from "./wiki";
 export * from "./trackProgress";
+export * from "./weeklyPulse";

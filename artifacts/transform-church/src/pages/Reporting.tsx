@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useGetMe } from "@workspace/api-client-react";
 import { useUpload } from "@workspace/object-storage-web";
-import { BarChart3, Check, ChevronDown, ChevronUp, Download, Loader2, Plus, RefreshCw, Settings2, Trash2, Upload } from "lucide-react";
+import { BarChart3, Check, ChevronDown, ChevronUp, Download, Loader2, Mail, Plus, RefreshCw, Send, Settings2, Trash2, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 
 const BASE = import.meta.env.VITE_API_URL?.replace(/\/$/, "") ?? import.meta.env.BASE_URL.replace(/\/$/, "");
@@ -60,6 +62,27 @@ type ReportScriptStatus = {
   source: "bundled" | "uploaded";
   originalFileName: string | null;
   updatedAt: string | null;
+};
+
+type WeeklyPulseSourceOption = { id: string; name: string };
+type WeeklyPulseSources = {
+  checkinsEvents: WeeklyPulseSourceOption[];
+  groups: WeeklyPulseSourceOption[];
+  forms: WeeklyPulseSourceOption[];
+};
+type WeeklyPulseFormField = { id: string; label: string };
+type WeeklyPulseConfig = {
+  id: number;
+  name: string;
+  enabled: boolean;
+  recipientEmails: string[];
+  checkinsEventIds: string[];
+  groupIds: string[];
+  pcoFormId: string | null;
+  pcoFormFieldId: string | null;
+  lastRunAt: string | null;
+  lastRunStatus: "success" | "error" | null;
+  lastRunError: string | null;
 };
 
 const FIELD_OPTIONS: AvailableField[] = [
@@ -158,6 +181,25 @@ export default function Reporting() {
   const [scriptFiles, setScriptFiles] = useState<Partial<Record<ScriptSlot, File>>>({});
   const [savingScript, setSavingScript] = useState<ScriptSlot | null>(null);
 
+  // Weekly Pulse -- the automated Monday-morning attendance summary email
+  // (Check-Ins + Groups + an optional Planning Center Form), configured here
+  // and fired by the Worker's Cron Trigger (see routes/weeklyPulse.ts).
+  const [weeklyPulseConfigs, setWeeklyPulseConfigs] = useState<WeeklyPulseConfig[]>([]);
+  const [weeklyPulseSources, setWeeklyPulseSources] = useState<WeeklyPulseSources | null>(null);
+  const [weeklyPulseSourcesLoading, setWeeklyPulseSourcesLoading] = useState(false);
+  const [weeklyPulseSourcesError, setWeeklyPulseSourcesError] = useState("");
+  const [weeklyPulseFormFields, setWeeklyPulseFormFields] = useState<WeeklyPulseFormField[]>([]);
+  const [editingPulseId, setEditingPulseId] = useState<number | "new" | null>(null);
+  const [pulseDraftName, setPulseDraftName] = useState("Weekly Attendance Pulse");
+  const [pulseDraftEnabled, setPulseDraftEnabled] = useState(true);
+  const [pulseDraftRecipients, setPulseDraftRecipients] = useState("");
+  const [pulseDraftCheckinsEventIds, setPulseDraftCheckinsEventIds] = useState<string[]>([]);
+  const [pulseDraftGroupIds, setPulseDraftGroupIds] = useState<string[]>([]);
+  const [pulseDraftFormId, setPulseDraftFormId] = useState("");
+  const [pulseDraftFormFieldId, setPulseDraftFormFieldId] = useState("");
+  const [savingPulse, setSavingPulse] = useState(false);
+  const [runningPulseId, setRunningPulseId] = useState<number | null>(null);
+
   const fieldOptions = useMemo(
     () => [...FIELD_OPTIONS, ...planningCenterFields],
     [planningCenterFields],
@@ -221,6 +263,38 @@ export default function Reporting() {
     setReportScripts(await response.json() as ReportScriptStatus[]);
   };
 
+  const loadWeeklyPulseConfigs = async () => {
+    const response = await api("/api/weekly-pulse/config");
+    setWeeklyPulseConfigs(await response.json() as WeeklyPulseConfig[]);
+  };
+
+  const loadWeeklyPulseSources = async () => {
+    setWeeklyPulseSourcesLoading(true);
+    setWeeklyPulseSourcesError("");
+    try {
+      const response = await api("/api/weekly-pulse/sources");
+      setWeeklyPulseSources(await response.json() as WeeklyPulseSources);
+    } catch (error) {
+      setWeeklyPulseSourcesError(error instanceof Error ? error.message : "Could not load Planning Center sources.");
+    } finally {
+      setWeeklyPulseSourcesLoading(false);
+    }
+  };
+
+  const loadWeeklyPulseFormFields = async (formId: string) => {
+    if (!formId) {
+      setWeeklyPulseFormFields([]);
+      return;
+    }
+    try {
+      const response = await api(`/api/weekly-pulse/forms/${encodeURIComponent(formId)}/fields`);
+      setWeeklyPulseFormFields(await response.json() as WeeklyPulseFormField[]);
+    } catch (error) {
+      setWeeklyPulseFormFields([]);
+      toast({ title: "Could not load form fields", description: error instanceof Error ? error.message : "Request failed.", variant: "destructive" });
+    }
+  };
+
   useEffect(() => {
     loadEvents();
     loadTemplates().catch((error) => {
@@ -234,8 +308,17 @@ export default function Reporting() {
       loadReportScripts().catch((error) => {
         toast({ title: "Could not load report scripts", description: error.message, variant: "destructive" });
       });
+      loadWeeklyPulseConfigs().catch((error) => {
+        toast({ title: "Could not load Weekly Pulse configs", description: error.message, variant: "destructive" });
+      });
+      loadWeeklyPulseSources();
     }
   }, [isAdmin]);
+
+  useEffect(() => {
+    if (editingPulseId === null) return;
+    loadWeeklyPulseFormFields(pulseDraftFormId);
+  }, [pulseDraftFormId, editingPulseId]);
 
   const { uploadFile, isUploading } = useUpload({
     basePath: `${BASE}/api/storage`,
@@ -402,6 +485,103 @@ export default function Reporting() {
       toast({ title: "Could not reset report script", description: error instanceof Error ? error.message : "Request failed.", variant: "destructive" });
     } finally {
       setSavingScript(null);
+    }
+  };
+
+  const resetPulseDraft = () => {
+    setPulseDraftName("Weekly Attendance Pulse");
+    setPulseDraftEnabled(true);
+    setPulseDraftRecipients("");
+    setPulseDraftCheckinsEventIds([]);
+    setPulseDraftGroupIds([]);
+    setPulseDraftFormId("");
+    setPulseDraftFormFieldId("");
+  };
+
+  const startNewPulseConfig = () => {
+    resetPulseDraft();
+    setEditingPulseId("new");
+  };
+
+  const editPulseConfig = (config: WeeklyPulseConfig) => {
+    if (editingPulseId === config.id) {
+      setEditingPulseId(null);
+      return;
+    }
+    setPulseDraftName(config.name);
+    setPulseDraftEnabled(config.enabled);
+    setPulseDraftRecipients(config.recipientEmails.join(", "));
+    setPulseDraftCheckinsEventIds(config.checkinsEventIds);
+    setPulseDraftGroupIds(config.groupIds);
+    setPulseDraftFormId(config.pcoFormId ?? "");
+    setPulseDraftFormFieldId(config.pcoFormFieldId ?? "");
+    setEditingPulseId(config.id);
+  };
+
+  const togglePulseCheckinsEvent = (id: string, checked: boolean) => {
+    setPulseDraftCheckinsEventIds((current) =>
+      checked ? [...current, id] : current.filter((value) => value !== id),
+    );
+  };
+
+  const togglePulseGroup = (id: string, checked: boolean) => {
+    setPulseDraftGroupIds((current) =>
+      checked ? [...current, id] : current.filter((value) => value !== id),
+    );
+  };
+
+  const savePulseConfig = async () => {
+    const recipientEmails = pulseDraftRecipients
+      .split(/[,\n]/)
+      .map((email) => email.trim())
+      .filter(Boolean);
+    setSavingPulse(true);
+    try {
+      await api("/api/weekly-pulse/config", {
+        method: "POST",
+        body: JSON.stringify({
+          id: typeof editingPulseId === "number" ? editingPulseId : undefined,
+          name: pulseDraftName.trim() || "Weekly Attendance Pulse",
+          enabled: pulseDraftEnabled,
+          recipientEmails,
+          checkinsEventIds: pulseDraftCheckinsEventIds,
+          groupIds: pulseDraftGroupIds,
+          pcoFormId: pulseDraftFormId || null,
+          pcoFormFieldId: pulseDraftFormId ? (pulseDraftFormFieldId || null) : null,
+        }),
+      });
+      await loadWeeklyPulseConfigs();
+      setEditingPulseId(null);
+      toast({ title: "Weekly Pulse saved" });
+    } catch (error) {
+      toast({ title: "Could not save Weekly Pulse", description: error instanceof Error ? error.message : "Request failed.", variant: "destructive" });
+    } finally {
+      setSavingPulse(false);
+    }
+  };
+
+  const deletePulseConfig = async (config: WeeklyPulseConfig) => {
+    if (!window.confirm(`Delete the "${config.name}" Weekly Pulse report?`)) return;
+    try {
+      await api(`/api/weekly-pulse/config/${config.id}`, { method: "DELETE" });
+      await loadWeeklyPulseConfigs();
+      toast({ title: "Weekly Pulse deleted" });
+    } catch (error) {
+      toast({ title: "Could not delete Weekly Pulse", description: error instanceof Error ? error.message : "Request failed.", variant: "destructive" });
+    }
+  };
+
+  const runPulseNow = async (config: WeeklyPulseConfig) => {
+    setRunningPulseId(config.id);
+    try {
+      await api(`/api/weekly-pulse/config/${config.id}/run-now`, { method: "POST" });
+      await loadWeeklyPulseConfigs();
+      toast({ title: "Test email sent", description: `${config.name} was sent to its recipients.` });
+    } catch (error) {
+      toast({ title: "Could not send test email", description: error instanceof Error ? error.message : "Request failed.", variant: "destructive" });
+      await loadWeeklyPulseConfigs();
+    } finally {
+      setRunningPulseId(null);
     }
   };
 
@@ -865,6 +1045,294 @@ export default function Reporting() {
             </div>
           </CardContent>
         </Card>
+      )}
+
+      {isAdmin && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2"><Mail className="h-5 w-5" /> Weekly Pulse</CardTitle>
+            <p className="text-sm text-muted-foreground">
+              An automated email, sent every Monday morning, with a simple numbers summary of attendance from the
+              Check-Ins events and Groups you pick below, plus an optional count from a Planning Center form.
+            </p>
+          </CardHeader>
+          <CardContent className="space-y-5">
+            {weeklyPulseSourcesError && (
+              <div className="flex items-center gap-2 text-sm text-destructive">
+                <span>{weeklyPulseSourcesError}</span>
+                <Button type="button" size="sm" variant="outline" onClick={loadWeeklyPulseSources}>Try again</Button>
+              </div>
+            )}
+
+            <div className="divide-y rounded-lg border">
+              {!weeklyPulseConfigs.length && (
+                <p className="p-4 text-sm text-muted-foreground">No Weekly Pulse reports have been set up yet.</p>
+              )}
+              {weeklyPulseConfigs.map((config) => (
+                <div key={config.id} className="p-3">
+                  <div className="flex items-center justify-between gap-4">
+                    <div>
+                      <p className="font-medium">
+                        {config.name}
+                        {!config.enabled && <span className="ml-2 text-xs text-muted-foreground">(disabled)</span>}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {config.recipientEmails.length} recipient{config.recipientEmails.length === 1 ? "" : "s"}
+                        {" · "}
+                        {config.checkinsEventIds.length} Check-Ins event{config.checkinsEventIds.length === 1 ? "" : "s"}
+                        {" · "}
+                        {config.groupIds.length} group{config.groupIds.length === 1 ? "" : "s"}
+                        {config.pcoFormId ? " · 1 form" : ""}
+                      </p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {config.lastRunAt
+                          ? `Last run ${new Date(config.lastRunAt).toLocaleString()} -- ${config.lastRunStatus === "success" ? "sent" : `failed${config.lastRunError ? `: ${config.lastRunError}` : ""}`}`
+                          : "Not run yet"}
+                      </p>
+                    </div>
+                    <div className="flex gap-1">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => runPulseNow(config)}
+                        disabled={runningPulseId !== null}
+                      >
+                        {runningPulseId === config.id ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
+                        Send test now
+                      </Button>
+                      <Button size="sm" variant="outline" onClick={() => editPulseConfig(config)}>
+                        <Settings2 className="mr-2 h-4 w-4" /> Edit
+                      </Button>
+                      <Button size="icon" variant="ghost" onClick={() => deletePulseConfig(config)} aria-label={`Delete ${config.name}`}>
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+
+                  {editingPulseId === config.id && (
+                    <PulseConfigForm
+                      idPrefix={`pulse-${config.id}`}
+                      name={pulseDraftName}
+                      setName={setPulseDraftName}
+                      enabled={pulseDraftEnabled}
+                      setEnabled={setPulseDraftEnabled}
+                      recipients={pulseDraftRecipients}
+                      setRecipients={setPulseDraftRecipients}
+                      sources={weeklyPulseSources}
+                      sourcesLoading={weeklyPulseSourcesLoading}
+                      checkinsEventIds={pulseDraftCheckinsEventIds}
+                      onToggleCheckinsEvent={togglePulseCheckinsEvent}
+                      groupIds={pulseDraftGroupIds}
+                      onToggleGroup={togglePulseGroup}
+                      formId={pulseDraftFormId}
+                      setFormId={setPulseDraftFormId}
+                      formFieldId={pulseDraftFormFieldId}
+                      setFormFieldId={setPulseDraftFormFieldId}
+                      formFields={weeklyPulseFormFields}
+                      saving={savingPulse}
+                      onSave={savePulseConfig}
+                      onCancel={() => setEditingPulseId(null)}
+                    />
+                  )}
+                </div>
+              ))}
+            </div>
+
+            {editingPulseId === "new" ? (
+              <div className="rounded-lg border bg-muted/20 p-4">
+                <PulseConfigForm
+                  idPrefix="pulse-new"
+                  name={pulseDraftName}
+                  setName={setPulseDraftName}
+                  enabled={pulseDraftEnabled}
+                  setEnabled={setPulseDraftEnabled}
+                  recipients={pulseDraftRecipients}
+                  setRecipients={setPulseDraftRecipients}
+                  sources={weeklyPulseSources}
+                  sourcesLoading={weeklyPulseSourcesLoading}
+                  checkinsEventIds={pulseDraftCheckinsEventIds}
+                  onToggleCheckinsEvent={togglePulseCheckinsEvent}
+                  groupIds={pulseDraftGroupIds}
+                  onToggleGroup={togglePulseGroup}
+                  formId={pulseDraftFormId}
+                  setFormId={setPulseDraftFormId}
+                  formFieldId={pulseDraftFormFieldId}
+                  setFormFieldId={setPulseDraftFormFieldId}
+                  formFields={weeklyPulseFormFields}
+                  saving={savingPulse}
+                  onSave={savePulseConfig}
+                  onCancel={() => setEditingPulseId(null)}
+                />
+              </div>
+            ) : (
+              <Button variant="outline" onClick={startNewPulseConfig}>
+                <Plus className="mr-2 h-4 w-4" /> Add Weekly Pulse report
+              </Button>
+            )}
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+function PulseConfigForm({
+  idPrefix,
+  name,
+  setName,
+  enabled,
+  setEnabled,
+  recipients,
+  setRecipients,
+  sources,
+  sourcesLoading,
+  checkinsEventIds,
+  onToggleCheckinsEvent,
+  groupIds,
+  onToggleGroup,
+  formId,
+  setFormId,
+  formFieldId,
+  setFormFieldId,
+  formFields,
+  saving,
+  onSave,
+  onCancel,
+}: {
+  idPrefix: string;
+  name: string;
+  setName: (value: string) => void;
+  enabled: boolean;
+  setEnabled: (value: boolean) => void;
+  recipients: string;
+  setRecipients: (value: string) => void;
+  sources: WeeklyPulseSources | null;
+  sourcesLoading: boolean;
+  checkinsEventIds: string[];
+  onToggleCheckinsEvent: (id: string, checked: boolean) => void;
+  groupIds: string[];
+  onToggleGroup: (id: string, checked: boolean) => void;
+  formId: string;
+  setFormId: (value: string) => void;
+  formFieldId: string;
+  setFormFieldId: (value: string) => void;
+  formFields: WeeklyPulseFormField[];
+  saving: boolean;
+  onSave: () => void;
+  onCancel: () => void;
+}) {
+  const hasAnySource = checkinsEventIds.length > 0 || groupIds.length > 0 || Boolean(formId);
+  const hasRecipients = recipients.split(/[,\n]/).map((email) => email.trim()).some(Boolean);
+  return (
+    <div className="mt-4 space-y-4 rounded-lg border bg-muted/20 p-4">
+      <div className="max-w-sm space-y-2">
+        <Label htmlFor={`${idPrefix}-name`}>Report name</Label>
+        <Input id={`${idPrefix}-name`} value={name} onChange={(event) => setName(event.target.value)} />
+      </div>
+
+      <div className="flex items-center gap-3">
+        <Switch id={`${idPrefix}-enabled`} checked={enabled} onCheckedChange={setEnabled} />
+        <Label htmlFor={`${idPrefix}-enabled`}>Send automatically every Monday morning</Label>
+      </div>
+
+      <div className="max-w-lg space-y-2">
+        <Label htmlFor={`${idPrefix}-recipients`}>Recipient emails</Label>
+        <Textarea
+          id={`${idPrefix}-recipients`}
+          value={recipients}
+          onChange={(event) => setRecipients(event.target.value)}
+          placeholder="pastor@transformchurch.app, admin@transformchurch.app"
+          rows={2}
+        />
+        <p className="text-xs text-muted-foreground">Separate multiple addresses with commas or new lines.</p>
+      </div>
+
+      {sourcesLoading && <p className="text-sm text-muted-foreground">Loading Planning Center events, groups, and forms…</p>}
+
+      {sources && (
+        <>
+          <div className="space-y-2">
+            <Label>Check-Ins events</Label>
+            {!sources.checkinsEvents.length && <p className="text-xs text-muted-foreground">No Check-Ins events found.</p>}
+            <div className="max-h-48 space-y-1 overflow-y-auto rounded-md border p-2">
+              {sources.checkinsEvents.map((event) => (
+                <label key={event.id} className="flex items-center gap-2 rounded px-2 py-1 text-sm hover:bg-background">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 rounded border-input"
+                    checked={checkinsEventIds.includes(event.id)}
+                    onChange={(e) => onToggleCheckinsEvent(event.id, e.target.checked)}
+                  />
+                  {event.name}
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label>Groups</Label>
+            {!sources.groups.length && <p className="text-xs text-muted-foreground">No Planning Center groups found.</p>}
+            <div className="max-h-48 space-y-1 overflow-y-auto rounded-md border p-2">
+              {sources.groups.map((group) => (
+                <label key={group.id} className="flex items-center gap-2 rounded px-2 py-1 text-sm hover:bg-background">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 rounded border-input"
+                    checked={groupIds.includes(group.id)}
+                    onChange={(e) => onToggleGroup(group.id, e.target.checked)}
+                  />
+                  {group.name}
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor={`${idPrefix}-form`}>Planning Center form (optional)</Label>
+              <select
+                id={`${idPrefix}-form`}
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                value={formId}
+                onChange={(event) => {
+                  setFormId(event.target.value);
+                  setFormFieldId("");
+                }}
+              >
+                <option value="">No form</option>
+                {sources.forms.map((form) => (
+                  <option key={form.id} value={form.id}>{form.name}</option>
+                ))}
+              </select>
+            </div>
+            {formId && (
+              <div className="space-y-2">
+                <Label htmlFor={`${idPrefix}-form-field`}>Breakdown field (optional)</Label>
+                <select
+                  id={`${idPrefix}-form-field`}
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  value={formFieldId}
+                  onChange={(event) => setFormFieldId(event.target.value)}
+                >
+                  <option value="">Just a total count</option>
+                  {formFields.map((field) => (
+                    <option key={field.id} value={field.id}>{field.label}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+          </div>
+        </>
+      )}
+
+      <div className="flex gap-2">
+        <Button onClick={onSave} disabled={saving || !hasRecipients || !hasAnySource}>
+          {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} Save
+        </Button>
+        <Button variant="ghost" onClick={onCancel}>Cancel</Button>
+      </div>
+      {!hasAnySource && (
+        <p className="text-xs text-muted-foreground">Select at least one Check-Ins event, group, or form.</p>
       )}
     </div>
   );

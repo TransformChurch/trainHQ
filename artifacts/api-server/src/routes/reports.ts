@@ -18,8 +18,10 @@ import { ObjectStorageService } from "../lib/objectStorage";
 
 const router: IRouter = Router();
 const storage = new ObjectStorageService();
-const CHECK_INS_BASE = "https://api.planningcenteronline.com/check-ins/v2";
-const PEOPLE_BASE = "https://api.planningcenteronline.com/people/v2";
+// Exported so routes/weeklyPulse.ts can reuse the same base URLs rather than
+// re-declaring them.
+export const CHECK_INS_BASE = "https://api.planningcenteronline.com/check-ins/v2";
+export const PEOPLE_BASE = "https://api.planningcenteronline.com/people/v2";
 const REPORT_TTL_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_SESSION_COUNT = 5;
 const MAX_SESSION_COUNT = 52;
@@ -104,14 +106,18 @@ type StandardFieldKey = typeof REPORT_FIELDS[number]["key"];
 type ReportFieldKey = StandardFieldKey | `custom:${string}`;
 type ReportFieldDefinition = { key: ReportFieldKey; label: string };
 
-type JsonApiResource = {
+// Exported so routes/weeklyPulse.ts (and anything else talking to a PCO
+// JSON:API endpoint) can reuse this instead of redeclaring an equivalent
+// shape.
+export type JsonApiResource = {
   id: string;
   type?: string;
   attributes?: Record<string, unknown>;
   relationships?: Record<string, { data?: { id?: string; type?: string } | null }>;
 };
 
-function text(value: unknown): string {
+// Exported for reuse by routes/weeklyPulse.ts.
+export function text(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
@@ -120,7 +126,8 @@ function csv(value: unknown): string {
   return /[",\r\n]/.test(raw) ? `"${raw.replace(/"/g, '""')}"` : raw;
 }
 
-function dateOnly(value: unknown): string {
+// Exported for reuse by routes/weeklyPulse.ts.
+export function dateOnly(value: unknown): string {
   const raw = text(value);
   const match = raw.match(/^(\d{4}-\d{2}-\d{2})/);
   return match?.[1] ?? "";
@@ -213,7 +220,11 @@ function selectCleanedColumns(cleaned: string, selectedFields: ReportFieldKey[],
   return [outputHeaders, ...outputRows].map((row) => row.map(csv).join(",")).join("\n");
 }
 
-async function planningCenterRequest(url: string, accessToken: string): Promise<any> {
+// Exported so routes/weeklyPulse.ts reuses this instead of a third copy of
+// the same retry/backoff-on-429 logic (see the 2026-10-01 comment on
+// PEOPLE_BATCH_SIZE/PEOPLE_BATCH_DELAY_MS above for the rate-limit numbers
+// this is paced against).
+export async function planningCenterRequest(url: string, accessToken: string): Promise<any> {
   const maxAttempts = 6;
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     const response = await fetch(url, {
@@ -251,7 +262,8 @@ async function planningCenterRequest(url: string, accessToken: string): Promise<
   throw new Error("Planning Center request retry limit was reached.");
 }
 
-async function fetchCollection(
+// Exported for the same reason as planningCenterRequest() above.
+export async function fetchCollection(
   initialUrl: string,
   accessToken: string,
 ): Promise<{ data: JsonApiResource[]; included: JsonApiResource[] }> {
@@ -270,7 +282,8 @@ async function fetchCollection(
   return { data, included };
 }
 
-function relationshipId(resource: JsonApiResource, name: string): string {
+// Exported for reuse by routes/weeklyPulse.ts.
+export function relationshipId(resource: JsonApiResource, name: string): string {
   return text(resource.relationships?.[name]?.data?.id);
 }
 
@@ -296,7 +309,13 @@ function normalizeGrade(value: unknown): string {
   return `${n}${suffix} Grade`;
 }
 
-function firstValue(attributes: Record<string, unknown>, ...names: string[]): string {
+// Exported for reuse by routes/weeklyPulse.ts -- same "try several plausible
+// attribute names" tolerance this codebase already leans on for PCO
+// resources whose exact attribute naming isn't nailed down from the outside
+// (see e.g. the custom person field_data handling below), reused here for
+// FormField/FormSubmissionValue, whose exact attribute names weren't fully
+// confirmed from Planning Center's public docs either.
+export function firstValue(attributes: Record<string, unknown>, ...names: string[]): string {
   for (const name of names) {
     const value = text(attributes[name]);
     if (value) return value;
@@ -304,14 +323,14 @@ function firstValue(attributes: Record<string, unknown>, ...names: string[]): st
   return "";
 }
 
-function reportText(value: unknown): string {
+export function reportText(value: unknown): string {
   if (typeof value === "boolean") return value ? "Yes" : "No";
   if (typeof value === "number" && Number.isFinite(value)) return String(value);
   if (Array.isArray(value)) return value.map(reportText).filter(Boolean).join(", ");
   return text(value);
 }
 
-function firstReportValue(attributes: Record<string, unknown>, ...names: string[]): string {
+export function firstReportValue(attributes: Record<string, unknown>, ...names: string[]): string {
   for (const name of names) {
     const value = reportText(attributes[name]);
     if (value) return value;

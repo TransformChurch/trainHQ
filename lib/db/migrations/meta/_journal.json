@@ -211,6 +211,13 @@
       "when": 1790829376812,
       "tag": "0029_fk_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1790880000000,
+      "tag": "0030_weekly_pulse",
+      "breakpoints": true
     }
   ]
 }

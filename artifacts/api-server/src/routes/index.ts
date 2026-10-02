@@ -18,6 +18,7 @@ import facilitiesRouter from "./facilities";
 import wikiRouter, { createWikiRouter } from "./wiki";
 import siteCopyRouter from "./siteCopy";
 import reportsRouter from "./reports";
+import weeklyPulseRouter from "./weeklyPulse";
 
 const router: IRouter = Router();
 
@@ -41,5 +42,6 @@ router.use("/wiki", wikiRouter);
 router.use("/tc-wiki", createWikiRouter("tc-wiki", "TC Wiki"));
 router.use(siteCopyRouter);
 router.use("/reports", reportsRouter);
+router.use("/weekly-pulse", weeklyPulseRouter);
 
 export default router;

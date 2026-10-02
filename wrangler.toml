@@ -9,7 +9,10 @@
 # or in the dashboard under Workers & Pages > this Worker > Settings >
 # Variables and Secrets):
 #   DATABASE_URL, AUTH_JWT_SECRET, SESSION_SECRET, STORAGE_SIGNING_SECRET,
-#   PCO_CLIENT_ID, PCO_CLIENT_SECRET, RESEND_API_KEY, GOOGLE_API_KEY
+#   PCO_CLIENT_ID, PCO_CLIENT_SECRET, RESEND_API_KEY, GOOGLE_API_KEY,
+#   WEEKLY_PULSE_RUN_SECRET (any long random string -- generate with e.g.
+#   `openssl rand -hex 32`; authenticates the Monday Cron Trigger's call to
+#   the container, see src/worker.ts's scheduled() and routes/weeklyPulse.ts)
 #   Bootstrap-only (set for the first deploy, then remove):
 #   INITIAL_ADMIN_EMAIL or INITIAL_ADMIN_EXTERNAL_USER_ID
 #
@@ -55,6 +58,16 @@ storage = "sqlite"
 [[r2_buckets]]
 binding = "STORAGE_BUCKET"
 bucket_name = "transform-church-storage"
+
+# Fires the Worker's scheduled() handler (src/worker.ts), which makes an
+# internal, secret-authenticated call into the container's
+# POST /api/weekly-pulse/run-scheduled -- the "Weekly Pulse" automated
+# attendance email. Cloudflare Cron Triggers run in UTC with no timezone
+# support, so this is pinned to a fixed UTC time rather than "local Monday
+# morning"; 11:00 UTC is 6-7am US Eastern depending on daylight saving.
+# Adjust here (and redeploy) if a different send time is wanted.
+[triggers]
+crons = ["0 11 * * 1"]
 
 [vars]
 NODE_ENV = "production"

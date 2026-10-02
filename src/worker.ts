@@ -44,6 +44,13 @@ export interface Env {
   // Bootstrap-only -- set until the first admin signs in, then unset.
   INITIAL_ADMIN_EMAIL?: string;
   INITIAL_ADMIN_EXTERNAL_USER_ID?: string;
+  // Shared secret between this Worker's scheduled() handler (below) and
+  // routes/weeklyPulse.ts's POST /api/weekly-pulse/run-scheduled -- see the
+  // comment on that route for why a secret is needed at all (the container
+  // has no way to otherwise tell a legitimate Cron-triggered call apart from
+  // an arbitrary public request to the same path). Set with
+  // `wrangler secret put WEEKLY_PULSE_RUN_SECRET`.
+  WEEKLY_PULSE_RUN_SECRET?: string;
 }
 
 // `cloudflare:workers`'s `env` export is typed against the ambient `Env`
@@ -99,6 +106,7 @@ export class TransformChurchContainer extends Container<Env> {
     // first administrator has signed in.
     INITIAL_ADMIN_EMAIL: env.INITIAL_ADMIN_EMAIL ?? "",
     INITIAL_ADMIN_EXTERNAL_USER_ID: env.INITIAL_ADMIN_EXTERNAL_USER_ID ?? "",
+    WEEKLY_PULSE_RUN_SECRET: env.WEEKLY_PULSE_RUN_SECRET ?? "",
   };
 
   // Bridges the container's plain-HTTP object-storage calls to the real R2
@@ -182,5 +190,27 @@ export default {
     // wrangler.toml and route with getRandom() instead if traffic grows
     // enough to want more than one container running concurrently.
     return getContainer(workerEnv.API_CONTAINER, "primary").fetch(request);
+  },
+
+  // Fires every Monday morning per [triggers] crons in wrangler.toml. The
+  // Container has no ingress of its own -- this is the only thing that can
+  // reach it on a schedule, so this just makes the same internal call a
+  // "send test now" click in the admin UI would make, authenticated with the
+  // shared secret instead of an admin's JWT (see routes/weeklyPulse.ts's
+  // POST /run-scheduled for why that's necessary and how it's checked).
+  async scheduled(_controller: ScheduledController, workerEnv: Env, ctx: ExecutionContext): Promise<void> {
+    ctx.waitUntil(
+      (async () => {
+        const request = new Request("https://internal/api/weekly-pulse/run-scheduled", {
+          method: "POST",
+          headers: { "x-internal-secret": workerEnv.WEEKLY_PULSE_RUN_SECRET ?? "" },
+        });
+        const response = await getContainer(workerEnv.API_CONTAINER, "primary").fetch(request);
+        if (!response.ok) {
+          const body = await response.text().catch(() => "");
+          console.error(`Weekly pulse scheduled run failed: ${response.status} ${body.slice(0, 500)}`);
+        }
+      })(),
+    );
   },
 };
