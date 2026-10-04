@@ -13,6 +13,11 @@
 #   WEEKLY_PULSE_RUN_SECRET (any long random string -- generate with e.g.
 #   `openssl rand -hex 32`; authenticates the Monday Cron Trigger's call to
 #   the container, see src/worker.ts's scheduled() and routes/weeklyPulse.ts)
+#   GOOGLE_SERVICE_ACCOUNT_KEY (a Google Cloud service account's JSON key,
+#   on one line -- share the Wiki's staff Drive folder with that service
+#   account's client_email) and WIKI_DRIVE_SYNC_RUN_SECRET (same pattern as
+#   WEEKLY_PULSE_RUN_SECRET, for the daily Wiki Drive sync Cron Trigger --
+#   see lib/googleServiceAccount.ts and routes/adminWikiDriveSync.ts)
 #   TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN (from the Twilio console) plus
 #   EITHER TWILIO_MESSAGING_SERVICE_SID (preferred) OR TWILIO_FROM_NUMBER (a
 #   single E.164 number) -- powers "Group Texting" (routes/groupBroadcasts.ts,
@@ -68,14 +73,21 @@ binding = "STORAGE_BUCKET"
 bucket_name = "transform-church-storage"
 
 # Fires the Worker's scheduled() handler (src/worker.ts), which makes an
-# internal, secret-authenticated call into the container's
-# POST /api/weekly-pulse/run-scheduled -- the "Weekly Pulse" automated
-# attendance email. Cloudflare Cron Triggers run in UTC with no timezone
-# support, so this is pinned to a fixed UTC time rather than "local Monday
-# morning"; 11:00 UTC is 6-7am US Eastern depending on daylight saving.
-# Adjust here (and redeploy) if a different send time is wanted.
+# internal, secret-authenticated call into the container for each entry
+# below ("0 11 * * 1" -> Weekly Pulse's POST /api/weekly-pulse/run-scheduled;
+# "0 6 * * *" -> the Wiki Drive sync's
+# POST /api/admin/wiki-drive-sync/run-scheduled, which also has
+# WIKI_DRIVE_SYNC_CRON in worker.ts hardcoded to match it -- keep both in
+# sync if this time ever changes). Cloudflare Cron Triggers run in UTC with
+# no timezone support, so both are pinned to fixed UTC times rather than
+# "local morning"; 11:00 UTC is 6-7am US Eastern depending on daylight
+# saving, and 6:00 UTC is 1-2am US Eastern (picked to match this feature's
+# previous default "sync around 6am UTC" behavior from its in-process
+# fallback scheduler -- see WIKI_DRIVE_SYNC_HOUR_UTC in
+# lib/wikiDriveSync.ts's startWikiDriveScheduler()). Adjust here (and
+# redeploy) if a different time is wanted for either.
 [triggers]
-crons = ["0 11 * * 1"]
+crons = ["0 11 * * 1", "0 6 * * *"]
 
 [vars]
 NODE_ENV = "production"

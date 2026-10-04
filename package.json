@@ -36,7 +36,6 @@
     "@cloudflare/containers": "^0.3.7"
   },
   "dependencies": {
-    "@replit/connectors-sdk": "^0.4.3",
     "pdf-parse": "^2.4.5"
   }
 }

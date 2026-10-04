@@ -41,6 +41,13 @@ export interface Env {
   RESEND_API_KEY?: string;
   EMAIL_FROM?: string;
   GOOGLE_API_KEY?: string;
+  // Google Cloud service-account JSON key (one line), used only by the Wiki
+  // Drive sync (lib/googleServiceAccount.ts / lib/wikiDriveSync.ts) to read
+  // the staff Drive folder -- unrelated to GOOGLE_API_KEY above, which is a
+  // separate, simpler Drive integration (Documents' "Import folder", for
+  // publicly-shared folders only). Share the Wiki's source folder with this
+  // service account's `client_email` for the sync to see it.
+  GOOGLE_SERVICE_ACCOUNT_KEY?: string;
   // Bootstrap-only -- set until the first admin signs in, then unset.
   INITIAL_ADMIN_EMAIL?: string;
   INITIAL_ADMIN_EXTERNAL_USER_ID?: string;
@@ -51,6 +58,10 @@ export interface Env {
   // an arbitrary public request to the same path). Set with
   // `wrangler secret put WEEKLY_PULSE_RUN_SECRET`.
   WEEKLY_PULSE_RUN_SECRET?: string;
+  // Same pattern as WEEKLY_PULSE_RUN_SECRET above, for the Wiki Drive sync's
+  // POST /api/admin/wiki-drive-sync/run-scheduled. Set with
+  // `wrangler secret put WIKI_DRIVE_SYNC_RUN_SECRET`.
+  WIKI_DRIVE_SYNC_RUN_SECRET?: string;
 }
 
 // `cloudflare:workers`'s `env` export is typed against the ambient `Env`
@@ -60,6 +71,10 @@ export interface Env {
 // rather than depend on it -- at runtime this is still the real bound env
 // object with every var/secret below present.
 const env = ambientEnv as unknown as Env;
+
+// Must match the Wiki Drive sync's entry in wrangler.toml's [triggers]
+// crons array exactly (string equality against ScheduledController.cron).
+const WIKI_DRIVE_SYNC_CRON = "0 6 * * *";
 
 export class TransformChurchContainer extends Container<Env> {
   defaultPort = 3000;
@@ -95,6 +110,7 @@ export class TransformChurchContainer extends Container<Env> {
     RESEND_API_KEY: env.RESEND_API_KEY ?? "",
     EMAIL_FROM: env.EMAIL_FROM ?? "",
     GOOGLE_API_KEY: env.GOOGLE_API_KEY ?? "",
+    GOOGLE_SERVICE_ACCOUNT_KEY: env.GOOGLE_SERVICE_ACCOUNT_KEY ?? "",
     // CORS defaults match the app's own safe-by-default behavior: blank
     // origins means same-origin only, credentials off, framing self-only.
     CORS_ALLOWED_ORIGINS: env.CORS_ALLOWED_ORIGINS ?? "",
@@ -107,6 +123,7 @@ export class TransformChurchContainer extends Container<Env> {
     INITIAL_ADMIN_EMAIL: env.INITIAL_ADMIN_EMAIL ?? "",
     INITIAL_ADMIN_EXTERNAL_USER_ID: env.INITIAL_ADMIN_EXTERNAL_USER_ID ?? "",
     WEEKLY_PULSE_RUN_SECRET: env.WEEKLY_PULSE_RUN_SECRET ?? "",
+    WIKI_DRIVE_SYNC_RUN_SECRET: env.WIKI_DRIVE_SYNC_RUN_SECRET ?? "",
   };
 
   // Bridges the container's plain-HTTP object-storage calls to the real R2
@@ -192,15 +209,33 @@ export default {
     return getContainer(workerEnv.API_CONTAINER, "primary").fetch(request);
   },
 
-  // Fires every Monday morning per [triggers] crons in wrangler.toml. The
-  // Container has no ingress of its own -- this is the only thing that can
-  // reach it on a schedule, so this just makes the same internal call a
-  // "send test now" click in the admin UI would make, authenticated with the
-  // shared secret instead of an admin's JWT (see routes/weeklyPulse.ts's
-  // POST /run-scheduled for why that's necessary and how it's checked).
-  async scheduled(_controller: ScheduledController, workerEnv: Env, ctx: ExecutionContext): Promise<void> {
+  // Fires per [triggers] crons in wrangler.toml -- currently Monday morning
+  // (Weekly Pulse) and once daily (Wiki Drive sync). The Container has no
+  // ingress of its own -- this is the only thing that can reach it on a
+  // schedule, so each branch below just makes the same internal call a
+  // manual "run now"/"send test now" click in the admin UI would make,
+  // authenticated with a shared secret instead of an admin's JWT (see
+  // routes/weeklyPulse.ts's and routes/adminWikiDriveSync.ts's
+  // POST /run-scheduled routes for why that's necessary and how it's
+  // checked). `controller.cron` is which of wrangler.toml's `crons` entries
+  // fired this invocation, so the two schedules are told apart by matching
+  // against the Wiki Drive sync's entry; anything else (i.e. the Weekly
+  // Pulse entry) falls through to the original behavior.
+  async scheduled(controller: ScheduledController, workerEnv: Env, ctx: ExecutionContext): Promise<void> {
     ctx.waitUntil(
       (async () => {
+        if (controller.cron === WIKI_DRIVE_SYNC_CRON) {
+          const request = new Request("https://internal/api/admin/wiki-drive-sync/run-scheduled", {
+            method: "POST",
+            headers: { "x-internal-secret": workerEnv.WIKI_DRIVE_SYNC_RUN_SECRET ?? "" },
+          });
+          const response = await getContainer(workerEnv.API_CONTAINER, "primary").fetch(request);
+          if (!response.ok) {
+            const body = await response.text().catch(() => "");
+            console.error(`Wiki Drive scheduled sync failed: ${response.status} ${body.slice(0, 500)}`);
+          }
+          return;
+        }
         const request = new Request("https://internal/api/weekly-pulse/run-scheduled", {
           method: "POST",
           headers: { "x-internal-secret": workerEnv.WEEKLY_PULSE_RUN_SECRET ?? "" },

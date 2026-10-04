@@ -6,13 +6,12 @@ import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { ReplitConnectors } from "@replit/connectors-sdk";
 import { and, eq, sql } from "drizzle-orm";
 import { db, settingsTable, wikiArticlesTable, wikiCategoriesTable } from "@workspace/db";
 import { logger } from "./logger";
+import { getGoogleDriveAccessToken, isGoogleDriveConfigured } from "./googleServiceAccount";
 
 const execFileAsync = promisify(execFile);
-const connectors = new ReplitConnectors();
 const DRIVE_FOLDER = "application/vnd.google-apps.folder";
 const PDF = "application/pdf";
 const MAX_PDF_BYTES = 25 * 1024 * 1024;
@@ -49,7 +48,10 @@ export function normalizeDriveFolderId(input: string, allowRoot = false): string
 
 async function driveGet(path: string, params: Record<string, string>) {
   const query = new URLSearchParams(params).toString();
-  const response = await connectors.proxy("google-drive", `${path}?${query}`, { method: "GET" });
+  const accessToken = await getGoogleDriveAccessToken();
+  const response = await fetch(`https://www.googleapis.com${path}?${query}`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
   if (!response.ok) throw new Error(`Google Drive request failed (${response.status})`);
   return response;
 }
@@ -321,7 +323,12 @@ export async function getWikiDriveSyncStatus() {
   return {
     sourceFolderId,
     sourceFolderLink: sourceFolderId ? `https://drive.google.com/drive/folders/${encodeURIComponent(sourceFolderId)}` : null,
-    connectionConfigured: true,
+    // Previously hardcoded `true` -- left over from the Replit-connector
+    // implementation, where Drive access was always "configured" from this
+    // app's point of view (Replit brokered the OAuth separately). Now that
+    // this app authenticates with its own Google service account, whether
+    // Drive access actually works depends on whether that key is set.
+    connectionConfigured: isGoogleDriveConfigured(),
     status: {
       state,
       lastSyncedAt: lastSuccessAt,
