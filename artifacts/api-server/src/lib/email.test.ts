@@ -19,8 +19,18 @@ test("a value that already has a display name is not double-wrapped", () => {
   assert.equal(resolveFromHeader("<pulse@transformchurch.app>"), "Transform Church <pulse@transformchurch.app>");
 });
 
+test("display names that would need quoting are reduced to safe characters", () => {
+  assert.equal(resolveFromHeader("Transform Church, Youth <pulse@transformchurch.app>"), "Transform Church Youth <pulse@transformchurch.app>");
+  assert.equal(resolveFromHeader("TC (Reports) <pulse@transformchurch.app>"), "TC Reports <pulse@transformchurch.app>");
+  assert.equal(resolveFromHeader("pulse@tc.app <pulse@transformchurch.app>"), "pulse tc.app <pulse@transformchurch.app>");
+  assert.equal(resolveFromHeader('"" <pulse@transformchurch.app>'), "Transform Church <pulse@transformchurch.app>");
+});
+
 test("an unusable value returns null instead of a header Resend will reject", () => {
   assert.equal(resolveFromHeader("transformchurch.app"), null);
   assert.equal(resolveFromHeader("Transform Church"), null);
   assert.equal(resolveFromHeader("a@b.com, c@d.com"), null);
+  assert.equal(resolveFromHeader("mailto:pulse@transformchurch.app"), null);
+  assert.equal(resolveFromHeader("pulse@transformchurch"), null);
+  assert.equal(resolveFromHeader("pulse@transformchurch.app>"), null);
 });

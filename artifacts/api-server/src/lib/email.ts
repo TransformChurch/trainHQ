@@ -23,8 +23,25 @@ export interface SendEmailResult {
 
 const DEFAULT_FROM_NAME = "Transform Church";
 const DEFAULT_FROM_ADDRESS = "onboarding@resend.dev";
-const BARE_EMAIL = /^[^\s<>@"]+@[^\s<>@"]+\.[^\s<>@"]+$/;
-const NAMED_EMAIL = /^([^<>]*?)\s*<\s*([^\s<>@"]+@[^\s<>@"]+\.[^\s<>@"]+)\s*>$/;
+// Deliberately stricter than RFC 5322: plain ASCII addresses only, which is
+// all a church sending domain needs and all Resend's validator reliably
+// accepts.
+const ADDRESS = String.raw`[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}`;
+const BARE_EMAIL = new RegExp(`^${ADDRESS}$`);
+const NAMED_EMAIL = new RegExp(`^([^<>]*?)\\s*<\\s*(${ADDRESS})\\s*>$`);
+
+// Display-name characters that need RFC 5322 quoting (commas, @, quotes,
+// brackets, semicolons...) are a common way to get Resend's 422 "Invalid
+// from field" even with a valid address, so reduce the name to characters
+// that never need quoting instead of trying to quote it correctly.
+function safeDisplayName(raw: string): string {
+  const cleaned = raw
+    .replace(/^"(.*)"$/, "$1")
+    .replace(/[^A-Za-z0-9 .'&!_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return cleaned || DEFAULT_FROM_NAME;
+}
 
 // Builds the Resend `from` header from EMAIL_FROM. Resend rejects anything
 // that isn't `addr@example.com` or `Name <addr@example.com>` with a 422, and
@@ -44,7 +61,7 @@ export function resolveFromHeader(raw: string | undefined = process.env.EMAIL_FR
   if (BARE_EMAIL.test(value)) return `${DEFAULT_FROM_NAME} <${value}>`;
   const named = NAMED_EMAIL.exec(value);
   if (named) {
-    const name = named[1].trim().replace(/^"(.*)"$/, "$1").trim() || DEFAULT_FROM_NAME;
+    const name = safeDisplayName(named[1].trim());
     return `${name} <${named[2]}>`;
   }
   return null;
@@ -77,7 +94,9 @@ export async function sendEmail({ to, subject, html }: SendEmailInput): Promise<
     });
     if (!response.ok) {
       const body = await response.text().catch(() => "");
-      return { sent: false, error: `Resend returned ${response.status}: ${body.slice(0, 500)}` };
+      // The sender line is included (it's an address, not a secret) so a
+      // from-field rejection can be diagnosed straight from the admin UI.
+      return { sent: false, error: `Resend returned ${response.status}: ${body.slice(0, 500)} (sent from: ${from})` };
     }
     return { sent: true };
   } catch (err) {
