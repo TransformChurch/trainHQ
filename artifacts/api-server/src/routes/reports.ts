@@ -12,7 +12,8 @@ import {
   reportTemplatesTable,
 } from "@workspace/db";
 import { and, eq, lt } from "drizzle-orm";
-import { requireAdmin, requireManagerOrAdmin } from "../middlewares/requireAuth";
+import { requireAdmin } from "../middlewares/requireAuth";
+import { requireToolAccess } from "../middlewares/requireToolAccess";
 import { getValidPlanningCenterAccessToken } from "../lib/planningCenter";
 import { ObjectStorageService } from "../lib/objectStorage";
 import { sendEmail } from "../lib/email";
@@ -592,7 +593,7 @@ function sendError(req: Request, res: Response, error: unknown, fallback: string
   res.status(typed.status ?? 500).json({ error: typed.message || fallback });
 }
 
-router.get("/events", requireManagerOrAdmin, async (req, res) => {
+router.get("/events", requireToolAccess("reporting"), async (req, res) => {
   try {
     const accessToken = await getValidPlanningCenterAccessToken(res.locals.dbUser.id);
     const collection = await fetchCollection(
@@ -609,7 +610,7 @@ router.get("/events", requireManagerOrAdmin, async (req, res) => {
   }
 });
 
-router.get("/fields", requireAdmin, async (req, res) => {
+router.get("/fields", requireToolAccess("reporting"), async (req, res) => {
   try {
     const accessToken = await getValidPlanningCenterAccessToken(res.locals.dbUser.id);
     const customFields = await fetchReportFieldDefinitions(accessToken);
@@ -707,7 +708,7 @@ router.delete("/scripts/:slot", requireAdmin, async (req, res) => {
   }
 });
 
-router.get("/templates", requireManagerOrAdmin, async (_req, res) => {
+router.get("/templates", requireToolAccess("reporting"), async (_req, res) => {
   const rows = await db.select().from(reportTemplatesTable).orderBy(reportTemplatesTable.name);
   res.json(rows.map(({ objectPath: _objectPath, pullFields, ...row }) => ({
     ...row,
@@ -798,7 +799,7 @@ router.delete("/templates/:templateId", requireAdmin, async (req, res) => {
   }
 });
 
-router.get("/prepare-progress/:progressId", requireManagerOrAdmin, (req, res) => {
+router.get("/prepare-progress/:progressId", requireToolAccess("reporting"), (req, res) => {
   cleanPreparationProgress();
   const progressId = text(req.params.progressId);
   const progress = preparationProgress.get(progressKey(res.locals.dbUser.id, progressId));
@@ -815,7 +816,7 @@ router.get("/prepare-progress/:progressId", requireManagerOrAdmin, (req, res) =>
   res.json(response);
 });
 
-router.post("/prepare", requireManagerOrAdmin, async (req, res) => {
+router.post("/prepare", requireToolAccess("reporting"), async (req, res) => {
   let workDir = "";
   const progressId = text(req.body?.progressId);
   const userId = res.locals.dbUser.id;
@@ -1116,7 +1117,7 @@ async function generateReportPdf(
   }
 }
 
-router.post("/generate", requireManagerOrAdmin, async (req, res) => {
+router.post("/generate", requireToolAccess("reporting"), async (req, res) => {
   try {
     const runId = text(req.body?.runId);
     const templateId = Number(req.body?.templateId);
@@ -1160,7 +1161,7 @@ export function parseReportRecipients(raw: unknown): { recipients: string[] } | 
 // /generate and emails it as an attachment. The report lists people
 // (including children) by name, so the send is logged with who sent it and
 // how many recipients, and the recipient count is capped.
-router.post("/email-pdf", requireManagerOrAdmin, async (req, res) => {
+router.post("/email-pdf", requireToolAccess("reporting"), async (req, res) => {
   try {
     const runId = text(req.body?.runId);
     const templateId = Number(req.body?.templateId);
@@ -1202,7 +1203,7 @@ router.post("/email-pdf", requireManagerOrAdmin, async (req, res) => {
   }
 });
 
-router.get("/runs/:runId/data.csv", requireManagerOrAdmin, async (req, res) => {
+router.get("/runs/:runId/data.csv", requireToolAccess("reporting"), async (req, res) => {
   try {
     const runs = await db.select().from(reportRunsTable).where(and(
       eq(reportRunsTable.id, req.params.runId as string),

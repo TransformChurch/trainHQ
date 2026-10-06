@@ -26,6 +26,7 @@ import AdminWiki from "@/pages/AdminWiki";
 import Facilities from "@/pages/Facilities";
 import AdminFacilities from "@/pages/AdminFacilities";
 import Reporting from "@/pages/Reporting";
+import ToolManagement from "@/pages/ToolManagement";
 import Messaging from "@/pages/Messaging";
 import NotFound from "@/pages/not-found";
 import { useUpsertMe, useGetMe } from "@workspace/api-client-react";
@@ -33,6 +34,7 @@ import { setAuthTokenGetter, setBaseUrl } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
 import { AlertCircle } from "lucide-react";
 import { SiteCopyProvider } from "@/lib/siteCopy";
+import { useToolAccess, type ToolKey } from "@/lib/toolAccess";
 
 // Audit finding 4.1 (High): no defaultOptions meant TanStack Query's own
 // default staleTime of 0 applied everywhere, so every remount of a
@@ -238,10 +240,11 @@ function Spinner() {
   return <div className="min-h-screen flex items-center justify-center"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" /></div>;
 }
 
-function ProtectedRoute({ component: Component, adminOnly = false, managerOrAdmin = false }: { component: any; adminOnly?: boolean; managerOrAdmin?: boolean }) {
+function ProtectedRoute({ component: Component, adminOnly = false, managerOrAdmin = false, tool }: { component: any; adminOnly?: boolean; managerOrAdmin?: boolean; tool?: ToolKey }) {
   const { isLoaded, isSignedIn } = useAuth();
   const { synced } = useContext(UserSyncContext);
   const { data: me, isLoading: meLoading } = useGetMe();
+  const toolAccess = useToolAccess();
   if (!isLoaded) return <Spinner />;
   if (!isSignedIn) return <Redirect to="/sign-in" />;
   if (!synced) return <Spinner />;
@@ -251,6 +254,10 @@ function ProtectedRoute({ component: Component, adminOnly = false, managerOrAdmi
     if (me.role === "student") return <Redirect to="/dashboard" />;
   }
   if (managerOrAdmin && me?.role === "student") return <Redirect to="/dashboard" />;
+  if (tool) {
+    if (meLoading || toolAccess.loading) return <Spinner />;
+    if (!toolAccess.can(tool)) return <Redirect to="/dashboard" />;
+  }
   return <AppLayout><Component /></AppLayout>;
 }
 
@@ -285,14 +292,15 @@ function AppRoutes() {
           <Route path="/tc-wiki"><ProtectedRoute component={() => <Wiki wikiKey="tc-wiki" wikiName="TC Wiki" />} /></Route>
           <Route path="/tc-wiki/:slug"><ProtectedRoute component={() => <WikiArticle wikiKey="tc-wiki" wikiName="TC Wiki" />} /></Route>
           <Route path="/facilities"><ProtectedRoute component={Facilities} /></Route>
-          <Route path="/reporting"><ProtectedRoute component={Reporting} adminOnly /></Route>
-          <Route path="/messaging"><ProtectedRoute component={Messaging} adminOnly /></Route>
+          <Route path="/reporting"><ProtectedRoute component={Reporting} tool="reporting" /></Route>
+          <Route path="/messaging"><ProtectedRoute component={Messaging} tool="messaging" /></Route>
           <Route path="/admin"><ProtectedRoute component={AdminDashboard} adminOnly /></Route>
           <Route path="/admin/users"><ProtectedRoute component={AdminUsers} managerOrAdmin /></Route>
           <Route path="/admin/content"><Redirect to="/admin/modules" /></Route>
           <Route path="/admin/modules"><ProtectedRoute component={() => <AdminContent section="modules" />} managerOrAdmin /></Route>
           <Route path="/admin/documents"><ProtectedRoute component={() => <AdminContent section="documents" />} managerOrAdmin /></Route>
           <Route path="/admin/growth-tracks"><ProtectedRoute component={AdminGrowthTracks} managerOrAdmin /></Route>
+          <Route path="/admin/tools"><ProtectedRoute component={ToolManagement} adminOnly /></Route>
           <Route path="/admin/settings"><ProtectedRoute component={AdminSettings} adminOnly /></Route>
           <Route path="/admin/facilities"><ProtectedRoute component={AdminFacilities} adminOnly /></Route>
           <Route path="/admin/wiki"><ProtectedRoute component={AdminWiki} adminOnly /></Route>
@@ -307,4 +315,4 @@ function AppRoutes() {
 
 export default function App() {
   return <TooltipProvider><WouterRouter base={basePath}><AppRoutes /></WouterRouter><Toaster /></TooltipProvider>;
-}
+}

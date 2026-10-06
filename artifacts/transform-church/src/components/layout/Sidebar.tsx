@@ -2,11 +2,12 @@ import { Link, useLocation } from "wouter";
 import { useGetMe } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/App";
-import { BookOpen, LayoutDashboard, Settings, Video, ShieldCheck, LogOut, Menu, UserCircle, Users, TrendingUp, UsersRound, FileText, Wrench, BarChart3, Library, MessageSquare, type LucideIcon } from "lucide-react";
+import { BookOpen, LayoutDashboard, Settings, Video, ShieldCheck, LogOut, Menu, UserCircle, Users, TrendingUp, UsersRound, FileText, Wrench, BarChart3, Library, MessageSquare, SlidersHorizontal, type LucideIcon } from "lucide-react";
 import wordmark from "@assets/TC_Black_Wordmark_1782833324395.png";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { useEffect, useState } from "react";
 import { useSiteCopy } from "@/lib/siteCopy";
+import { useToolAccess } from "@/lib/toolAccess";
 
 type NavigationItem = {
   href: string;
@@ -25,6 +26,7 @@ export function Sidebar() {
   const isAdmin = user?.role === "admin";
   const isManager = user?.role === "manager";
   const isManagerOrAdmin = isAdmin || isManager;
+  const toolAccess = useToolAccess();
   const [facilitiesAllowed, setFacilitiesAllowed] = useState(false);
   const [wikiAllowed, setWikiAllowed] = useState(false);
   const [tcWikiAllowed, setTcWikiAllowed] = useState(false);
@@ -79,8 +81,8 @@ export function Sidebar() {
     ...(wikiAllowed ? [{ href: "/wiki", label: copy("nav.wiki"), icon: Library }] : []),
     ...(tcWikiAllowed ? [{ href: "/tc-wiki", label: "TC Wiki", icon: Library }] : []),
     ...(facilitiesAllowed ? [{ href: "/facilities", label: copy("nav.requestHub"), icon: Wrench }] : []),
-    ...(isAdmin ? [{ href: "/reporting", label: "Reporting", icon: BarChart3 }] : []),
-    ...(isAdmin ? [{ href: "/messaging", label: "Messaging", icon: MessageSquare }] : []),
+    ...(toolAccess.can("reporting") ? [{ href: "/reporting", label: "Reporting", icon: BarChart3 }] : []),
+    ...(toolAccess.can("messaging") ? [{ href: "/messaging", label: "Messaging", icon: MessageSquare }] : []),
   ];
 
   const managerItems: NavigationItem[] = [
@@ -93,6 +95,7 @@ export function Sidebar() {
   const adminOnlyItems: NavigationItem[] = [
     { href: "/admin", label: copy("nav.adminDashboard"), icon: ShieldCheck },
     { href: "/admin/settings", label: copy("nav.adminSettings"), icon: Settings },
+    { href: "/admin/tools", label: "Tool Management", icon: SlidersHorizontal },
     { href: "/admin/facilities", label: copy("nav.requestHub"), icon: Wrench },
     { href: "/admin/wiki", label: copy("nav.wiki"), icon: Library },
     { href: "/admin/tc-wiki", label: "TC Wiki", icon: Library },

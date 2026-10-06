@@ -12,7 +12,7 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { db, groupBroadcastsTable, type GroupBroadcast } from "@workspace/db";
 import { desc } from "drizzle-orm";
-import { requireAdmin } from "../middlewares/requireAuth";
+import { requireToolAccess } from "../middlewares/requireToolAccess";
 import { getValidPlanningCenterAccessToken } from "../lib/planningCenter";
 import { sendSms, isSmsConfigured, getEstimatedSmsPrice, countSmsSegments } from "../lib/sms";
 import { sendEmail } from "../lib/email";
@@ -219,7 +219,7 @@ export async function resolveRecipientsFromGroups(groupIds: string[], accessToke
   return results;
 }
 
-router.get("/sources", requireAdmin, async (req, res) => {
+router.get("/sources", requireToolAccess("messaging"), async (req, res) => {
   try {
     const accessToken = await getValidPlanningCenterAccessToken(res.locals.dbUser.id);
     let groupsError: string | undefined;
@@ -243,7 +243,7 @@ router.get("/sources", requireAdmin, async (req, res) => {
   }
 });
 
-router.post("/send", requireAdmin, async (req, res) => {
+router.post("/send", requireToolAccess("messaging"), async (req, res) => {
   try {
     const channel: Channel = req.body?.channel === "email" ? "email" : "sms";
     const message = text(req.body?.message).trim();
@@ -380,7 +380,7 @@ router.post("/send", requireAdmin, async (req, res) => {
   }
 });
 
-router.get("/history", requireAdmin, async (req, res) => {
+router.get("/history", requireToolAccess("messaging"), async (req, res) => {
   try {
     const rows = await db.select().from(groupBroadcastsTable).orderBy(desc(groupBroadcastsTable.sentAt)).limit(50);
     res.json(rows.map(toBroadcastJson));

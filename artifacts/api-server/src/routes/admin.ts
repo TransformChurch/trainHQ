@@ -12,6 +12,7 @@ import adminWikiRouter, { createAdminWikiRouter } from "./adminWiki";
 import adminTracksRouter from "./adminTracks";
 import adminPlanningCenterRouter from "./adminPlanningCenter";
 import adminWikiDriveSyncRouter from "./adminWikiDriveSync";
+import { adminToolAccessRouter } from "./toolAccess";
 import { resolveFromHeader } from "../lib/email";
 
 const router = Router();
@@ -428,5 +429,6 @@ router.use("/tc-wiki", createAdminWikiRouter("tc-wiki"));
 router.use("/tracks", adminTracksRouter);
 router.use("/planning-center", adminPlanningCenterRouter);
 router.use("/wiki-drive-sync", adminWikiDriveSyncRouter);
+router.use("/tool-access", adminToolAccessRouter);
 
 export default router;
