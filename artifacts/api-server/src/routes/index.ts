@@ -20,6 +20,7 @@ import siteCopyRouter from "./siteCopy";
 import reportsRouter from "./reports";
 import weeklyPulseRouter from "./weeklyPulse";
 import attendanceHistoryRouter from "./attendanceHistory";
+import groupHistoryRouter from "./groupHistory";
 import groupBroadcastsRouter from "./groupBroadcasts";
 import toolAccessRouter from "./toolAccess";
 
@@ -47,6 +48,7 @@ router.use(siteCopyRouter);
 router.use("/reports", reportsRouter);
 router.use("/weekly-pulse", weeklyPulseRouter);
 router.use("/attendance-history", attendanceHistoryRouter);
+router.use("/group-history", groupHistoryRouter);
 router.use("/group-broadcasts", groupBroadcastsRouter);
 router.use("/tool-access", toolAccessRouter);
 

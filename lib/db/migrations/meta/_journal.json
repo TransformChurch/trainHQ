@@ -267,6 +267,13 @@
       "when": 1791058200004,
       "tag": "0037_history_gender_counts",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1791058200005,
+      "tag": "0038_groups_weekly_history",
+      "breakpoints": true
     }
   ]
 }

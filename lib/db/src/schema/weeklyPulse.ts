@@ -130,3 +130,28 @@ export const checkinsWeeklyHistoryTable = pgTable("checkins_weekly_history", {
 ]);
 
 export type CheckinsWeeklyHistory = typeof checkinsWeeklyHistoryTable.$inferSelect;
+
+// Planning Center Groups attendance history per group per week, pulled
+// read-only by the "Group attendance history" tool on the Reporting page --
+// see routes/groupHistory.ts. Same Monday-00:00-UTC weeks as
+// checkins_weekly_history. Groups only have attendance for meetings where a
+// leader took it: `attendees` is NULL for a week whose meetings had no
+// attendance recorded (not taken), which is different from 0 (taken, nobody
+// came). Re-pulling a group overwrites its weeks.
+export const groupsWeeklyHistoryTable = pgTable("groups_weekly_history", {
+  id: serial("id").primaryKey(),
+  groupId: text("group_id").notNull(),
+  groupName: text("group_name").notNull(),
+  groupArchived: boolean("group_archived").notNull().default(false),
+  weekStart: date("week_start").notNull(),
+  weekEnd: date("week_end").notNull(), // exclusive
+  meetings: integer("meetings").notNull(), // group events in the week
+  attendees: integer("attendees"), // unique people marked present
+  attendanceRecords: integer("attendance_records").notNull(), // all records, present or not
+  fetchedAt: timestamp("fetched_at").notNull().defaultNow(),
+}, (table) => [
+  uniqueIndex("groups_weekly_history_group_week_idx").on(table.groupId, table.weekStart),
+  index("groups_weekly_history_week_start_idx").on(table.weekStart),
+]);
+
+export type GroupsWeeklyHistory = typeof groupsWeeklyHistoryTable.$inferSelect;

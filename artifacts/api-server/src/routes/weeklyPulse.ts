@@ -27,6 +27,7 @@ import { and, desc, eq } from "drizzle-orm";
 import { requireAdmin } from "../middlewares/requireAuth";
 import { getValidPlanningCenterAccessToken } from "../lib/planningCenter";
 import { sendEmail } from "../lib/email";
+import { summarizeGroupAttendance } from "../lib/groupAttendance";
 import { logger } from "../lib/logger";
 import {
   CHECK_INS_BASE,
@@ -160,7 +161,12 @@ async function fetchGroupWeeklyCount(
       return startsAt && startsAt >= weekStart && startsAt < weekEnd;
     });
     if (!eventsInWeek.length) return { count: 0, eventsFound: 0 };
-    let total = 0;
+    // 2026-10-06: this used to add up every attendance record, but Planning
+    // Center returns one record per roster member with an `attended` flag,
+    // absentees included -- so the Pulse was reporting roughly roster size.
+    // Now counts unique people marked present, the same rule as the group
+    // history pull (lib/groupAttendance.ts).
+    const records: JsonApiResource[] = [];
     let anyAttendanceFetchFailed = false;
     for (const event of eventsInWeek) {
       try {
@@ -168,17 +174,20 @@ async function fetchGroupWeeklyCount(
           `${GROUPS_BASE}/events/${encodeURIComponent(event.id)}/attendances?per_page=100`,
           accessToken,
         );
-        total += attendanceCollection.data.length;
+        records.push(...attendanceCollection.data);
       } catch {
         anyAttendanceFetchFailed = true;
       }
     }
+    const { attendees } = summarizeGroupAttendance(records);
     return {
-      count: total,
+      count: attendees ?? 0,
       eventsFound: eventsInWeek.length,
       warning: anyAttendanceFetchFailed
         ? "Couldn't load attendance for one or more of this group's meetings this week -- the Groups attendance endpoint may need to be verified."
-        : undefined,
+        : attendees === null
+          ? "Attendance wasn't taken for this group's meeting this week."
+          : undefined,
     };
   } catch (error) {
     return {

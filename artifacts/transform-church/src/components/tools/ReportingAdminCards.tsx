@@ -854,6 +854,8 @@ export function ReportingAdminCards() {
         </Card>
 
       <AttendanceHistoryCard />
+
+      <GroupHistoryCard />
     </div>
   );
 }
@@ -1011,6 +1013,163 @@ function AttendanceHistoryCard() {
           )}
           <Button variant="outline" onClick={downloadHistory} disabled={running || !summary?.rows}>
             <Download className="mr-2 h-4 w-4" /> Download history CSV
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// Groups counterpart of AttendanceHistoryCard: weekly Planning Center Groups
+// attendance for every group into groups_weekly_history -- see
+// routes/groupHistory.ts. Same step-by-step, keep-the-tab-open pattern.
+const GROUP_HISTORY_MAX_WEEKS_PER_CALL = 8;
+const GROUP_HISTORY_MAX_MEETINGS_PER_CALL = 20;
+
+type HistoryGroup = { id: string; name: string; archived: boolean };
+type GroupHistoryWeek = { weekStart: string; weekEnd: string; meetingIds: string[] };
+type GroupHistorySummary = { rows: number; groups: number; firstWeek: string | null; lastWeek: string | null; lastFetchedAt: string | null };
+
+function batchGroupWeeks(weeks: GroupHistoryWeek[]): GroupHistoryWeek[][] {
+  const batches: GroupHistoryWeek[][] = [];
+  let current: GroupHistoryWeek[] = [];
+  let meetings = 0;
+  for (const week of weeks) {
+    if (current.length && (current.length >= GROUP_HISTORY_MAX_WEEKS_PER_CALL || meetings + week.meetingIds.length > GROUP_HISTORY_MAX_MEETINGS_PER_CALL)) {
+      batches.push(current);
+      current = [];
+      meetings = 0;
+    }
+    current.push(week);
+    meetings += week.meetingIds.length;
+  }
+  if (current.length) batches.push(current);
+  return batches;
+}
+
+function GroupHistoryCard() {
+  const { toast } = useToast();
+  const [summary, setSummary] = useState<GroupHistorySummary | null>(null);
+  const [running, setRunning] = useState(false);
+  const [progress, setProgress] = useState("");
+  const [failures, setFailures] = useState<{ groupName: string; error: string }[]>([]);
+  const stopRequested = useRef(false);
+
+  const loadSummary = async () => {
+    try {
+      const response = await api("/api/group-history/summary");
+      setSummary(await response.json() as GroupHistorySummary);
+    } catch {
+      setSummary(null);
+    }
+  };
+
+  useEffect(() => {
+    loadSummary();
+  }, []);
+
+  const runPull = async () => {
+    if (!window.confirm("Pull weekly attendance for every Planning Center group since Jan 1, 2024? This can take a while. Keep this tab open until it finishes.")) return;
+    stopRequested.current = false;
+    setRunning(true);
+    setFailures([]);
+    let weeksSaved = 0;
+    const failed: { groupName: string; error: string }[] = [];
+    try {
+      setProgress("Loading Planning Center groups…");
+      const groups = await (await api("/api/group-history/groups")).json() as HistoryGroup[];
+      for (const [index, group] of groups.entries()) {
+        if (stopRequested.current) break;
+        const label = `Group ${index + 1} of ${groups.length}: ${group.name}`;
+        try {
+          setProgress(`${label} (finding meetings…)`);
+          const weeks = await (await api(
+            `/api/group-history/groups/${encodeURIComponent(group.id)}/weeks?since=${HISTORY_SINCE}`,
+          )).json() as GroupHistoryWeek[];
+          let done = 0;
+          for (const batch of batchGroupWeeks(weeks)) {
+            if (stopRequested.current) break;
+            setProgress(`${label} (${done} of ${weeks.length} weeks)`);
+            await api(`/api/group-history/groups/${encodeURIComponent(group.id)}/weeks`, {
+              method: "POST",
+              body: JSON.stringify({ groupName: group.name, archived: group.archived, weeks: batch }),
+            });
+            done += batch.length;
+            weeksSaved += batch.length;
+          }
+        } catch (error) {
+          failed.push({ groupName: group.name, error: error instanceof Error ? error.message : "Request failed." });
+          setFailures([...failed]);
+        }
+      }
+      toast({
+        title: stopRequested.current ? "Group history pull stopped" : "Group history pull finished",
+        description: `${weeksSaved} group-weeks saved${failed.length ? `, ${failed.length} group${failed.length === 1 ? "" : "s"} failed` : ""}.`,
+        variant: failed.length ? "destructive" : undefined,
+      });
+    } catch (error) {
+      toast({ title: "Could not pull group history", description: error instanceof Error ? error.message : "Request failed.", variant: "destructive" });
+    } finally {
+      setRunning(false);
+      setProgress("");
+      await loadSummary();
+    }
+  };
+
+  const downloadHistory = async () => {
+    try {
+      const response = await api("/api/group-history/history.csv");
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = "group-attendance-history-by-week.csv";
+      anchor.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      toast({ title: "Could not download group history", description: error instanceof Error ? error.message : "Request failed.", variant: "destructive" });
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2"><BarChart3 className="h-5 w-5" /> Group attendance history</CardTitle>
+        <p className="text-sm text-muted-foreground">
+          A one-time pull of weekly attendance for every Planning Center group since Jan 1, 2024, in the same
+          Monday-to-Monday weeks. Counts people marked present; weeks where no attendance was taken are left blank,
+          not zero. Read-only in Planning Center. Safe to run again.
+        </p>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <p className="text-sm text-muted-foreground">
+          {summary && summary.rows > 0
+            ? `${summary.rows} group-weeks saved across ${summary.groups} groups (${summary.firstWeek} to ${summary.lastWeek}).`
+            : "No group history pulled yet."}
+        </p>
+        {running && (
+          <p className="flex items-center gap-2 text-sm">
+            <Loader2 className="h-4 w-4 animate-spin" /> {progress} Keep this tab open.
+          </p>
+        )}
+        {failures.length > 0 && (
+          <div className="rounded-md border border-destructive/40 p-3 text-sm">
+            <p className="font-medium text-destructive">Some groups could not be pulled (run again to retry them):</p>
+            <ul className="mt-1 list-disc pl-5 text-muted-foreground">
+              {failures.map((failure) => <li key={failure.groupName}>{failure.groupName}: {failure.error}</li>)}
+            </ul>
+          </div>
+        )}
+        <div className="flex flex-wrap gap-2">
+          {running ? (
+            <Button variant="outline" onClick={() => { stopRequested.current = true; }}>Stop</Button>
+          ) : (
+            <Button onClick={runPull}>
+              <RefreshCw className="mr-2 h-4 w-4" /> Pull group history since Jan 1, 2024
+            </Button>
+          )}
+          <Button variant="outline" onClick={downloadHistory} disabled={running || !summary?.rows}>
+            <Download className="mr-2 h-4 w-4" /> Download group history CSV
           </Button>
         </div>
       </CardContent>
