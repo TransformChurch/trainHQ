@@ -1,4 +1,4 @@
-import { boolean, pgTable, serial, text, timestamp } from "drizzle-orm/pg-core";
+import { boolean, date, index, integer, pgTable, serial, text, timestamp } from "drizzle-orm/pg-core";
 import { usersTable } from "./users";
 
 // Config for the automated "weekly pulse" email -- a lightweight, numbers-only
@@ -38,3 +38,59 @@ export const weeklyPulseConfigTable = pgTable("weekly_pulse_config", {
 });
 
 export type WeeklyPulseConfig = typeof weeklyPulseConfigTable.$inferSelect;
+
+// One row per Weekly Pulse run (scheduled or "Send test now"), recorded
+// whether or not the email itself went out, so the numbers are never lost to
+// a mail failure. Backs the "Download latest report" CSV and the long-term
+// tracker below.
+//
+// countsTowardTracker marks the single run per config per standard week that
+// the year-over-year tracker should use: the window must end on a Monday at
+// 00:00 UTC (what the Monday Cron Trigger produces -- see computeWeekRange in
+// routes/weeklyPulse.ts), so a mid-week "Send test now" with an odd window
+// never lands in the tracker. A later qualifying run for the same config and
+// week (a retry, or a Monday re-send) supersedes the earlier one by flipping
+// its flag off rather than deleting it.
+//
+// configId is ON DELETE SET NULL and configName is a snapshot, so deleting a
+// Weekly Pulse config never erases its history.
+export const weeklyPulseRunsTable = pgTable("weekly_pulse_runs", {
+  id: serial("id").primaryKey(),
+  configId: integer("config_id").references(() => weeklyPulseConfigTable.id, { onDelete: "set null" }),
+  configName: text("config_name").notNull(),
+  trigger: text("trigger").notNull(), // "scheduled" | "manual"
+  weekStart: date("week_start").notNull(),
+  weekEnd: date("week_end").notNull(), // exclusive, matches the email's window
+  countsTowardTracker: boolean("counts_toward_tracker").notNull().default(false),
+  emailStatus: text("email_status"), // "sent" | "error" | null while sending
+  emailError: text("email_error"),
+  ranAt: timestamp("ran_at").notNull().defaultNow(),
+}, (table) => [
+  index("weekly_pulse_runs_config_id_idx").on(table.configId),
+  index("weekly_pulse_runs_week_start_idx").on(table.weekStart),
+]);
+
+// The master tracker: one row per number in a run. Query it with
+// weekly_pulse_runs.counts_toward_tracker = true for clean week-by-week,
+// year-over-year series. sourceType is "checkins" | "group" | "form" |
+// "form_field"; for "form_field" rows, detail holds the answer text and
+// fieldLabel the question. sourceId is the Planning Center id, so a series
+// survives a rename in Planning Center. value is NULL when the number
+// couldn't be fetched at all (warning says why) -- never a fake 0.
+export const weeklyPulseMetricsTable = pgTable("weekly_pulse_metrics", {
+  id: serial("id").primaryKey(),
+  runId: integer("run_id").notNull().references(() => weeklyPulseRunsTable.id, { onDelete: "cascade" }),
+  sourceType: text("source_type").notNull(),
+  sourceId: text("source_id").notNull(),
+  sourceName: text("source_name").notNull(),
+  fieldLabel: text("field_label"),
+  detail: text("detail"),
+  value: integer("value"),
+  warning: text("warning"),
+}, (table) => [
+  index("weekly_pulse_metrics_run_id_idx").on(table.runId),
+  index("weekly_pulse_metrics_source_idx").on(table.sourceType, table.sourceId),
+]);
+
+export type WeeklyPulseRun = typeof weeklyPulseRunsTable.$inferSelect;
+export type WeeklyPulseMetric = typeof weeklyPulseMetricsTable.$inferSelect;
