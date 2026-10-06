@@ -16,11 +16,18 @@
 // both before relying on the Monday automation.
 import { Router, type IRouter, type Request, type Response } from "express";
 import { timingSafeEqual } from "node:crypto";
-import { db, weeklyPulseConfigTable, type WeeklyPulseConfig } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import {
+  db,
+  weeklyPulseConfigTable,
+  weeklyPulseRunsTable,
+  weeklyPulseMetricsTable,
+  type WeeklyPulseConfig,
+} from "@workspace/db";
+import { and, desc, eq } from "drizzle-orm";
 import { requireAdmin } from "../middlewares/requireAuth";
 import { getValidPlanningCenterAccessToken } from "../lib/planningCenter";
 import { sendEmail } from "../lib/email";
+import { logger } from "../lib/logger";
 import {
   CHECK_INS_BASE,
   PEOPLE_BASE,
@@ -278,8 +285,13 @@ async function fetchFormWeeklyStats(
   return result;
 }
 
-type NamedCount = { name: string; count: number; warning?: string };
+// sourceId (the Planning Center id) and failed (the whole fetch threw, so
+// count is a placeholder 0 for the email, not a real number) exist for the
+// tracker -- see weeklyPulseMetricsTable.
+type NamedCount = { sourceId: string; name: string; count: number; warning?: string; failed?: boolean };
 type FormSummary = {
+  sourceId: string;
+  failed?: boolean;
   name: string;
   totalSubmissions: number;
   fieldLabel?: string;
@@ -343,13 +355,19 @@ function buildEmailHtml(
     </div>`;
 }
 
-async function runWeeklyPulse(config: WeeklyPulseConfig): Promise<{ sent: boolean; error?: string }> {
-  const accessToken = await getValidPlanningCenterAccessToken(config.createdByUserId);
-  const weekRange = computeWeekRange();
+type PulseResults = {
+  checkins: NamedCount[];
+  groups: NamedCount[];
+  forms: FormSummary[];
+};
+
+async function collectWeeklyPulse(
+  config: WeeklyPulseConfig,
+  accessToken: string,
+  weekRange: { start: string; end: string },
+): Promise<PulseResults> {
   const eventIds = parseJsonArray(config.checkinsEventIds);
   const groupIds = parseJsonArray(config.groupIds);
-  const recipientEmails = parseJsonArray(config.recipientEmails);
-  if (!recipientEmails.length) return { sent: false, error: "No recipient emails configured." };
 
   const checkinsResults: NamedCount[] = [];
   for (const eventId of eventIds) {
@@ -357,9 +375,11 @@ async function runWeeklyPulse(config: WeeklyPulseConfig): Promise<{ sent: boolea
       const eventPage = await planningCenterRequest(`${CHECK_INS_BASE}/events/${encodeURIComponent(eventId)}`, accessToken);
       const name = firstValue(eventPage.data?.attributes ?? {}, "name") || `Event ${eventId}`;
       const { count } = await fetchCheckInsWeeklyCount(eventId, accessToken, weekRange.start, weekRange.end);
-      checkinsResults.push({ name, count });
+      checkinsResults.push({ sourceId: eventId, name, count });
     } catch (error) {
       checkinsResults.push({
+        sourceId: eventId,
+        failed: true,
         name: `Event ${eventId}`,
         count: 0,
         warning: error instanceof Error ? error.message : String(error),
@@ -373,9 +393,11 @@ async function runWeeklyPulse(config: WeeklyPulseConfig): Promise<{ sent: boolea
       const groupPage = await planningCenterRequest(`${GROUPS_BASE}/groups/${encodeURIComponent(groupId)}`, accessToken);
       const name = firstValue(groupPage.data?.attributes ?? {}, "name") || `Group ${groupId}`;
       const { count, warning } = await fetchGroupWeeklyCount(groupId, accessToken, weekRange.start, weekRange.end);
-      groupsResults.push({ name, count, warning });
+      groupsResults.push({ sourceId: groupId, name, count, warning });
     } catch (error) {
       groupsResults.push({
+        sourceId: groupId,
+        failed: true,
         name: `Group ${groupId}`,
         count: 0,
         warning: error instanceof Error ? error.message : String(error),
@@ -394,9 +416,17 @@ async function runWeeklyPulse(config: WeeklyPulseConfig): Promise<{ sent: boolea
         const fields = await fetchFormFields(formId, accessToken);
         fieldLabel = fields.find((field) => field.id === fieldId)?.label;
       }
-      formResults.push({ name, totalSubmissions: stats.totalSubmissions, fieldLabel, fieldBreakdown: stats.fieldBreakdown });
+      formResults.push({
+        sourceId: formId,
+        name,
+        totalSubmissions: stats.totalSubmissions,
+        fieldLabel: fieldLabel ?? (fieldId ? `Field ${fieldId}` : undefined),
+        fieldBreakdown: stats.fieldBreakdown,
+      });
     } catch (error) {
       formResults.push({
+        sourceId: formId,
+        failed: true,
         name: `Form ${formId}`,
         totalSubmissions: 0,
         fieldBreakdown: null,
@@ -405,13 +435,138 @@ async function runWeeklyPulse(config: WeeklyPulseConfig): Promise<{ sent: boolea
     }
   }
 
-  const html = buildEmailHtml(config, weekRange, checkinsResults, groupsResults, formResults);
+  return { checkins: checkinsResults, groups: groupsResults, forms: formResults };
+}
+
+export type PulseMetricRow = {
+  sourceType: "checkins" | "group" | "form" | "form_field";
+  sourceId: string;
+  sourceName: string;
+  fieldLabel: string | null;
+  detail: string | null;
+  value: number | null;
+  warning: string | null;
+};
+
+// Flattens one run's results into tracker rows. A source whose fetch threw
+// entirely is stored as value NULL (with the reason in warning) rather than
+// the 0 the email shows, so a Planning Center hiccup never reads as "nobody
+// came" in a year-over-year comparison.
+export function metricsFromResults(results: PulseResults): PulseMetricRow[] {
+  const rows: PulseMetricRow[] = [];
+  for (const item of results.checkins) {
+    rows.push({
+      sourceType: "checkins", sourceId: item.sourceId, sourceName: item.name, fieldLabel: null, detail: null,
+      value: item.failed ? null : item.count, warning: item.warning ?? null,
+    });
+  }
+  for (const item of results.groups) {
+    rows.push({
+      sourceType: "group", sourceId: item.sourceId, sourceName: item.name, fieldLabel: null, detail: null,
+      value: item.failed ? null : item.count, warning: item.warning ?? null,
+    });
+  }
+  for (const form of results.forms) {
+    rows.push({
+      sourceType: "form", sourceId: form.sourceId, sourceName: form.name, fieldLabel: null, detail: null,
+      value: form.failed ? null : form.totalSubmissions, warning: form.warning ?? null,
+    });
+    for (const [answer, count] of Object.entries(form.fieldBreakdown ?? {}).sort((a, b) => b[1] - a[1])) {
+      rows.push({
+        sourceType: "form_field", sourceId: form.sourceId, sourceName: form.name, fieldLabel: form.fieldLabel ?? null,
+        detail: answer, value: count, warning: null,
+      });
+    }
+  }
+  return rows;
+}
+
+// True when the window is the standard Monday-to-Monday week the Cron
+// Trigger produces (ends Monday 00:00 UTC, 7 days long). Only these runs
+// feed the tracker -- see weeklyPulseRunsTable.countsTowardTracker.
+export function isStandardWeek(weekRange: { start: string; end: string }): boolean {
+  const end = new Date(weekRange.end);
+  const start = new Date(weekRange.start);
+  return (
+    end.getUTCDay() === 1 &&
+    end.getUTCHours() === 0 && end.getUTCMinutes() === 0 && end.getUTCSeconds() === 0 &&
+    end.getTime() - start.getTime() === 7 * 24 * 60 * 60 * 1000
+  );
+}
+
+export async function recordRun(
+  config: WeeklyPulseConfig,
+  trigger: "scheduled" | "manual",
+  weekRange: { start: string; end: string },
+  results: PulseResults,
+): Promise<number> {
+  const weekStart = weekRange.start.slice(0, 10);
+  const weekEnd = weekRange.end.slice(0, 10);
+  const countsTowardTracker = isStandardWeek(weekRange);
+  const metrics = metricsFromResults(results);
+  return db.transaction(async (tx) => {
+    if (countsTowardTracker) {
+      // A newer run for the same config + week (a retry or a Monday re-send)
+      // replaces the earlier one in the tracker; the old run stays as history.
+      await tx.update(weeklyPulseRunsTable)
+        .set({ countsTowardTracker: false })
+        .where(and(
+          eq(weeklyPulseRunsTable.configId, config.id),
+          eq(weeklyPulseRunsTable.weekStart, weekStart),
+          eq(weeklyPulseRunsTable.countsTowardTracker, true),
+        ));
+    }
+    const [run] = await tx.insert(weeklyPulseRunsTable).values({
+      configId: config.id,
+      configName: config.name,
+      trigger,
+      weekStart,
+      weekEnd,
+      countsTowardTracker,
+    }).returning({ id: weeklyPulseRunsTable.id });
+    if (metrics.length) {
+      await tx.insert(weeklyPulseMetricsTable).values(metrics.map((row) => ({ ...row, runId: run.id })));
+    }
+    return run.id;
+  });
+}
+
+async function runWeeklyPulse(
+  config: WeeklyPulseConfig,
+  trigger: "scheduled" | "manual",
+): Promise<{ sent: boolean; error?: string }> {
+  const accessToken = await getValidPlanningCenterAccessToken(config.createdByUserId);
+  const weekRange = computeWeekRange();
+  const recipientEmails = parseJsonArray(config.recipientEmails);
+  if (!recipientEmails.length) return { sent: false, error: "No recipient emails configured." };
+
+  const results = await collectWeeklyPulse(config, accessToken, weekRange);
+
+  // Numbers are saved before the email goes out, so a mail failure (like the
+  // Resend "from" error) never loses a week. A failure to save is logged but
+  // doesn't block the email -- the email is the existing behavior.
+  let runId: number | null = null;
+  try {
+    runId = await recordRun(config, trigger, weekRange, results);
+  } catch (error) {
+    logger.error({ err: error, configId: config.id }, "Failed to record weekly pulse run to the tracker");
+  }
+
+  const html = buildEmailHtml(config, weekRange, results.checkins, results.groups, results.forms);
   const subjectDate = new Date(weekRange.end).toLocaleDateString("en-US", { month: "short", day: "numeric" });
-  return sendEmail({
+  const result = await sendEmail({
     to: recipientEmails,
     subject: `${config.name} — week ending ${subjectDate}`,
     html,
   });
+
+  if (runId !== null) {
+    await db.update(weeklyPulseRunsTable)
+      .set({ emailStatus: result.sent ? "sent" : "error", emailError: result.sent ? null : (result.error ?? "Unknown error") })
+      .where(eq(weeklyPulseRunsTable.id, runId))
+      .catch((error) => logger.error({ err: error, runId }, "Failed to record weekly pulse email status"));
+  }
+  return result;
 }
 
 async function recordRunResult(id: number, result: { sent: boolean; error?: string }) {
@@ -604,7 +759,7 @@ router.post("/config/:id/run-now", requireAdmin, async (req, res) => {
       res.status(409).json({ error: "This weekly pulse already ran in the last few minutes. Wait a moment before running it again." });
       return;
     }
-    const result = await runWeeklyPulse({ ...config, createdByUserId: res.locals.dbUser.id });
+    const result = await runWeeklyPulse({ ...config, createdByUserId: res.locals.dbUser.id }, "manual");
     await recordRunResult(id, result);
     if (!result.sent) {
       res.status(502).json({ error: result.error ?? "Failed to send the weekly pulse email." });
@@ -613,6 +768,86 @@ router.post("/config/:id/run-now", requireAdmin, async (req, res) => {
     res.json({ sent: true });
   } catch (error) {
     sendError(req, res, error, "Failed to run weekly pulse");
+  }
+});
+
+// Excel/Sheets treat a cell starting with = + - @ (or tab/CR) as a formula.
+// Names and form answers come from Planning Center and anyone filling out a
+// public form, so neutralise those before they reach a spreadsheet.
+function csvCell(value: unknown): string {
+  let raw = value === null || value === undefined ? "" : String(value);
+  if (typeof value === "string" && /^[=+\-@\t\r]/.test(raw)) raw = `'${raw}`;
+  return /[",\r\n]/.test(raw) ? `"${raw.replace(/"/g, '""')}"` : raw;
+}
+
+const SECTION_LABELS: Record<string, string> = {
+  checkins: "Check-Ins",
+  group: "Groups",
+  form: "Forms",
+  form_field: "Forms",
+};
+
+export function buildLatestReportCsv(
+  run: { configName: string; weekStart: string; weekEnd: string; ranAt: Date; trigger: string },
+  metrics: PulseMetricRow[],
+): string {
+  const header = ["Report", "Week start", "Week end", "Ran at (UTC)", "Run type", "Section", "Source", "Question", "Answer", "Count", "Note"];
+  const ranAt = run.ranAt.toISOString().replace("T", " ").slice(0, 16);
+  const runType = run.trigger === "scheduled" ? "Scheduled" : "Manual";
+  const lines = metrics.map((row) => [
+    run.configName,
+    run.weekStart,
+    run.weekEnd,
+    ranAt,
+    runType,
+    SECTION_LABELS[row.sourceType] ?? row.sourceType,
+    row.sourceName,
+    row.sourceType === "form_field" ? (row.fieldLabel ?? "") : row.sourceType === "form" ? "Total submissions" : "",
+    row.detail ?? "",
+    row.value,
+    row.value === null ? `Not available: ${row.warning ?? "fetch failed"}` : (row.warning ?? ""),
+  ]);
+  return [header, ...lines].map((line) => line.map(csvCell).join(",")).join("\r\n") + "\r\n";
+}
+
+// ── GET /api/weekly-pulse/config/:id/latest-report.csv ──────────────────────
+// The numbers from this config's most recent run (scheduled or test), as a
+// CSV for Excel/Sheets.
+router.get("/config/:id/latest-report.csv", requireAdmin, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id)) {
+      res.status(400).json({ error: "Invalid config id." });
+      return;
+    }
+    const runs = await db.select().from(weeklyPulseRunsTable)
+      .where(eq(weeklyPulseRunsTable.configId, id))
+      .orderBy(desc(weeklyPulseRunsTable.ranAt), desc(weeklyPulseRunsTable.id))
+      .limit(1);
+    const run = runs[0];
+    if (!run) {
+      res.status(404).json({ error: "No saved report yet. Reports are saved starting with the next run." });
+      return;
+    }
+    const metrics = await db.select().from(weeklyPulseMetricsTable)
+      .where(eq(weeklyPulseMetricsTable.runId, run.id))
+      .orderBy(weeklyPulseMetricsTable.id);
+    const body = buildLatestReportCsv(run, metrics.map((row) => ({
+      sourceType: row.sourceType as PulseMetricRow["sourceType"],
+      sourceId: row.sourceId,
+      sourceName: row.sourceName,
+      fieldLabel: row.fieldLabel,
+      detail: row.detail,
+      value: row.value,
+      warning: row.warning,
+    })));
+    const safeName = run.configName.replace(/[^a-z0-9_-]+/gi, "-").replace(/^-+|-+$/g, "").slice(0, 60) || "weekly-pulse";
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="${safeName}-${run.weekStart}.csv"`);
+    res.setHeader("Cache-Control", "no-store");
+    res.send("\uFEFF" + body);
+  } catch (error) {
+    sendError(req, res, error, "Failed to download the latest weekly pulse report");
   }
 });
 
@@ -640,7 +875,7 @@ router.post("/run-scheduled", async (req, res) => {
         results.push({ id: config.id, sent: false, error: "Skipped: this config already ran within the overlap guard window." });
         continue;
       }
-      const result = await runWeeklyPulse(config);
+      const result = await runWeeklyPulse(config, "scheduled");
       await recordRunResult(config.id, result);
       results.push({ id: config.id, sent: result.sent, error: result.error });
     } catch (error) {

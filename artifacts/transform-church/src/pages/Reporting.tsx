@@ -204,6 +204,7 @@ export default function Reporting() {
   const [pulseDraftForms, setPulseDraftForms] = useState<{ formId: string; fieldId: string }[]>([]);
   const [savingPulse, setSavingPulse] = useState(false);
   const [runningPulseId, setRunningPulseId] = useState<number | null>(null);
+  const [downloadingPulseId, setDownloadingPulseId] = useState<number | null>(null);
 
   const fieldOptions = useMemo(
     () => [...FIELD_OPTIONS, ...planningCenterFields],
@@ -597,6 +598,26 @@ export default function Reporting() {
       await loadWeeklyPulseConfigs();
     } finally {
       setRunningPulseId(null);
+    }
+  };
+
+  const downloadPulseReport = async (config: WeeklyPulseConfig) => {
+    setDownloadingPulseId(config.id);
+    try {
+      const response = await api(`/api/weekly-pulse/config/${config.id}/latest-report.csv`);
+      const blob = await response.blob();
+      const disposition = response.headers.get("Content-Disposition") ?? "";
+      const fileName = disposition.match(/filename="([^"]+)"/)?.[1] ?? "weekly-pulse.csv";
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = fileName;
+      anchor.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      toast({ title: "Could not download report", description: error instanceof Error ? error.message : "Request failed.", variant: "destructive" });
+    } finally {
+      setDownloadingPulseId(null);
     }
   };
 
@@ -1114,6 +1135,16 @@ export default function Reporting() {
                       >
                         {runningPulseId === config.id ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
                         Send test now
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => downloadPulseReport(config)}
+                        disabled={downloadingPulseId !== null}
+                        title="Download the numbers from the most recent run as a CSV"
+                      >
+                        {downloadingPulseId === config.id ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
+                        Latest report
                       </Button>
                       <Button size="sm" variant="outline" onClick={() => editPulseConfig(config)}>
                         <Settings2 className="mr-2 h-4 w-4" /> Edit
