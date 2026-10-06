@@ -253,6 +253,13 @@
       "when": 1791058200002,
       "tag": "0035_weekly_pulse_tracker",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1791058200003,
+      "tag": "0036_checkins_weekly_history",
+      "breakpoints": true
     }
   ]
 }

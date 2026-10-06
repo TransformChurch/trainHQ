@@ -1224,7 +1224,169 @@ export default function Reporting() {
           </CardContent>
         </Card>
       )}
+
+      {isAdmin && <AttendanceHistoryCard />}
     </div>
+  );
+}
+
+// One-time (re-runnable) pull of weekly Check-Ins attendance for every
+// event, active and archived, into the attendance history table -- see
+// routes/attendanceHistory.ts. Driven step by step from the browser so no
+// single request runs long; keep the tab open while it runs.
+const HISTORY_SINCE = "2024-01-01";
+const HISTORY_MAX_WEEKS_PER_CALL = 8;
+const HISTORY_MAX_PERIODS_PER_CALL = 60;
+
+type HistoryEvent = { id: string; name: string; archived: boolean };
+type HistoryWeek = { weekStart: string; weekEnd: string; periodIds: string[] };
+type HistorySummary = { rows: number; events: number; firstWeek: string | null; lastWeek: string | null; lastFetchedAt: string | null };
+
+function batchHistoryWeeks(weeks: HistoryWeek[]): HistoryWeek[][] {
+  const batches: HistoryWeek[][] = [];
+  let current: HistoryWeek[] = [];
+  let periods = 0;
+  for (const week of weeks) {
+    if (current.length && (current.length >= HISTORY_MAX_WEEKS_PER_CALL || periods + week.periodIds.length > HISTORY_MAX_PERIODS_PER_CALL)) {
+      batches.push(current);
+      current = [];
+      periods = 0;
+    }
+    current.push(week);
+    periods += week.periodIds.length;
+  }
+  if (current.length) batches.push(current);
+  return batches;
+}
+
+function AttendanceHistoryCard() {
+  const { toast } = useToast();
+  const [summary, setSummary] = useState<HistorySummary | null>(null);
+  const [running, setRunning] = useState(false);
+  const [progress, setProgress] = useState("");
+  const [failures, setFailures] = useState<{ eventName: string; error: string }[]>([]);
+  const stopRequested = useRef(false);
+
+  const loadSummary = async () => {
+    try {
+      const response = await api("/api/attendance-history/summary");
+      setSummary(await response.json() as HistorySummary);
+    } catch {
+      setSummary(null);
+    }
+  };
+
+  useEffect(() => {
+    loadSummary();
+  }, []);
+
+  const runPull = async () => {
+    if (!window.confirm("Pull weekly attendance for every Check-Ins event since Jan 1, 2024? This can take a while. Keep this tab open until it finishes.")) return;
+    stopRequested.current = false;
+    setRunning(true);
+    setFailures([]);
+    let weeksSaved = 0;
+    const failed: { eventName: string; error: string }[] = [];
+    try {
+      setProgress("Loading Check-Ins events…");
+      const events = await (await api("/api/attendance-history/events")).json() as HistoryEvent[];
+      for (const [index, event] of events.entries()) {
+        if (stopRequested.current) break;
+        const label = `Event ${index + 1} of ${events.length}: ${event.name}`;
+        try {
+          setProgress(`${label} (finding sessions…)`);
+          const weeks = await (await api(
+            `/api/attendance-history/events/${encodeURIComponent(event.id)}/weeks?since=${HISTORY_SINCE}`,
+          )).json() as HistoryWeek[];
+          const batches = batchHistoryWeeks(weeks);
+          let done = 0;
+          for (const batch of batches) {
+            if (stopRequested.current) break;
+            setProgress(`${label} (${done} of ${weeks.length} weeks)`);
+            await api(`/api/attendance-history/events/${encodeURIComponent(event.id)}/weeks`, {
+              method: "POST",
+              body: JSON.stringify({ eventName: event.name, archived: event.archived, weeks: batch }),
+            });
+            done += batch.length;
+            weeksSaved += batch.length;
+          }
+        } catch (error) {
+          failed.push({ eventName: event.name, error: error instanceof Error ? error.message : "Request failed." });
+          setFailures([...failed]);
+        }
+      }
+      toast({
+        title: stopRequested.current ? "Attendance history pull stopped" : "Attendance history pull finished",
+        description: `${weeksSaved} event-weeks saved${failed.length ? `, ${failed.length} event${failed.length === 1 ? "" : "s"} failed` : ""}.`,
+        variant: failed.length ? "destructive" : undefined,
+      });
+    } catch (error) {
+      toast({ title: "Could not pull attendance history", description: error instanceof Error ? error.message : "Request failed.", variant: "destructive" });
+    } finally {
+      setRunning(false);
+      setProgress("");
+      await loadSummary();
+    }
+  };
+
+  const downloadHistory = async () => {
+    try {
+      const response = await api("/api/attendance-history/history.csv");
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = "attendance-history-by-week.csv";
+      anchor.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      toast({ title: "Could not download history", description: error instanceof Error ? error.message : "Request failed.", variant: "destructive" });
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2"><BarChart3 className="h-5 w-5" /> Attendance history</CardTitle>
+        <p className="text-sm text-muted-foreground">
+          A one-time pull of weekly Check-Ins attendance for every event, active and archived, since Jan 1, 2024,
+          using the same Monday-to-Monday weeks as the Weekly Pulse. Read-only in Planning Center. Safe to run again:
+          it refreshes the weeks it already has.
+        </p>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <p className="text-sm text-muted-foreground">
+          {summary && summary.rows > 0
+            ? `${summary.rows} event-weeks saved across ${summary.events} events (${summary.firstWeek} to ${summary.lastWeek}).`
+            : "No history pulled yet."}
+        </p>
+        {running && (
+          <p className="flex items-center gap-2 text-sm">
+            <Loader2 className="h-4 w-4 animate-spin" /> {progress} Keep this tab open.
+          </p>
+        )}
+        {failures.length > 0 && (
+          <div className="rounded-md border border-destructive/40 p-3 text-sm">
+            <p className="font-medium text-destructive">Some events could not be pulled (run again to retry them):</p>
+            <ul className="mt-1 list-disc pl-5 text-muted-foreground">
+              {failures.map((failure) => <li key={failure.eventName}>{failure.eventName}: {failure.error}</li>)}
+            </ul>
+          </div>
+        )}
+        <div className="flex flex-wrap gap-2">
+          {running ? (
+            <Button variant="outline" onClick={() => { stopRequested.current = true; }}>Stop</Button>
+          ) : (
+            <Button onClick={runPull}>
+              <RefreshCw className="mr-2 h-4 w-4" /> Pull history since Jan 1, 2024
+            </Button>
+          )}
+          <Button variant="outline" onClick={downloadHistory} disabled={running || !summary?.rows}>
+            <Download className="mr-2 h-4 w-4" /> Download history CSV
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -1417,4 +1579,4 @@ function PulseConfigForm({
       )}
     </div>
   );
-}
+}

@@ -554,10 +554,19 @@ async function runWeeklyPulse(
 
   const html = buildEmailHtml(config, weekRange, results.checkins, results.groups, results.forms);
   const subjectDate = new Date(weekRange.end).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  // Same numbers as the email body, as a spreadsheet-ready attachment -- the
+  // identical format to the "Latest report" download.
+  const weekStart = weekRange.start.slice(0, 10);
+  const csv = buildLatestReportCsv(
+    { configName: config.name, weekStart, weekEnd: weekRange.end.slice(0, 10), ranAt: new Date(), trigger },
+    metricsFromResults(results),
+  );
+  const safeName = config.name.replace(/[^a-z0-9_-]+/gi, "-").replace(/^-+|-+$/g, "").slice(0, 60) || "weekly-pulse";
   const result = await sendEmail({
     to: recipientEmails,
     subject: `${config.name} — week ending ${subjectDate}`,
     html,
+    attachments: [{ filename: `${safeName}-${weekStart}.csv`, content: "\uFEFF" + csv }],
   });
 
   if (runId !== null) {

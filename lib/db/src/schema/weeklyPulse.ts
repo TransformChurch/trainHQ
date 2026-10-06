@@ -1,4 +1,4 @@
-import { boolean, date, index, integer, pgTable, serial, text, timestamp } from "drizzle-orm/pg-core";
+import { boolean, date, index, integer, pgTable, serial, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 import { usersTable } from "./users";
 
 // Config for the automated "weekly pulse" email -- a lightweight, numbers-only
@@ -94,3 +94,29 @@ export const weeklyPulseMetricsTable = pgTable("weekly_pulse_metrics", {
 
 export type WeeklyPulseRun = typeof weeklyPulseRunsTable.$inferSelect;
 export type WeeklyPulseMetric = typeof weeklyPulseMetricsTable.$inferSelect;
+
+// One-time (re-runnable) history of Check-Ins attendance per event per week,
+// pulled read-only from Planning Center by the "Attendance history" tool on
+// the Reporting page -- see routes/attendanceHistory.ts. Weeks use the same
+// Monday-00:00-UTC boundaries as the Weekly Pulse (computeWeekRange), so a
+// row here lines up with the tracker's weekly_pulse_metrics rows for the same
+// event (source_type "checkins", source_id = event_id). Re-pulling an event
+// overwrites its weeks (unique on event_id + week_start). Weeks where the
+// event had no sessions have no row.
+export const checkinsWeeklyHistoryTable = pgTable("checkins_weekly_history", {
+  id: serial("id").primaryKey(),
+  eventId: text("event_id").notNull(),
+  eventName: text("event_name").notNull(),
+  eventArchived: boolean("event_archived").notNull().default(false),
+  weekStart: date("week_start").notNull(),
+  weekEnd: date("week_end").notNull(), // exclusive
+  uniqueAttendees: integer("unique_attendees").notNull(),
+  totalCheckIns: integer("total_check_ins").notNull(),
+  sessions: integer("sessions").notNull(), // event periods in the week
+  fetchedAt: timestamp("fetched_at").notNull().defaultNow(),
+}, (table) => [
+  uniqueIndex("checkins_weekly_history_event_week_idx").on(table.eventId, table.weekStart),
+  index("checkins_weekly_history_week_start_idx").on(table.weekStart),
+]);
+
+export type CheckinsWeeklyHistory = typeof checkinsWeeklyHistoryTable.$inferSelect;

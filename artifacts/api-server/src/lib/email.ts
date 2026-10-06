@@ -6,10 +6,16 @@
 // now (same behavior either way); worth pointing both at this helper next
 // time either file is touched for something else.
 
+export interface EmailAttachment {
+  filename: string;
+  content: string | Buffer; // raw file content; base64-encoded for Resend below
+}
+
 export interface SendEmailInput {
   to: string | string[];
   subject: string;
   html: string;
+  attachments?: EmailAttachment[];
 }
 
 export interface SendEmailResult {
@@ -67,7 +73,7 @@ export function resolveFromHeader(raw: string | undefined = process.env.EMAIL_FR
   return null;
 }
 
-export async function sendEmail({ to, subject, html }: SendEmailInput): Promise<SendEmailResult> {
+export async function sendEmail({ to, subject, html, attachments }: SendEmailInput): Promise<SendEmailResult> {
   const apiKey = process.env.RESEND_API_KEY;
   if (!apiKey) return { sent: false, error: "RESEND_API_KEY is not configured" };
 
@@ -90,6 +96,14 @@ export async function sendEmail({ to, subject, html }: SendEmailInput): Promise<
         to,
         subject,
         html,
+        ...(attachments?.length
+          ? {
+              attachments: attachments.map((attachment) => ({
+                filename: attachment.filename,
+                content: Buffer.from(attachment.content).toString("base64"),
+              })),
+            }
+          : {}),
       }),
     });
     if (!response.ok) {

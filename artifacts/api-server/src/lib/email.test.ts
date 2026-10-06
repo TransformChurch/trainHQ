@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { resolveFromHeader } from "./email";
+import { resolveFromHeader, sendEmail } from "./email";
 
 test("unset or empty EMAIL_FROM falls back to the default sender", () => {
   assert.equal(resolveFromHeader(undefined), "Transform Church <onboarding@resend.dev>");
@@ -33,4 +33,33 @@ test("an unusable value returns null instead of a header Resend will reject", ()
   assert.equal(resolveFromHeader("mailto:pulse@transformchurch.app"), null);
   assert.equal(resolveFromHeader("pulse@transformchurch"), null);
   assert.equal(resolveFromHeader("pulse@transformchurch.app>"), null);
+});
+
+test("sendEmail base64-encodes attachments for Resend", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalKey = process.env.RESEND_API_KEY;
+  const originalFrom = process.env.EMAIL_FROM;
+  let sentBody: any = null;
+  process.env.RESEND_API_KEY = "test-key";
+  process.env.EMAIL_FROM = "Reporting@transformchurch.app";
+  globalThis.fetch = (async (_url: string, init: RequestInit) => {
+    sentBody = JSON.parse(String(init.body));
+    return new Response("{}", { status: 200 });
+  }) as typeof fetch;
+  try {
+    const result = await sendEmail({
+      to: ["a@example.com"],
+      subject: "s",
+      html: "<p>x</p>",
+      attachments: [{ filename: "pulse.csv", content: "Source,Count\r\nKids,42\r\n" }],
+    });
+    assert.equal(result.sent, true);
+    assert.equal(sentBody.from, "Transform Church <Reporting@transformchurch.app>");
+    assert.equal(sentBody.attachments[0].filename, "pulse.csv");
+    assert.equal(Buffer.from(sentBody.attachments[0].content, "base64").toString("utf8"), "Source,Count\r\nKids,42\r\n");
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalKey === undefined) delete process.env.RESEND_API_KEY; else process.env.RESEND_API_KEY = originalKey;
+    if (originalFrom === undefined) delete process.env.EMAIL_FROM; else process.env.EMAIL_FROM = originalFrom;
+  }
 });
