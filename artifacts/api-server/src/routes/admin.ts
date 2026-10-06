@@ -12,6 +12,7 @@ import adminWikiRouter, { createAdminWikiRouter } from "./adminWiki";
 import adminTracksRouter from "./adminTracks";
 import adminPlanningCenterRouter from "./adminPlanningCenter";
 import adminWikiDriveSyncRouter from "./adminWikiDriveSync";
+import { resolveFromHeader } from "../lib/email";
 
 const router = Router();
 
@@ -31,7 +32,11 @@ async function sendAssignmentEmail(
   const apiKey = process.env.RESEND_API_KEY;
   if (!apiKey) return;
   try {
-    const fromAddr = process.env.EMAIL_FROM ?? "onboarding@resend.dev";
+    const from = resolveFromHeader();
+    if (!from) {
+      console.error("Skipping assignment email: EMAIL_FROM is not a valid sender address");
+      return;
+    }
     const dueLine = dueDate
       ? `<p><strong>Due:</strong> ${new Date(dueDate).toLocaleDateString()}</p>`
       : "";
@@ -42,7 +47,7 @@ async function sendAssignmentEmail(
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        from: `Transform Church <${fromAddr}>`,
+        from,
         to: toEmail,
         subject: `New Training Module Assigned: ${moduleName}`,
         html: `

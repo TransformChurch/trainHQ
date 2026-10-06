@@ -21,11 +21,46 @@ export interface SendEmailResult {
   error?: string;
 }
 
+const DEFAULT_FROM_NAME = "Transform Church";
+const DEFAULT_FROM_ADDRESS = "onboarding@resend.dev";
+const BARE_EMAIL = /^[^\s<>@"]+@[^\s<>@"]+\.[^\s<>@"]+$/;
+const NAMED_EMAIL = /^([^<>]*?)\s*<\s*([^\s<>@"]+@[^\s<>@"]+\.[^\s<>@"]+)\s*>$/;
+
+// Builds the Resend `from` header from EMAIL_FROM. Resend rejects anything
+// that isn't `addr@example.com` or `Name <addr@example.com>` with a 422, and
+// the old `Transform Church <${EMAIL_FROM}>` template produced exactly that
+// in two real cases: the Worker passes EMAIL_FROM through as "" when the
+// secret is unset (so `??` never fell back and the header became
+// `Transform Church <>`), and a value that already carried a display name
+// came out double-wrapped (`Transform Church <Name <addr>>`). Accepts a bare
+// address, a full `Name <addr>` value, surrounding whitespace or quotes, and
+// falls back to the Resend sandbox sender when unset. Returns null when the
+// value is set but unusable so callers can report a clear error instead of
+// a raw Resend 422.
+export function resolveFromHeader(raw: string | undefined = process.env.EMAIL_FROM): string | null {
+  let value = (raw ?? "").trim();
+  if (/^(["']).*\1$/.test(value)) value = value.slice(1, -1).trim();
+  if (!value) return `${DEFAULT_FROM_NAME} <${DEFAULT_FROM_ADDRESS}>`;
+  if (BARE_EMAIL.test(value)) return `${DEFAULT_FROM_NAME} <${value}>`;
+  const named = NAMED_EMAIL.exec(value);
+  if (named) {
+    const name = named[1].trim().replace(/^"(.*)"$/, "$1").trim() || DEFAULT_FROM_NAME;
+    return `${name} <${named[2]}>`;
+  }
+  return null;
+}
+
 export async function sendEmail({ to, subject, html }: SendEmailInput): Promise<SendEmailResult> {
   const apiKey = process.env.RESEND_API_KEY;
   if (!apiKey) return { sent: false, error: "RESEND_API_KEY is not configured" };
 
-  const fromAddr = process.env.EMAIL_FROM ?? "onboarding@resend.dev";
+  const from = resolveFromHeader();
+  if (!from) {
+    return {
+      sent: false,
+      error: "EMAIL_FROM is set but is not a valid sender. Use an address like pulse@yourdomain.com or Name <pulse@yourdomain.com>.",
+    };
+  }
   try {
     const response = await fetch("https://api.resend.com/emails", {
       method: "POST",
@@ -34,7 +69,7 @@ export async function sendEmail({ to, subject, html }: SendEmailInput): Promise<
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        from: `Transform Church <${fromAddr}>`,
+        from,
         to,
         subject,
         html,

@@ -19,6 +19,7 @@ import {
   syncPlanningCenterModuleAssignment,
   syncPlanningCenterTrackDateField,
 } from "../lib/planningCenter";
+import { resolveFromHeader } from "../lib/email";
 
 const router = Router();
 
@@ -32,14 +33,18 @@ async function sendTrackAssignmentEmail(
   const apiKey = process.env.RESEND_API_KEY;
   if (!apiKey) return;
   try {
-    const fromAddr = process.env.EMAIL_FROM ?? "onboarding@resend.dev";
+    const from = resolveFromHeader();
+    if (!from) {
+      console.error("Skipping assignment email: EMAIL_FROM is not a valid sender address");
+      return;
+    }
     const dueLine = dueDate ? `<p><strong>Due:</strong> ${new Date(dueDate).toLocaleDateString()}</p>` : "";
     const moduleListHtml = moduleTitles.map((title) => `<li>${title}</li>`).join("");
     await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
       body: JSON.stringify({
-        from: `Transform Church <${fromAddr}>`,
+        from,
         to: toEmail,
         subject: `New Training Track Assigned: ${trackName}`,
         html: `<h2>You've been assigned a new training track</h2><p>Hi ${toName},</p><p>A new training track has been assigned to you:</p><p><strong>${trackName}</strong></p>${dueLine}<p>It includes the following modules:</p><ul>${moduleListHtml}</ul><p>Log in to your Transform Church training portal to get started.</p>`,
