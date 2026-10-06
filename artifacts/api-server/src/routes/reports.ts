@@ -17,6 +17,14 @@ import { requireToolAccess } from "../middlewares/requireToolAccess";
 import { getValidPlanningCenterAccessToken } from "../lib/planningCenter";
 import { ObjectStorageService } from "../lib/objectStorage";
 import { sendEmail } from "../lib/email";
+import {
+  addDays,
+  buildWeeklyHistory,
+  genderByPersonFromIncluded,
+  loadTrendRows,
+  saveHistoryRows,
+  weekStartFor,
+} from "../lib/checkinsHistory";
 
 const router: IRouter = Router();
 const storage = new ObjectStorageService();
@@ -984,6 +992,32 @@ router.post("/prepare", requireToolAccess("reporting"), async (req, res) => {
       records.set(key, current);
     }
 
+    // Keep the attendance tracker (checkins_weekly_history) current for this
+    // event: the check-ins fetched above already cover its full history, so
+    // the last year of weeks is recomputed and saved here at no extra
+    // Planning Center cost. The report's trend chart reads these rows back
+    // at generate time. Best-effort -- a tracker problem never blocks the
+    // report itself.
+    try {
+      const periodStartById = new Map<string, string>();
+      for (const period of periodCollection.data) {
+        const startsAt = text(period.attributes?.starts_at);
+        if (period.id && startsAt) periodStartById.set(period.id, startsAt);
+      }
+      const sinceWeek = addDays(weekStartFor(`${endDate}T12:00:00Z`), -7 * 52);
+      const historyRows = buildWeeklyHistory(
+        collection.data,
+        periodStartById,
+        genderByPersonFromIncluded(collection.included),
+        sinceWeek,
+        new Date(),
+        firstTimeCollection.data,
+      );
+      await saveHistoryRows({ eventId, eventName, archived: false }, historyRows);
+    } catch (error) {
+      req.log.warn({ err: error, eventId }, "Could not refresh the attendance tracker for this event");
+    }
+
     const headers = [
       ...REPORT_FIELDS.map((field) => field.label),
       ...selectedCustomFields.map((field) => fieldLabel(field, customLabels)),
@@ -1098,11 +1132,26 @@ async function generateReportPdf(
       fail(422, "This report template has no engine configured.");
     }
     const definition = reportEngineDefinition(template!.engine as Parameters<typeof reportEngineDefinition>[0]);
+    // Attendance trend: the last 13 weeks for this event from the saved
+    // tracker (refreshed at prepare time). Without at least two weeks the
+    // engine falls back to the report's own weeks.
+    const trendArgs: string[] = [];
+    try {
+      const trendRows = await loadTrendRows(run!.eventId, run!.endDate, 13);
+      if (trendRows.length >= 2) {
+        const trendPath = join(workDir, "trend.json");
+        await writeFile(trendPath, JSON.stringify(trendRows));
+        trendArgs.push("--trend-json", trendPath);
+      }
+    } catch (error) {
+      console.warn("Attendance trend unavailable; using the report's own weeks.", error);
+    }
     await runPython([
       bundledReportEngineScript(definition.script),
       ...definition.args,
       "--data", cleanedPath,
       "--out-pdf", pdfPath,
+      ...trendArgs,
     ], 180_000);
     const engineStats = await stat(pdfPath).catch(() => null);
     if (!engineStats?.isFile() || engineStats.size === 0) fail(422, "The report engine did not create a PDF.");

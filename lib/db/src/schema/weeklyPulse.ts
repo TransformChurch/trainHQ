@@ -113,6 +113,16 @@ export const checkinsWeeklyHistoryTable = pgTable("checkins_weekly_history", {
   uniqueAttendees: integer("unique_attendees").notNull(),
   totalCheckIns: integer("total_check_ins").notNull(),
   sessions: integer("sessions").notNull(), // event periods in the week
+  // Unique attendees by Planning Center gender (migration 0037). NULL on
+  // rows saved before gender was tracked.
+  maleAttendees: integer("male_attendees"),
+  femaleAttendees: integer("female_attendees"),
+  unknownGenderAttendees: integer("unknown_gender_attendees"),
+  // First-time guests whose first check-in was this week, and how many of
+  // them have since come back to any later service (migration 0037). Filled
+  // in when a report is prepared for the event; NULL otherwise.
+  firstTimers: integer("first_timers"),
+  firstTimersReturned: integer("first_timers_returned"),
   fetchedAt: timestamp("fetched_at").notNull().defaultNow(),
 }, (table) => [
   uniqueIndex("checkins_weekly_history_event_week_idx").on(table.eventId, table.weekStart),

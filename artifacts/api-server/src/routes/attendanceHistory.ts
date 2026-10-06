@@ -17,6 +17,13 @@
 // (no volunteers), unique people across all of the week's sessions.
 import { Router, type IRouter, type Request, type Response } from "express";
 import { checkinsWeeklyHistoryTable, db } from "@workspace/db";
+import {
+  addDays,
+  genderByPersonFromIncluded,
+  saveHistoryRows,
+  summarizeCheckIns,
+  weekStartFor,
+} from "../lib/checkinsHistory";
 import { asc, count, countDistinct, max, sql } from "drizzle-orm";
 import { requireAdmin } from "../middlewares/requireAuth";
 import { getValidPlanningCenterAccessToken } from "../lib/planningCenter";
@@ -26,9 +33,10 @@ import {
   fetchCollection,
   firstValue,
   planningCenterRequest,
-  relationshipId,
   text,
 } from "./reports";
+
+export { addDays, summarizeCheckIns, weekStartFor };
 
 const router: IRouter = Router();
 
@@ -38,24 +46,11 @@ export const MAX_PERIODS_PER_REQUEST = 60;
 
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 const PCO_ID = /^\d{1,20}$/;
-const DAY_MS = 24 * 60 * 60 * 1000;
 
 function sendError(req: Request, res: Response, error: unknown, fallback: string) {
   const typed = error as Error & { status?: number; details?: string };
   req.log.error({ err: error, details: typed.details }, fallback);
   res.status(typed.status ?? 500).json({ error: typed.message || fallback });
-}
-
-// Monday 00:00 UTC on or before the given instant, as YYYY-MM-DD.
-export function weekStartFor(iso: string): string {
-  const date = new Date(iso);
-  date.setUTCHours(0, 0, 0, 0);
-  const daysSinceMonday = (date.getUTCDay() + 6) % 7;
-  return new Date(date.getTime() - daysSinceMonday * DAY_MS).toISOString().slice(0, 10);
-}
-
-export function addDays(dateOnly: string, days: number): string {
-  return new Date(new Date(`${dateOnly}T00:00:00Z`).getTime() + days * DAY_MS).toISOString().slice(0, 10);
 }
 
 export type HistoryWeek = { weekStart: string; weekEnd: string; periodIds: string[] };
@@ -80,13 +75,6 @@ export function groupPeriodsByWeek(
   return [...byWeek.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([weekStart, periodIds]) => ({ weekStart, weekEnd: addDays(weekStart, 7), periodIds }));
-}
-
-// Unique people across a week's attendee check-ins. Falls back to the raw
-// count if Planning Center ever omits the person link, same as the Pulse.
-export function summarizeCheckIns(checkIns: JsonApiResource[]): { uniqueAttendees: number; totalCheckIns: number } {
-  const people = new Set(checkIns.map((checkIn) => relationshipId(checkIn, "person")).filter(Boolean));
-  return { uniqueAttendees: people.size || checkIns.length, totalCheckIns: checkIns.length };
 }
 
 // Excel/Sheets formula guard, same as weeklyPulse.ts's csvCell.
@@ -220,42 +208,34 @@ router.post("/events/:eventId/weeks", requireAdmin, async (req, res) => {
     }
 
     const accessToken = await getValidPlanningCenterAccessToken(res.locals.dbUser.id);
-    const saved = [];
+    const rows = [];
     for (const week of weeks) {
       const checkIns: JsonApiResource[] = [];
+      const included: JsonApiResource[] = [];
       for (const periodId of week.periodIds) {
         const collection = await fetchCollection(
-          `${CHECK_INS_BASE}/events/${encodeURIComponent(eventId)}/event_periods/${encodeURIComponent(periodId)}/check_ins?filter=attendee&per_page=100`,
+          `${CHECK_INS_BASE}/events/${encodeURIComponent(eventId)}/event_periods/${encodeURIComponent(periodId)}/check_ins?filter=attendee&include=person&per_page=100`,
           accessToken,
         );
         checkIns.push(...collection.data);
+        included.push(...collection.included);
       }
-      const { uniqueAttendees, totalCheckIns } = summarizeCheckIns(checkIns);
-      const values = {
-        eventId,
-        eventName,
-        eventArchived: archived,
+      rows.push({
         weekStart: week.weekStart,
         weekEnd: addDays(week.weekStart, 7),
-        uniqueAttendees,
-        totalCheckIns,
         sessions: week.periodIds.length,
-        fetchedAt: new Date(),
-      };
-      await db.insert(checkinsWeeklyHistoryTable).values(values).onConflictDoUpdate({
-        target: [checkinsWeeklyHistoryTable.eventId, checkinsWeeklyHistoryTable.weekStart],
-        set: {
-          eventName: values.eventName,
-          eventArchived: values.eventArchived,
-          weekEnd: values.weekEnd,
-          uniqueAttendees: values.uniqueAttendees,
-          totalCheckIns: values.totalCheckIns,
-          sessions: values.sessions,
-          fetchedAt: values.fetchedAt,
-        },
+        ...summarizeCheckIns(checkIns, genderByPersonFromIncluded(included)),
+        firstTimers: null,
+        firstTimersReturned: null,
       });
-      saved.push({ weekStart: week.weekStart, uniqueAttendees, totalCheckIns, sessions: values.sessions });
     }
+    await saveHistoryRows({ eventId, eventName, archived }, rows);
+    const saved = rows.map((row) => ({
+      weekStart: row.weekStart,
+      uniqueAttendees: row.uniqueAttendees,
+      totalCheckIns: row.totalCheckIns,
+      sessions: row.sessions,
+    }));
     res.json({ saved });
   } catch (error) {
     sendError(req, res, error, "Failed to pull attendance for these weeks");

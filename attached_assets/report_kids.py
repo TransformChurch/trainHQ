@@ -60,10 +60,11 @@ import pandas as pd
 from report_common import (
     BandSeries, CATEGORICAL, FEMALE_COLOR, MALE_COLOR, UNKNOWN_COLOR,
     CleanedData, attendance_rate_bucket_edges, bucket_labels, bucket_series,
-    draw_cover_page, draw_grouped_bar, draw_ordinal_bar, draw_pie,
-    draw_report_header, draw_stat_tiles, draw_table, draw_trend_lines,
-    draw_weekly_stacked_by_age, format_period_label, load_cleaned_csv,
-    new_page, save_pdf, setup_style, style_axes,
+    draw_cover_page, draw_first_timer_page, draw_grouped_bar, draw_ordinal_bar, draw_pie,
+    draw_report_header, draw_stat_tiles, draw_table, draw_trend,
+    draw_weekly_stacked_by_age, first_timer_stats, format_period_label, grade_colors,
+    load_cleaned_csv, load_trend_json, new_page, nonzero_slices, save_pdf, section_title,
+    setup_style, style_axes, trend_from_report,
 )
 
 ORG_NAME = "Transform Church"
@@ -134,7 +135,7 @@ def prepare(data: CleanedData, config: CampusConfig, as_of: dt.date | None = Non
 
 def render(data: CleanedData, config: CampusConfig, period_label: str | None = None,
            as_of: dt.date | None = None, logo_path: str | Path | None = DEFAULT_LOGO,
-           orientation: str = "portrait") -> list:
+           orientation: str = "portrait", trend_path: str | Path | None = None) -> list:
     setup_style()
     df = prepare(data, config, as_of)
     week_dates = data.week_dates
@@ -199,14 +200,36 @@ def render(data: CleanedData, config: CampusConfig, period_label: str | None = N
     bucket_total = sum(bucket_counts) or 1
     bucket_pct = [c / bucket_total for c in bucket_counts]
 
-    trend_series = {
-        "Male": [int(df.loc[df["_gender"] == "Male", w].sum()) for w in week_cols],
-        "Female": [int(df.loc[df["_gender"] == "Female", w].sum()) for w in week_cols],
-        "Unknown": [int(df.loc[df["_gender"].isna(), w].sum()) for w in week_cols],
-    }
-    trend_colors = {"Male": MALE_COLOR, "Female": FEMALE_COLOR, "Unknown": UNKNOWN_COLOR}
+    # Attendance trend: the last ~13 weeks from the saved attendance tracker
+    # when the server supplied it, else just this report's own weeks.
+    trend = load_trend_json(trend_path) or trend_from_report(df, week_cols, week_dates)
+
+    # Age-group donut (the weekly-chart bands: few enough slices to read,
+    # unlike the 10+ fine grades), one blue ramp youngest -> oldest.
+    band_labels = config.chart_band_order + ["Unknown"]
+    band_colors = grade_colors(len(config.chart_band_order))
+
+    def band_counts(frame):
+        return [int((frame["_chart_band"] == b).sum()) for b in config.chart_band_order] \
+            + [int(frame["_chart_band"].isna().sum())]
+
+    age_donut = nonzero_slices(band_labels, band_counts(df), band_colors)
+    summary_colors = [CATEGORICAL[3], CATEGORICAL[0], UNKNOWN_COLOR]
 
     ft_df = df[df["_first_timer"]]
+    ft_stats = first_timer_stats(ft_df, week_cols, week_dates)
+    ft_breakdowns = [
+        ("By gender", ["Male", "Female", "Unknown"],
+         [int((ft_df["_gender"] == "Male").sum()), int((ft_df["_gender"] == "Female").sum()),
+          int(ft_df["_gender"].isna().sum())],
+         [MALE_COLOR, FEMALE_COLOR, UNKNOWN_COLOR]),
+        ("By age group", band_labels, band_counts(ft_df), band_colors),
+        ("Pre-Elementary vs Elementary", ["Pre-Elementary", "Elementary", "n/a"],
+         [int(ft_df["_fine_grade"].isin(pre_elem).sum()),
+          int(ft_df["_fine_grade"].isin([g for g in config.fine_grade_order if g not in pre_elem]).sum()),
+          int(ft_df["_fine_grade"].isna().sum())],
+         summary_colors),
+    ]
     ft_bands = []
     for band_label in config.chart_band_order:
         mask = ft_df["_chart_band"] == band_label
@@ -242,43 +265,41 @@ def render(data: CleanedData, config: CampusConfig, period_label: str | None = N
         draw_weekly_stacked_by_age(figA, (0.06, 0.14, 0.88, 0.34), week_dates, bands)
         figs.append(figA)
 
-        # ---- Page B: Attendance Summary, Grade Breakdown, Grade vs Gender ----
+        # ---- Page B: Attendance Summary + Age Group donuts, Grade vs Gender ----
         figB = page()
         draw_report_header(figB, report_name, label, logo_path=logo)
-        ax_pie = figB.add_axes((0.10, 0.72, 0.34, 0.16))
-        draw_pie(ax_pie, ["Pre-Elementary", "Elementary", "n/a"], [pre_elem_n, elem_n, na_n])
-        ax_pie.set_title("Attendance Summary", loc="left", x=-0.05)
-        ax_bar = figB.add_axes((0.10, 0.46, 0.80, 0.18))
-        draw_ordinal_bar(ax_bar, config.fine_grade_order + ["n/a"], grade_counts, color=CATEGORICAL[0])
-        ax_bar.set_title("Grade Breakdown", loc="left")
-        ax_gg = figB.add_axes((0.08, 0.09, 0.86, 0.28))
+        section_title(figB, 0.06, 0.865, "Attendance Summary")
+        ax_pie = figB.add_axes((0.06, 0.60, 0.19, 0.24))
+        s_lab, s_val, s_col = nonzero_slices(["Pre-Elementary", "Elementary", "n/a"], [pre_elem_n, elem_n, na_n],
+                                             summary_colors)
+        draw_pie(ax_pie, s_lab, s_val, colors=s_col)
+        section_title(figB, 0.52, 0.865, "Kids by Age Group")
+        ax_age = figB.add_axes((0.52, 0.60, 0.19, 0.24))
+        draw_pie(ax_age, *age_donut[:2], colors=age_donut[2])
+        section_title(figB, 0.06, 0.53, "Grade vs Gender")
+        ax_gg = figB.add_axes((0.08, 0.09, 0.86, 0.40))
         draw_grouped_bar(ax_gg, config.fine_grade_order + ["n/a"],
                           {"Male": male_counts, "Female": female_counts},
                           {"Male": MALE_COLOR, "Female": FEMALE_COLOR})
-        ax_gg.set_title("Grade vs Gender", loc="left")
         figs.append(figB)
 
-        # ---- Page C: attendance-rate buckets, trend ----
+        # ---- Page C: services attended, trend ----
         figC = page()
         draw_report_header(figC, report_name, label, logo_path=logo)
-        ax_p1 = figC.add_axes((0.08, 0.66, 0.36, 0.12))
-        draw_pie(ax_p1, bucket_lbls, bucket_pct, value_fmt=lambda v: f"{v:.0%}")
-        ax_p1.set_title("Percentage of Kids vs\nServices Attended", loc="left", fontsize=9, x=-0.1)
-        ax_p2 = figC.add_axes((0.54, 0.66, 0.36, 0.12))
-        draw_pie(ax_p2, bucket_lbls, bucket_counts)
-        ax_p2.set_title("Number of Kids vs\nServices Attended", loc="left", fontsize=9, x=-0.1)
-        ax_trend = figC.add_axes((0.10, 0.08, 0.80, 0.50))
-        draw_trend_lines(ax_trend, week_dates, trend_series, trend_colors)
-        ax_trend.set_title("Attendance Trend", loc="left")
+        section_title(figC, 0.06, 0.865, "Number of Kids vs Services Attended",
+                      f"Share of the {num_weeks} services each child came to")
+        ax_p2 = figC.add_axes((0.08, 0.60, 0.22, 0.23))
+        draw_pie(ax_p2, bucket_lbls, bucket_counts, colors=grade_colors(len(bucket_lbls), False, CATEGORICAL[2]),
+                 legend_fontsize=9)
+        draw_trend(figC, (0.10, 0.08, 0.80, 0.42), trend)
         figs.append(figC)
 
-        # ---- Page D: first-timer weekly ----
-        figD = page()
-        draw_report_header(figD, report_name, label, logo_path=logo)
-        figD.text(0.06, 0.87, "Weekly Attendance by Age/Gender Group — First-Timers Only",
-                  fontsize=11, fontweight="bold", color="#0b0b0b")
-        draw_weekly_stacked_by_age(figD, (0.06, 0.16, 0.88, 0.58), week_dates, ft_bands)
-        figs.append(figD)
+        # ---- Last page: first-time guest analytics ----
+        figE = page()
+        draw_report_header(figE, report_name, label, logo_path=logo)
+        draw_first_timer_page(figE, ft_stats, ft_breakdowns, people_word="kids", trend=trend,
+                              week_dates=week_dates, ft_bands=ft_bands)
+        figs.append(figE)
 
         return figs
 
@@ -318,18 +339,13 @@ def render(data: CleanedData, config: CampusConfig, period_label: str | None = N
     ax_gg.set_title("Grade vs Gender", loc="left")
     figs.append(fig3)
 
-    # ---- Page 3: attendance-rate buckets, first-timer weekly, trend ----
+    # ---- Page 3: services attended, trend ----
     fig4 = page()
     draw_report_header(fig4, report_name, label, logo_path=logo)
-    ax_p1 = fig4.add_axes((0.04, 0.58, 0.20, 0.30))
-    draw_pie(ax_p1, bucket_lbls, bucket_pct, value_fmt=lambda v: f"{v:.0%}")
-    ax_p1.set_title("Percentage of Kids vs\nServices Attended", loc="left", fontsize=9.5, x=-0.15)
-    ax_p2 = fig4.add_axes((0.56, 0.58, 0.20, 0.30))
-    draw_pie(ax_p2, bucket_lbls, bucket_counts)
-    ax_p2.set_title("Number of Kids vs\nServices Attended", loc="left", fontsize=9.5, x=-0.15)
-    ax_trend = fig4.add_axes((0.10, 0.10, 0.80, 0.36))
-    draw_trend_lines(ax_trend, week_dates, trend_series, trend_colors)
-    ax_trend.set_title("Attendance Trend", loc="left")
+    section_title(fig4, 0.06, 0.86, "Number of Kids vs Services Attended")
+    ax_p2 = fig4.add_axes((0.06, 0.52, 0.22, 0.30))
+    draw_pie(ax_p2, bucket_lbls, bucket_counts, colors=grade_colors(len(bucket_lbls), False, CATEGORICAL[2]))
+    draw_trend(fig4, (0.08, 0.08, 0.86, 0.32), trend)
     figs.append(fig4)
 
     # ---- Page 4: first-timer weekly ----
@@ -339,6 +355,12 @@ def render(data: CleanedData, config: CampusConfig, period_label: str | None = N
               fontsize=11, fontweight="bold", color="#0b0b0b")
     draw_weekly_stacked_by_age(fig5, (0.06, 0.18, 0.88, 0.54), week_dates, ft_bands)
     figs.append(fig5)
+
+    fig6 = page()
+    draw_report_header(fig6, report_name, label, logo_path=logo)
+    draw_first_timer_page(fig6, ft_stats, ft_breakdowns, people_word="kids", trend=trend,
+                          week_dates=week_dates, ft_bands=ft_bands)
+    figs.append(fig6)
 
     return figs
 
@@ -354,6 +376,7 @@ def main():
     ap.add_argument("--logo", help="path to a logo image; defaults to the bundled TC Kids logo, if present")
     ap.add_argument("--no-logo", action="store_true", help="omit the logo entirely")
     ap.add_argument("--orientation", choices=["landscape", "portrait"], default="portrait")
+    ap.add_argument("--trend-json", help="weekly totals from the saved attendance tracker, for the trend chart")
     args = ap.parse_args()
 
     from report_kids_rutherford import CONFIG as RUTHERFORD_CONFIG
@@ -364,7 +387,7 @@ def main():
     as_of = dt.datetime.strptime(args.as_of, "%Y-%m-%d").date() if args.as_of else None
     logo_path = None if args.no_logo else (args.logo or DEFAULT_LOGO)
     figs = render(data, config, period_label=args.period_label, as_of=as_of, logo_path=logo_path,
-                  orientation=args.orientation)
+                  orientation=args.orientation, trend_path=args.trend_json)
     save_pdf(figs, args.out_pdf)
     print(f"Wrote {args.out_pdf}")
 

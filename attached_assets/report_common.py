@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import colorsys
 import datetime as dt
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -373,26 +374,70 @@ def draw_grouped_bar(ax: plt.Axes, categories: list, series: dict, colors: dict,
 
 
 def draw_pie(ax: plt.Axes, labels: list, values: list, colors: list | None = None,
-             value_fmt=None) -> None:
-    """Part-to-whole pie -- reserved for <=6 segments (dataviz guidance);
+             value_fmt=None, center_label: str | None = None, legend_fontsize: float = 8.0,
+             legend_below: bool = False) -> None:
+    """Part-to-whole donut -- reserved for <=8 segments (dataviz guidance);
     callers with more categories should use draw_ordinal_bar instead.
+
+    Drawn as a donut (ring) rather than a solid pie: same part-to-whole read,
+    lighter on the page, and the hole carries the total (center_label).
 
     value_fmt: optional formatter for the legend's value text. Default shows
     "count (pct of whole)"; pass e.g. `lambda v: f"{v:.0%}"` when `values`
     are already fractions/percentages rather than raw counts."""
     colors = colors or CATEGORICAL[: len(labels)]
-    total = sum(values) or 1
+    total = sum(values) or 0
+    if total <= 0:
+        ax.text(0.5, 0.5, "No data this period", ha="center", va="center",
+                color=INK_MUTED, fontsize=8.5, transform=ax.transAxes)
+        ax.axis("off")
+        return
     wedges, _ = ax.pie(
         values, colors=colors, startangle=90, counterclock=False,
-        wedgeprops={"linewidth": 1.2, "edgecolor": SURFACE},
+        wedgeprops={"linewidth": 1.5, "edgecolor": SURFACE, "width": 0.38},
     )
+    if center_label is None:
+        center_label = f"{total:,.0f}" if value_fmt is None else None
+    if center_label:
+        ax.text(0, 0.06, center_label, ha="center", va="center", fontsize=15,
+                fontweight="bold", color=INK_PRIMARY)
+        ax.text(0, -0.22, "total", ha="center", va="center", fontsize=7.5, color=INK_MUTED)
     if value_fmt is not None:
         legend_labels = [f"{lab} — {value_fmt(v)}" for lab, v in zip(labels, values)]
     else:
         legend_labels = [f"{lab} — {v:,.0f} ({v / total:.0%})" for lab, v in zip(labels, values)]
-    ax.legend(wedges, legend_labels, loc="center left", bbox_to_anchor=(1.05, 0.5),
-              fontsize=7.5, handletextpad=0.5, labelspacing=0.5, borderaxespad=0)
+    if legend_below:
+        ax.legend(wedges, legend_labels, loc="upper center", bbox_to_anchor=(0.5, -0.04),
+                  ncols=2 if len(labels) > 4 else 1, fontsize=legend_fontsize, handletextpad=0.4,
+                  labelspacing=0.4, columnspacing=0.9, borderaxespad=0, handlelength=1.0, handleheight=1.0)
+    else:
+        ax.legend(wedges, legend_labels, loc="center left", bbox_to_anchor=(1.05, 0.5),
+                  fontsize=legend_fontsize, handletextpad=0.5, labelspacing=0.55, borderaxespad=0,
+                  handlelength=1.0, handleheight=1.0)
     ax.set_aspect("equal")
+
+
+def grade_colors(n_known: int, include_unknown: bool = True, base: str = CATEGORICAL[0]) -> list:
+    """Colors for an ORDERED breakdown (grades / age groups): one hue, light
+    (youngest) to dark (oldest), plus the muted gray for Unknown."""
+    ramp = shade_ramp(base, n_known, light=0.80, dark=0.28) if n_known else []
+    return ramp + ([UNKNOWN_COLOR] if include_unknown else [])
+
+
+def nonzero_slices(labels: list, values: list, colors: list) -> tuple:
+    """Drop empty categories from a donut so its legend only lists what's
+    actually there (e.g. no 'Unknown' row when every grade is known)."""
+    kept = [(l, v, c) for l, v, c in zip(labels, values, colors) if v]
+    if not kept:
+        return labels, values, colors
+    return [k[0] for k in kept], [k[1] for k in kept], [k[2] for k in kept]
+
+
+def section_title(fig: plt.Figure, x: float, y: float, text: str, subtitle: str | None = None) -> None:
+    """Consistent section heading drawn in figure coordinates."""
+    fig.text(x, y, text, fontsize=11.5, fontweight="bold", color=INK_PRIMARY, ha="left", va="bottom")
+    if subtitle:
+        fig.text(x, y - 0.004, subtitle, fontsize=8, color=INK_MUTED, ha="left", va="top")
 
 
 def draw_weekly_band_small_multiples(fig: plt.Figure, rect: tuple, week_dates: list,
@@ -507,7 +552,9 @@ def shade_ramp(base_hex: str, n: int, light: float = 0.82, dark: float = 0.24,
 
 
 def draw_weekly_stacked_by_age(fig: plt.Figure, rect: tuple, week_dates: list,
-                                bands: "list[BandSeries]", base_color: str = CATEGORICAL[0]) -> None:
+                                bands: "list[BandSeries]", base_color: str = CATEGORICAL[0],
+                                legend_ncols: int | None = None, legend_gap: float = 0.03,
+                                legend_fontsize: float = 7.5) -> None:
     """Single bar per week date: every band's total (both genders combined)
     stacked into ONE bar, youngest band at the bottom, oldest at the top --
     each band shaded a progressively darker step of the same hue so age
@@ -546,14 +593,20 @@ def draw_weekly_stacked_by_age(fig: plt.Figure, rect: tuple, week_dates: list,
     ax.set_xticks(x)
     ax.set_xticklabels(week_labels, fontsize=8)
     style_axes(ax)
+    ax.yaxis.set_major_locator(plt.MaxNLocator(integer=True, nbins=5))
+    if not stack_bottom.any():
+        ax.set_ylim(0, 1)
+        ax.set_yticks([])
+        ax.text(0.5, 0.5, "No attendance to show this period", ha="center", va="center",
+                color=INK_MUTED, fontsize=9, transform=ax.transAxes)
     # Anchor the legend a FIXED figure-fraction gap above the axes, not a
     # percentage of the axes' own height -- a percentage-based offset looks
     # right for a tall, full-page chart but collides with neighboring
     # content once this same chart is placed in a shorter rect (e.g. two
     # sections sharing one portrait-mode page).
-    ax.legend(handles=handles, loc="lower right", bbox_to_anchor=(left + width, bottom + height + 0.03),
-              bbox_transform=fig.transFigure, ncols=min(len(handles), 4), fontsize=7.5, frameon=False,
-              columnspacing=1.0, handletextpad=0.5)
+    ax.legend(handles=handles, loc="lower right", bbox_to_anchor=(left + width, bottom + height + legend_gap),
+              bbox_transform=fig.transFigure, ncols=legend_ncols or min(len(handles), 4),
+              fontsize=legend_fontsize, frameon=False, columnspacing=1.0, handletextpad=0.5, borderaxespad=0)
 
 
 @dataclass
@@ -563,12 +616,24 @@ class BandSeries:
     colors: dict            # {"Male": MALE_COLOR, ...}
 
 
-def draw_trend_lines(ax: plt.Axes, week_dates: list, series: dict, colors: dict) -> None:
+def draw_trend_lines(ax: plt.Axes, week_dates: list, series: dict, colors: dict,
+                     emphasize: str | None = None) -> None:
     """Week-over-week trend lines (the original templates' 'Attendance'
-    scatter/smoothed-line chart)."""
+    scatter/smoothed-line chart). `emphasize` names one series (e.g.
+    "Total") to draw heavier and value-label, with the rest as thinner
+    supporting lines."""
     x = np.arange(len(week_dates))
     for name, values in series.items():
-        ax.plot(x, values, marker="o", markersize=4, linewidth=1.6, color=colors[name], label=name)
+        heavy = name == emphasize
+        ax.plot(x, values, marker="o", markersize=5 if heavy else 3.5, linewidth=2.4 if heavy else 1.4,
+                color=colors[name], label=name, zorder=3 if heavy else 2,
+                alpha=1.0 if heavy or emphasize is None else 0.9)
+        if heavy:
+            for xi, v in zip(x, values):
+                ax.annotate(f"{v:,.0f}", (xi, v), textcoords="offset points", xytext=(0, 5),
+                            ha="center", fontsize=6.5, color=INK_SECONDARY)
+    ymax = max((max(v) for v in series.values() if len(v)), default=0)
+    ax.set_ylim(0, ymax * 1.15 if ymax else 1)
     ax.set_xticks(x)
     week_labels = [d.strftime("%-m/%-d") if hasattr(d, "strftime") else str(d) for d in week_dates]
     ax.set_xticklabels(week_labels, rotation=30, ha="right", fontsize=7)
@@ -632,3 +697,199 @@ def save_pdf(fig_list: list, out_path: str | Path, page_numbers: bool = True) ->
 
 def full_bleed_axes(fig: plt.Figure, rect: tuple) -> plt.Axes:
     return fig.add_axes(rect)
+
+
+# ============================================================================
+# Attendance trend from the saved weekly tracker
+# ============================================================================
+
+@dataclass
+class TrendData:
+    week_dates: list
+    series: dict
+    colors: dict
+    emphasize: str | None
+    from_tracker: bool
+    # Weekly first-time guests and how many of them came back later, when the
+    # tracker has them (None otherwise).
+    first_timers: list | None = None
+    first_timers_returned: list | None = None
+
+
+def load_trend_json(path: str | Path | None) -> "TrendData | None":
+    """Reads the per-week numbers the server pulled from the saved attendance
+    tracker (checkins_weekly_history) for this event -- a list of
+    {weekStart, total, male, female, unknown}, oldest first. Returns None
+    when there's nothing usable, so callers fall back to the report's own
+    weeks."""
+    if not path:
+        return None
+    try:
+        rows = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    rows = sorted((r for r in rows if r.get("weekStart")), key=lambda r: r["weekStart"])
+    if len(rows) < 2:
+        return None
+    dates = [dt.date.fromisoformat(r["weekStart"]) for r in rows]
+    series = {"Total": [int(r.get("total") or 0) for r in rows]}
+    colors = {"Total": INK_SECONDARY}
+    if any(r.get("male") is not None or r.get("female") is not None for r in rows):
+        series["Male"] = [int(r.get("male") or 0) for r in rows]
+        series["Female"] = [int(r.get("female") or 0) for r in rows]
+        colors["Male"] = MALE_COLOR
+        colors["Female"] = FEMALE_COLOR
+        if any(r.get("unknown") for r in rows):
+            series["Unknown"] = [int(r.get("unknown") or 0) for r in rows]
+            colors["Unknown"] = UNKNOWN_COLOR
+    first_timers = returned = None
+    if any(r.get("firstTimers") is not None for r in rows):
+        first_timers = [int(r.get("firstTimers") or 0) for r in rows]
+        returned = [int(r.get("firstTimersReturned") or 0) for r in rows]
+    return TrendData(dates, series, colors, emphasize="Total", from_tracker=True,
+                     first_timers=first_timers, first_timers_returned=returned)
+
+
+def trend_from_report(df: pd.DataFrame, week_cols: list, week_dates: list) -> TrendData:
+    """Fallback trend from the report's own weeks (Male/Female/Unknown per
+    week, from the prepared roster) when no tracker data was supplied."""
+    series = {
+        "Male": [int(df.loc[df["_gender"] == "Male", w].sum()) for w in week_cols],
+        "Female": [int(df.loc[df["_gender"] == "Female", w].sum()) for w in week_cols],
+        "Unknown": [int(df.loc[df["_gender"].isna(), w].sum()) for w in week_cols],
+    }
+    colors = {"Male": MALE_COLOR, "Female": FEMALE_COLOR, "Unknown": UNKNOWN_COLOR}
+    return TrendData(list(week_dates), series, colors, emphasize=None, from_tracker=False)
+
+
+def draw_trend(fig: plt.Figure, rect: tuple, trend: TrendData) -> None:
+    left, bottom, width, height = rect
+    weeks = len(trend.week_dates)
+    title = f"Attendance Trend — last {weeks} weeks" if trend.from_tracker else "Attendance Trend"
+    subtitle = ("Unique attendees per week (labeled by the week's Monday), from the saved attendance tracker"
+                if trend.from_tracker else "Weekly attendance for this report's services")
+    section_title(fig, left, bottom + height + 0.035, title, subtitle)
+    ax = fig.add_axes(rect)
+    draw_trend_lines(ax, trend.week_dates, trend.series, trend.colors, emphasize=trend.emphasize)
+
+
+# ============================================================================
+# First-time guest analytics
+# ============================================================================
+
+@dataclass
+class FirstTimerStats:
+    total: int
+    returned: int            # attended 2+ services in this report's period
+    avg_visits: float
+    cohort_labels: list      # one per service date
+    cohort_returned: list    # of the guests whose first visit was that date, how many came back
+    cohort_once: list
+
+    @property
+    def return_rate(self) -> float:
+        return self.returned / self.total if self.total else 0.0
+
+
+def first_timer_stats(ft_df: pd.DataFrame, week_cols: list, week_dates: list) -> FirstTimerStats:
+    labels = [d.strftime("%-m/%-d") for d in week_dates]
+    if ft_df.empty or not week_cols:
+        return FirstTimerStats(0, 0, 0.0, labels, [0] * len(labels), [0] * len(labels))
+    attended = ft_df[week_cols].astype(bool).to_numpy()
+    visits = attended.sum(axis=1)
+    has_visit = visits > 0
+    first_idx = attended.argmax(axis=1)
+    cohort_returned = [0] * len(week_cols)
+    cohort_once = [0] * len(week_cols)
+    for idx, n, ok in zip(first_idx, visits, has_visit):
+        if not ok:
+            continue
+        if n >= 2:
+            cohort_returned[idx] += 1
+        else:
+            cohort_once[idx] += 1
+    return FirstTimerStats(
+        total=int(len(ft_df)),
+        returned=int((visits >= 2).sum()),
+        avg_visits=float(visits[has_visit].mean()) if has_visit.any() else 0.0,
+        cohort_labels=labels,
+        cohort_returned=cohort_returned,
+        cohort_once=cohort_once,
+    )
+
+
+RETURNED_COLOR = CATEGORICAL[2]   # aqua: came back
+FIRST_TIMER_COLOR = CATEGORICAL[6]  # violet: first-time guests
+
+
+def draw_first_timer_trend(fig: plt.Figure, rect: tuple, trend: "TrendData | None",
+                           stats: FirstTimerStats, week_dates: list) -> None:
+    """Line chart of first-time guests per week and how many of them came
+    back. Uses the tracker's last ~13 weeks when available (a quarter), else
+    the report's own weeks."""
+    left, bottom, width, height = rect
+    if trend is not None and trend.first_timers is not None:
+        dates = trend.week_dates
+        firsts = trend.first_timers
+        returned = trend.first_timers_returned
+        title = f"First-Time Guests by Week — last {len(dates)} weeks"
+        subtitle = "Week of their first visit (labeled by Monday) · came back = checked in again at any later service"
+    else:
+        dates = week_dates
+        firsts = [r + o for r, o in zip(stats.cohort_returned, stats.cohort_once)]
+        returned = stats.cohort_returned
+        title = "First-Time Guests by Week"
+        subtitle = "Week of their first visit · came back = attended again in this report's period"
+    section_title(fig, left, bottom + height + 0.035, title, subtitle)
+    ax = fig.add_axes(rect)
+    x = np.arange(len(dates))
+    ax.fill_between(x, returned, color=RETURNED_COLOR, alpha=0.12, linewidth=0)
+    ax.plot(x, firsts, marker="o", markersize=5, linewidth=2.4, color=FIRST_TIMER_COLOR, label="First-time guests", zorder=3)
+    ax.plot(x, returned, marker="o", markersize=4, linewidth=1.8, color=RETURNED_COLOR, label="Came back", zorder=3)
+    for xi, v in zip(x, firsts):
+        if v:
+            ax.annotate(f"{v}", (xi, v), textcoords="offset points", xytext=(0, 5), ha="center",
+                        fontsize=7, color=INK_SECONDARY)
+    ax.set_xticks(x)
+    ax.set_xticklabels([d.strftime("%-m/%-d") for d in dates], fontsize=7, rotation=30 if len(dates) > 8 else 0,
+                       ha="right" if len(dates) > 8 else "center")
+    ymax = max(max(firsts, default=0), 1)
+    ax.set_ylim(0, ymax * 1.25)
+    ax.yaxis.set_major_locator(plt.MaxNLocator(integer=True))
+    style_axes(ax)
+    ax.legend(loc="upper left", fontsize=7.5, frameon=False, ncols=2)
+
+
+def draw_first_timer_page(fig: plt.Figure, stats: FirstTimerStats, breakdowns: list,
+                          people_word: str = "students", trend: "TrendData | None" = None,
+                          week_dates: list | None = None, ft_bands: list | None = None,
+                          band_title: str = "Weekly Attendance by Age Group — First-Timers Only") -> None:
+    """The first-time guest analytics page (always the report's last page):
+    summary tiles, a row of donut breakdowns (each `(title, labels, values,
+    colors)`), a quarter-long first-timer line chart, and a small weekly
+    first-timer bar by age group."""
+    week_dates = week_dates or []
+    section_title(fig, 0.06, 0.872, "First-Time Guests",
+                  f"New {people_word} this period, and how many have come back")
+    draw_stat_tiles(fig, (0.06, 0.79, 0.88, 0.055), [
+        ("First-timers", f"{stats.total:,}"),
+        ("Came back (2+ visits)", f"{stats.returned:,}"),
+        ("Return rate", f"{stats.return_rate:.0%}"),
+        ("Avg. visits each", f"{stats.avg_visits:.1f}"),
+    ])
+    n = max(len(breakdowns), 1)
+    slot = 0.88 / n
+    donut_h = 0.115
+    fig_w, fig_h = fig.get_size_inches()
+    donut_w = donut_h * fig_h / fig_w   # square in inches
+    for i, (title, labels, values, colors) in enumerate(breakdowns):
+        cx = 0.06 + i * slot + slot / 2
+        fig.text(cx, 0.745, title, fontsize=10, fontweight="bold", color=INK_PRIMARY, ha="center", va="bottom")
+        ax = fig.add_axes((cx - donut_w / 2, 0.615, donut_w, donut_h))
+        lab, val, col = nonzero_slices(labels, values, colors)
+        draw_pie(ax, lab, val, colors=col, legend_fontsize=7, legend_below=True)
+    draw_first_timer_trend(fig, (0.08, 0.305, 0.86, 0.145), trend, stats, week_dates)
+    if ft_bands:
+        section_title(fig, 0.06, 0.222, band_title)
+        draw_weekly_stacked_by_age(fig, (0.08, 0.06, 0.86, 0.12), week_dates, ft_bands,
+                                   legend_ncols=len(ft_bands), legend_gap=0.008, legend_fontsize=7)

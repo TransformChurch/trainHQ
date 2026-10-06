@@ -32,7 +32,13 @@ test("groupPeriodsByWeek bins sessions, oldest first, and drops out-of-range one
 
 test("summarizeCheckIns counts a person once across sessions", () => {
   const checkIn = (person: string) => ({ id: Math.random().toString(), type: "CheckIn", relationships: { person: { data: { id: person } } } });
-  assert.deepEqual(summarizeCheckIns([checkIn("1"), checkIn("2"), checkIn("1")] as any), { uniqueAttendees: 2, totalCheckIns: 3 });
+  assert.deepEqual(summarizeCheckIns([checkIn("1"), checkIn("2"), checkIn("1")] as any), {
+    uniqueAttendees: 2, totalCheckIns: 3, maleAttendees: null, femaleAttendees: null, unknownGenderAttendees: null,
+  });
+  const genders = new Map<string, "male" | "female" | null>([["1", "male"], ["2", null]]);
+  assert.deepEqual(summarizeCheckIns([checkIn("1"), checkIn("2"), checkIn("1")] as any, genders), {
+    uniqueAttendees: 2, totalCheckIns: 3, maleAttendees: 1, femaleAttendees: 0, unknownGenderAttendees: 1,
+  });
 });
 
 test("history CSV has one row per event-week", () => {
