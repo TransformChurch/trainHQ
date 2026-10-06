@@ -106,3 +106,10 @@ PUBLIC_API_URL = "https://api.transformchurch.app"
 CORS_ALLOWED_ORIGINS = "https://transformchurch.app"
 CORS_ALLOW_CREDENTIALS = "false"
 FRAME_ANCESTORS = "'self'"
+# Sender for all Resend email (Weekly Pulse, assignment emails, Group
+# Texting's email channel). Must be on a domain verified in Resend
+# (transformchurch.app is). Kept here, not only in the dashboard, because
+# `wrangler deploy` replaces dashboard-set vars with this [vars] block --
+# when it was missing, EMAIL_FROM reached the container as "" and every
+# send failed with Resend's 422 "Invalid from field".
+EMAIL_FROM = "Reporting@transformchurch.app"
