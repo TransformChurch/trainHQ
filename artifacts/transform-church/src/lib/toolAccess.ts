@@ -10,14 +10,17 @@ type ToolAccess = Record<ToolKey, boolean>;
 // the API enforces the same rule server-side (middlewares/requireToolAccess).
 export function useToolAccess() {
   const { data: me } = useGetMe();
+  // Admins always have access, so never make them wait on (or lose the tools
+  // to a failure of) the access lookup.
+  const isAdmin = me?.role === "admin";
   const query = useQuery({
     queryKey: ["tool-access", "me", me?.id],
-    enabled: !!me,
+    enabled: !!me && !isAdmin,
     staleTime: 60_000,
     queryFn: async () => (await api("/api/tool-access/me")).json() as Promise<ToolAccess>,
   });
   return {
-    loading: !!me && query.isLoading,
-    can: (tool: ToolKey) => query.data?.[tool] === true,
+    loading: !!me && !isAdmin && query.isLoading,
+    can: (tool: ToolKey) => isAdmin || query.data?.[tool] === true,
   };
 }

@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Loader2, SlidersHorizontal } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { useToast } from "@/hooks/use-toast";
 import { api } from "@/lib/toolApi";
 import { ReportingAdminCards } from "@/components/tools/ReportingAdminCards";
 import { ToolAccessCard, type AccessUser, type ToolAccessConfig } from "@/components/tools/ToolAccessCard";
@@ -15,16 +15,21 @@ type AccessData = { tools: Record<ToolKey, ToolAccessConfig>; users: AccessUser[
 // attendance history, Wiki Drive sync). The tools' own pages stay focused on
 // day-to-day use.
 export default function ToolManagement() {
-  const { toast } = useToast();
   const [data, setData] = useState<AccessData | null>(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
+  const [loadError, setLoadError] = useState("");
+
+  const loadAccess = useCallback(() => {
+    setLoading(true);
+    setLoadError("");
     api("/api/admin/tool-access")
       .then(async (response) => setData(await response.json() as AccessData))
-      .catch((error) => toast({ title: "Could not load tool access", description: error instanceof Error ? error.message : "Request failed.", variant: "destructive" }))
+      .catch((error) => setLoadError(error instanceof Error ? error.message : "Request failed."))
       .finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => { loadAccess(); }, [loadAccess]);
 
   const accessCard = (tool: ToolKey, toolLabel: string) =>
     data ? (
@@ -38,7 +43,11 @@ export default function ToolManagement() {
     ) : loading ? (
       <p className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> Loading access settings…</p>
     ) : (
-      <p className="text-sm text-destructive">Access settings could not be loaded. Refresh to try again.</p>
+      <div className="space-y-2 rounded-md border border-destructive/40 p-4 text-sm">
+        <p className="font-medium text-destructive">Access settings could not be loaded.</p>
+        <p className="text-muted-foreground">{loadError || "Unknown error."} If this just deployed, the API may still be rolling out — wait a minute and retry.</p>
+        <Button size="sm" variant="outline" onClick={loadAccess}>Retry</Button>
+      </div>
     );
 
   return (
