@@ -166,6 +166,13 @@ export default function Reporting() {
   const preparingRef = useRef(false);
   const [preparationProgress, setPreparationProgress] = useState<PreparationProgress | null>(null);
   const [generating, setGenerating] = useState<"pdf" | null>(null);
+  // Step 3: email the finished PDF automatically once data is prepared.
+  // Recipients start as the signed-in user's own address.
+  const [emailReportWhenReady, setEmailReportWhenReady] = useState(true);
+  const [reportRecipients, setReportRecipients] = useState("");
+  const reportRecipientsTouched = useRef(false);
+  const [emailingReport, setEmailingReport] = useState(false);
+  const [reportEmailStatus, setReportEmailStatus] = useState("");
   const [templateName, setTemplateName] = useState("");
   const [templateEngine, setTemplateEngine] = useState<ReportEngine | "">("");
   const [savingTemplate, setSavingTemplate] = useState(false);
@@ -323,10 +330,44 @@ export default function Reporting() {
     getAuthToken: () => sessionStorage.getItem("auth_bearer_token"),
   });
 
+  useEffect(() => {
+    if (!reportRecipientsTouched.current && me?.email) setReportRecipients(me.email);
+  }, [me?.email]);
+
+  const emailReportPdf = async (run: PreparedRun) => {
+    const recipients = reportRecipients.split(/[\s,;]+/).map((value) => value.trim()).filter(Boolean);
+    if (!recipients.length) {
+      toast({ title: "No email recipients", description: "Add at least one address in step 3.", variant: "destructive" });
+      return;
+    }
+    setEmailingReport(true);
+    setReportEmailStatus("Creating the PDF and emailing it…");
+    try {
+      const response = await api("/api/reports/email-pdf", {
+        method: "POST",
+        body: JSON.stringify({ runId: run.runId, templateId: Number(selectedTemplate), recipients }),
+      });
+      const result = await response.json() as { recipients: string[] };
+      const sentTo = result.recipients.join(", ");
+      setReportEmailStatus(`Emailed to ${sentTo} at ${new Date().toLocaleTimeString()}.`);
+      toast({ title: "Report emailed", description: `The PDF was sent to ${sentTo}.` });
+    } catch (error) {
+      setReportEmailStatus("");
+      toast({ title: "Could not email the report", description: error instanceof Error ? error.message : "Request failed.", variant: "destructive" });
+    } finally {
+      setEmailingReport(false);
+    }
+  };
+
   const prepare = async () => {
     if (!eventId || !endDate || !selectedTemplate || (activeTemplate?.cleanupMode === "all_dates" && !startDate)) return;
     if (preparingRef.current) return; // already running -- see preparingRef comment above
+    if (emailReportWhenReady && !reportRecipients.trim()) {
+      toast({ title: "No email recipients", description: "Add an address in step 3, or turn off emailing.", variant: "destructive" });
+      return;
+    }
     preparingRef.current = true;
+    setReportEmailStatus("");
     const progressId = crypto.randomUUID();
     let progressTimer: number | undefined;
     setPreparing(true);
@@ -359,6 +400,7 @@ export default function Reporting() {
       const result = await response.json() as PreparedRun;
       setPrepared(result);
       toast({ title: "Attendance data cleaned", description: `${result.peopleCount} people are ready for the report.` });
+      if (emailReportWhenReady) await emailReportPdf(result);
     } catch (error) {
       toast({ title: "Could not prepare report", description: error instanceof Error ? error.message : "Request failed.", variant: "destructive" });
     } finally {
@@ -778,13 +820,49 @@ export default function Reporting() {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-3">
-            <StepNumber number={3} active={!!selectedTemplate} complete={!!prepared} />
+            <StepNumber number={3} active={!!selectedTemplate && !prepared} complete={!!reportEmailStatus || (!!selectedTemplate && !emailReportWhenReady)} />
+            Email the finished report
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              className="h-4 w-4 rounded border-input"
+              checked={emailReportWhenReady}
+              onChange={(event) => setEmailReportWhenReady(event.target.checked)}
+            />
+            Email the PDF automatically when step 4 finishes
+          </label>
+          <div className="max-w-lg space-y-2">
+            <Label htmlFor="report-recipients">Send to</Label>
+            <Input
+              id="report-recipients"
+              type="text"
+              inputMode="email"
+              placeholder="name@transformchurch.com, another@transformchurch.com"
+              value={reportRecipients}
+              disabled={!emailReportWhenReady}
+              onChange={(event) => { reportRecipientsTouched.current = true; setReportRecipients(event.target.value); }}
+            />
+            <p className="text-xs text-muted-foreground">
+              Separate addresses with commas (up to 10). The report lists attendees by name, including kids, so only send it to the team.
+            </p>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-3">
+            <StepNumber number={4} active={!!selectedTemplate} complete={!!prepared} />
             Pull, review, and download
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <p className="text-sm text-muted-foreground">
             Pull the fields configured for this template, merge duplicate check-ins, and format the CSV in the saved column order.
+            {emailReportWhenReady ? " The PDF is then emailed to the people in step 3." : ""}
           </p>
           <div className="flex flex-wrap items-center gap-3">
             <Button
@@ -828,7 +906,17 @@ export default function Reporting() {
               {generating === "pdf" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
               Download PDF
             </Button>
+            <Button variant="outline" onClick={() => prepared && emailReportPdf(prepared)} disabled={!prepared || !selectedTemplate || emailingReport || !reportRecipients.trim()}>
+              {emailingReport ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Mail className="mr-2 h-4 w-4" />}
+              Email PDF
+            </Button>
           </div>
+          {(emailingReport || reportEmailStatus) && (
+            <p className="flex items-center gap-2 text-sm text-muted-foreground" role="status" aria-live="polite">
+              {emailingReport && <Loader2 className="h-4 w-4 animate-spin" />}
+              {reportEmailStatus}
+            </p>
+          )}
         </CardContent>
       </Card>
 

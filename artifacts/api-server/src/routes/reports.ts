@@ -15,6 +15,7 @@ import { and, eq, lt } from "drizzle-orm";
 import { requireAdmin, requireManagerOrAdmin } from "../middlewares/requireAuth";
 import { getValidPlanningCenterAccessToken } from "../lib/planningCenter";
 import { ObjectStorageService } from "../lib/objectStorage";
+import { sendEmail } from "../lib/email";
 
 const router: IRouter = Router();
 const storage = new ObjectStorageService();
@@ -1058,8 +1059,64 @@ router.post("/prepare", requireManagerOrAdmin, async (req, res) => {
   }
 });
 
+// Renders a prepared run to PDF with its template's engine. Shared by the
+// download (POST /generate) and email (POST /email-pdf) routes.
+async function generateReportPdf(
+  runId: string,
+  templateId: number,
+  userId: string,
+): Promise<{ pdf: Buffer; fileName: string; run: typeof reportRunsTable.$inferSelect; templateName: string }> {
+  const fail = (status: number, message: string): never => {
+    const error = new Error(message) as Error & { status?: number };
+    error.status = status;
+    throw error;
+  };
+  const runs = await db.select().from(reportRunsTable).where(and(
+    eq(reportRunsTable.id, runId),
+    eq(reportRunsTable.requestedByUserId, userId),
+  )).limit(1);
+  const templates = await db.select().from(reportTemplatesTable).where(eq(reportTemplatesTable.id, templateId)).limit(1);
+  const run = runs[0];
+  const template = templates[0];
+  if (!run || run.expiresAt < new Date()) fail(410, "This prepared report expired. Prepare the data again.");
+  if (!template) fail(404, "Report template not found.");
+  if (run!.templateId !== templateId) fail(409, "This report was prepared for a different template. Prepare the data again.");
+
+  const workDir = await mkdtemp(join(tmpdir(), "tc-report-output-"));
+  try {
+    const cleanedFile = await storage.getObjectEntityFile(run!.cleanedObjectPath);
+    const cleanedPath = join(workDir, "cleaned.csv");
+    const pdfPath = join(workDir, "report.pdf");
+    await writeFile(cleanedPath, await readFile(cleanedFile.path));
+
+    if (!isReportEngine(template!.engine)) {
+      // Every template is created with one of the 4 built-in engines now
+      // (see POST /templates) -- the legacy upload-your-own-xlsx +
+      // LibreOffice pipeline was removed, so a template with no engine set
+      // is just a broken/legacy row that can't be rendered anymore.
+      fail(422, "This report template has no engine configured.");
+    }
+    const definition = reportEngineDefinition(template!.engine as Parameters<typeof reportEngineDefinition>[0]);
+    await runPython([
+      bundledReportEngineScript(definition.script),
+      ...definition.args,
+      "--data", cleanedPath,
+      "--out-pdf", pdfPath,
+    ], 180_000);
+    const engineStats = await stat(pdfPath).catch(() => null);
+    if (!engineStats?.isFile() || engineStats.size === 0) fail(422, "The report engine did not create a PDF.");
+    return {
+      pdf: await readFile(pdfPath),
+      fileName: `${safeFilePart(run!.eventName)}-${run!.startDate}-to-${run!.endDate}.pdf`,
+      run: run!,
+      templateName: template!.name,
+    };
+  } finally {
+    await rm(workDir, { recursive: true, force: true }).catch(() => undefined);
+  }
+}
+
 router.post("/generate", requireManagerOrAdmin, async (req, res) => {
-  let workDir = "";
   try {
     const runId = text(req.body?.runId);
     const templateId = Number(req.body?.templateId);
@@ -1068,64 +1125,80 @@ router.post("/generate", requireManagerOrAdmin, async (req, res) => {
       res.status(400).json({ error: "Report run, template, and output format (pdf) are required." });
       return;
     }
-    const runs = await db.select().from(reportRunsTable).where(and(
-      eq(reportRunsTable.id, runId),
-      eq(reportRunsTable.requestedByUserId, res.locals.dbUser.id),
-    )).limit(1);
-    const templates = await db.select().from(reportTemplatesTable).where(eq(reportTemplatesTable.id, templateId)).limit(1);
-    const run = runs[0];
-    const template = templates[0];
-    if (!run || run.expiresAt < new Date()) {
-      res.status(410).json({ error: "This prepared report expired. Prepare the data again." });
-      return;
-    }
-    if (!template) {
-      res.status(404).json({ error: "Report template not found." });
-      return;
-    }
-    if (run.templateId !== templateId) {
-      res.status(409).json({ error: "This report was prepared for a different template. Prepare the data again." });
-      return;
-    }
-
-    workDir = await mkdtemp(join(tmpdir(), "tc-report-output-"));
-    const cleanedFile = await storage.getObjectEntityFile(run.cleanedObjectPath);
-    const cleanedPath = join(workDir, "cleaned.csv");
-    const pdfPath = join(workDir, "report.pdf");
-    await writeFile(cleanedPath, await readFile(cleanedFile.path));
-
-    if (!isReportEngine(template.engine)) {
-      // Every template is created with one of the 4 built-in engines now
-      // (see POST /templates) -- the legacy upload-your-own-xlsx +
-      // LibreOffice pipeline was removed, so a template with no engine set
-      // is just a broken/legacy row that can't be rendered anymore.
-      const error = new Error("This report template has no engine configured.") as Error & { status?: number };
-      error.status = 422;
-      throw error;
-    }
-    const definition = reportEngineDefinition(template.engine);
-    await runPython([
-      bundledReportEngineScript(definition.script),
-      ...definition.args,
-      "--data", cleanedPath,
-      "--out-pdf", pdfPath,
-    ], 180_000);
-    const engineStats = await stat(pdfPath).catch(() => null);
-    if (!engineStats?.isFile() || engineStats.size === 0) {
-      const error = new Error("The report engine did not create a PDF.") as Error & { status?: number };
-      error.status = 422;
-      throw error;
-    }
-    const engineResult = await readFile(pdfPath);
-    const engineFileName = `${safeFilePart(run.eventName)}-${run.startDate}-to-${run.endDate}.pdf`;
+    const { pdf, fileName } = await generateReportPdf(runId, templateId, res.locals.dbUser.id);
     res.setHeader("Content-Type", "application/pdf");
-    res.setHeader("Content-Disposition", `attachment; filename="${engineFileName}"`);
+    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
     res.setHeader("Cache-Control", "private, no-store");
-    res.send(engineResult);
+    res.send(pdf);
   } catch (error) {
     sendError(req, res, error, "Failed to generate report");
-  } finally {
-    if (workDir) await rm(workDir, { recursive: true, force: true }).catch(() => undefined);
+  }
+});
+
+export const MAX_REPORT_EMAIL_RECIPIENTS = 10;
+const RECIPIENT_EMAIL = /^[^\s@<>,;"]+@[^\s@<>,;"]+\.[^\s@<>,;"]+$/;
+
+// Accepts an array or a comma/semicolon/space-separated string; returns the
+// de-duplicated, lower-cased addresses, or an error message.
+export function parseReportRecipients(raw: unknown): { recipients: string[] } | { error: string } {
+  const parts = (Array.isArray(raw) ? raw : [raw])
+    .flatMap((value) => (typeof value === "string" ? value.split(/[\s,;]+/) : []))
+    .map((value) => value.trim().toLowerCase())
+    .filter(Boolean);
+  const recipients = [...new Set(parts)];
+  if (!recipients.length) return { error: "Add at least one email address." };
+  const invalid = recipients.find((address) => !RECIPIENT_EMAIL.test(address));
+  if (invalid) return { error: `"${invalid}" isn't a valid email address.` };
+  if (recipients.length > MAX_REPORT_EMAIL_RECIPIENTS) {
+    return { error: `Send to at most ${MAX_REPORT_EMAIL_RECIPIENTS} people at once.` };
+  }
+  return { recipients };
+}
+
+// ── POST /api/reports/email-pdf ─────────────────────────────────────────────
+// Body: { runId, templateId, recipients }. Renders the same PDF as
+// /generate and emails it as an attachment. The report lists people
+// (including children) by name, so the send is logged with who sent it and
+// how many recipients, and the recipient count is capped.
+router.post("/email-pdf", requireManagerOrAdmin, async (req, res) => {
+  try {
+    const runId = text(req.body?.runId);
+    const templateId = Number(req.body?.templateId);
+    if (!runId || !Number.isInteger(templateId)) {
+      res.status(400).json({ error: "Report run and template are required." });
+      return;
+    }
+    const parsed = parseReportRecipients(req.body?.recipients);
+    if ("error" in parsed) {
+      res.status(400).json({ error: parsed.error });
+      return;
+    }
+    const { pdf, fileName, run, templateName } = await generateReportPdf(runId, templateId, res.locals.dbUser.id);
+    const sender = [res.locals.dbUser.firstName, res.locals.dbUser.lastName].filter(Boolean).join(" ") || "A Transform Church admin";
+    const escape = (value: string) => value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    const result = await sendEmail({
+      to: parsed.recipients,
+      subject: `${templateName}: ${run.eventName} (${run.startDate} to ${run.endDate})`,
+      html: `
+        <div style="font-family:Arial,Helvetica,sans-serif;max-width:480px;margin:0 auto;color:#111827;">
+          <p>The <strong>${escape(templateName)}</strong> report for <strong>${escape(run.eventName)}</strong>
+          (${escape(run.startDate)} to ${escape(run.endDate)}) is attached as a PDF.</p>
+          <p style="font-size:13px;color:#6b7280;">Sent by ${escape(sender)} from the Transform Church reporting page.
+          This report contains attendee names, so please don't forward it outside the team.</p>
+        </div>`,
+      attachments: [{ filename: fileName, content: pdf }],
+    });
+    req.log.info(
+      { runId, templateId, actorId: res.locals.dbUser.id, recipientCount: parsed.recipients.length, sent: result.sent },
+      "Report PDF email",
+    );
+    if (!result.sent) {
+      res.status(502).json({ error: result.error ?? "Failed to send the report email." });
+      return;
+    }
+    res.json({ sent: true, recipients: parsed.recipients });
+  } catch (error) {
+    sendError(req, res, error, "Failed to email report");
   }
 });
 
@@ -1152,4 +1225,4 @@ router.get("/runs/:runId/data.csv", requireManagerOrAdmin, async (req, res) => {
   }
 });
 
-export default router;
+export default router;
