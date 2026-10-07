@@ -864,7 +864,6 @@ export function ReportingAdminCards() {
 // event, active and archived, into the attendance history table -- see
 // routes/attendanceHistory.ts. Driven step by step from the browser so no
 // single request runs long; keep the tab open while it runs.
-const HISTORY_SINCE = "2024-01-01";
 const HISTORY_MAX_WEEKS_PER_CALL = 8;
 const HISTORY_MAX_PERIODS_PER_CALL = 60;
 
@@ -889,12 +888,130 @@ function batchHistoryWeeks(weeks: HistoryWeek[]): HistoryWeek[][] {
   return batches;
 }
 
+// ── Timeframe picker shared by both history cards ──────────────────────────
+// Checkboxes per quarter (plus a whole-year box) choose which weeks a pull
+// covers. A week belongs to the quarter its Monday falls in, matching the
+// Monday-start weeks the history tables use.
+const TIMEFRAME_FIRST_YEAR = 2023;
+const DEFAULT_TIMEFRAME_FROM = "2024-Q1"; // the original "since Jan 1, 2024" pull
+
+type QuarterKey = string; // "2025-Q3"
+
+function currentQuarter(now = new Date()): { year: number; quarter: number } {
+  return { year: now.getFullYear(), quarter: Math.floor(now.getMonth() / 3) + 1 };
+}
+
+function quarterKeysByYear(): { year: number; quarters: QuarterKey[] }[] {
+  const { year: thisYear, quarter: thisQuarter } = currentQuarter();
+  const years = [];
+  for (let year = thisYear; year >= TIMEFRAME_FIRST_YEAR; year -= 1) {
+    const last = year === thisYear ? thisQuarter : 4;
+    years.push({ year, quarters: Array.from({ length: last }, (_, i) => `${year}-Q${i + 1}`) });
+  }
+  return years;
+}
+
+function defaultTimeframe(): Set<QuarterKey> {
+  return new Set(quarterKeysByYear().flatMap((y) => y.quarters).filter((key) => key >= DEFAULT_TIMEFRAME_FROM));
+}
+
+// [start, endExclusive) as YYYY-MM-DD for a quarter key.
+function quarterRange(key: QuarterKey): [string, string] {
+  const [yearText, q] = key.split("-Q");
+  const year = Number(yearText);
+  const startMonth = (Number(q) - 1) * 3;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const start = `${year}-${pad(startMonth + 1)}-01`;
+  const end = startMonth + 3 >= 12 ? `${year + 1}-01-01` : `${year}-${pad(startMonth + 4)}-01`;
+  return [start, end];
+}
+
+function timeframeStart(selected: Set<QuarterKey>): string | null {
+  const keys = [...selected].sort();
+  return keys.length ? quarterRange(keys[0])[0] : null;
+}
+
+function weekInTimeframe(weekStart: string, selected: Set<QuarterKey>): boolean {
+  for (const key of selected) {
+    const [start, end] = quarterRange(key);
+    if (weekStart >= start && weekStart < end) return true;
+  }
+  return false;
+}
+
+function describeTimeframe(selected: Set<QuarterKey>): string {
+  const keys = [...selected].sort();
+  if (!keys.length) return "no quarters";
+  const label = (key: QuarterKey) => key.replace("-", " ");
+  if (keys.length === 1) return label(keys[0]);
+  const all = quarterKeysByYear().flatMap((y) => y.quarters).sort();
+  const first = all.indexOf(keys[0]);
+  const contiguous = keys.every((key, i) => all[first + i] === key);
+  return contiguous
+    ? `${label(keys[0])} – ${label(keys[keys.length - 1])} (${keys.length} quarters)`
+    : `${keys.length} quarters: ${keys.map(label).join(", ")}`;
+}
+
+function TimeframePicker({ selected, onChange, disabled }: {
+  selected: Set<QuarterKey>;
+  onChange: (next: Set<QuarterKey>) => void;
+  disabled?: boolean;
+}) {
+  const years = quarterKeysByYear();
+  const toggle = (keys: QuarterKey[], on: boolean) => {
+    const next = new Set(selected);
+    for (const key of keys) {
+      if (on) next.add(key);
+      else next.delete(key);
+    }
+    onChange(next);
+  };
+  return (
+    <fieldset className="space-y-2 rounded-md border p-3" disabled={disabled}>
+      <legend className="px-1 text-sm font-medium">Timeframe to pull</legend>
+      {years.map(({ year, quarters }) => {
+        const count = quarters.filter((key) => selected.has(key)).length;
+        return (
+          <div key={year} className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+            <label className="flex w-16 items-center gap-2 font-medium">
+              <input
+                type="checkbox"
+                className="h-4 w-4 rounded border-input"
+                checked={count === quarters.length}
+                ref={(el) => { if (el) el.indeterminate = count > 0 && count < quarters.length; }}
+                onChange={(event) => toggle(quarters, event.target.checked)}
+              />
+              {year}
+            </label>
+            {quarters.map((key) => (
+              <label key={key} className="flex items-center gap-1.5">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 rounded border-input"
+                  checked={selected.has(key)}
+                  onChange={(event) => toggle([key], event.target.checked)}
+                />
+                {key.split("-")[1]}
+              </label>
+            ))}
+          </div>
+        );
+      })}
+      <div className="flex gap-3 pt-1 text-xs">
+        <button type="button" className="underline text-muted-foreground" onClick={() => onChange(new Set(years.flatMap((y) => y.quarters)))}>Select all</button>
+        <button type="button" className="underline text-muted-foreground" onClick={() => onChange(new Set())}>Clear</button>
+      </div>
+    </fieldset>
+  );
+}
+
 function AttendanceHistoryCard() {
   const { toast } = useToast();
   const [summary, setSummary] = useState<HistorySummary | null>(null);
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState("");
   const [failures, setFailures] = useState<{ eventName: string; error: string }[]>([]);
+  const [timeframe, setTimeframe] = useState<Set<QuarterKey>>(defaultTimeframe);
   const stopRequested = useRef(false);
 
   const loadSummary = async () => {
@@ -911,7 +1028,10 @@ function AttendanceHistoryCard() {
   }, []);
 
   const runPull = async () => {
-    if (!window.confirm("Pull weekly attendance for every Check-Ins event since Jan 1, 2024? This can take a while. Keep this tab open until it finishes.")) return;
+    const since = timeframeStart(timeframe);
+    if (!since) return;
+    const selection = new Set(timeframe);
+    if (!window.confirm(`Pull weekly attendance for every Check-Ins event for ${describeTimeframe(selection)}? This can take a while. Keep this tab open until it finishes.`)) return;
     stopRequested.current = false;
     setRunning(true);
     setFailures([]);
@@ -925,9 +1045,9 @@ function AttendanceHistoryCard() {
         const label = `Event ${index + 1} of ${events.length}: ${event.name}`;
         try {
           setProgress(`${label} (finding sessions…)`);
-          const weeks = await (await api(
-            `/api/attendance-history/events/${encodeURIComponent(event.id)}/weeks?since=${HISTORY_SINCE}`,
-          )).json() as HistoryWeek[];
+          const weeks = (await (await api(
+            `/api/attendance-history/events/${encodeURIComponent(event.id)}/weeks?since=${since}`,
+          )).json() as HistoryWeek[]).filter((week) => weekInTimeframe(week.weekStart, selection));
           const batches = batchHistoryWeeks(weeks);
           let done = 0;
           for (const batch of batches) {
@@ -979,7 +1099,7 @@ function AttendanceHistoryCard() {
       <CardHeader>
         <CardTitle className="flex items-center gap-2"><BarChart3 className="h-5 w-5" /> Attendance history</CardTitle>
         <p className="text-sm text-muted-foreground">
-          A one-time pull of weekly Check-Ins attendance for every event, active and archived, since Jan 1, 2024,
+          Pulls weekly Check-Ins attendance for every event, active and archived, for the quarters you check below,
           using the same Monday-to-Monday weeks as the Weekly Pulse. Read-only in Planning Center. Safe to run again:
           it refreshes the weeks it already has.
         </p>
@@ -990,6 +1110,7 @@ function AttendanceHistoryCard() {
             ? `${summary.rows} event-weeks saved across ${summary.events} events (${summary.firstWeek} to ${summary.lastWeek}).`
             : "No history pulled yet."}
         </p>
+        <TimeframePicker selected={timeframe} onChange={setTimeframe} disabled={running} />
         {running && (
           <p className="flex items-center gap-2 text-sm">
             <Loader2 className="h-4 w-4 animate-spin" /> {progress} Keep this tab open.
@@ -1007,8 +1128,8 @@ function AttendanceHistoryCard() {
           {running ? (
             <Button variant="outline" onClick={() => { stopRequested.current = true; }}>Stop</Button>
           ) : (
-            <Button onClick={runPull}>
-              <RefreshCw className="mr-2 h-4 w-4" /> Pull history since Jan 1, 2024
+            <Button onClick={runPull} disabled={!timeframe.size}>
+              <RefreshCw className="mr-2 h-4 w-4" /> Pull selected timeframe
             </Button>
           )}
           <Button variant="outline" onClick={downloadHistory} disabled={running || !summary?.rows}>
@@ -1053,6 +1174,7 @@ function GroupHistoryCard() {
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState("");
   const [failures, setFailures] = useState<{ groupName: string; error: string }[]>([]);
+  const [timeframe, setTimeframe] = useState<Set<QuarterKey>>(defaultTimeframe);
   const stopRequested = useRef(false);
 
   const loadSummary = async () => {
@@ -1069,7 +1191,10 @@ function GroupHistoryCard() {
   }, []);
 
   const runPull = async () => {
-    if (!window.confirm("Pull weekly attendance for every Planning Center group since Jan 1, 2024? This can take a while. Keep this tab open until it finishes.")) return;
+    const since = timeframeStart(timeframe);
+    if (!since) return;
+    const selection = new Set(timeframe);
+    if (!window.confirm(`Pull weekly attendance for every Planning Center group for ${describeTimeframe(selection)}? This can take a while. Keep this tab open until it finishes.`)) return;
     stopRequested.current = false;
     setRunning(true);
     setFailures([]);
@@ -1083,9 +1208,9 @@ function GroupHistoryCard() {
         const label = `Group ${index + 1} of ${groups.length}: ${group.name}`;
         try {
           setProgress(`${label} (finding meetings…)`);
-          const weeks = await (await api(
-            `/api/group-history/groups/${encodeURIComponent(group.id)}/weeks?since=${HISTORY_SINCE}`,
-          )).json() as GroupHistoryWeek[];
+          const weeks = (await (await api(
+            `/api/group-history/groups/${encodeURIComponent(group.id)}/weeks?since=${since}`,
+          )).json() as GroupHistoryWeek[]).filter((week) => weekInTimeframe(week.weekStart, selection));
           let done = 0;
           for (const batch of batchGroupWeeks(weeks)) {
             if (stopRequested.current) break;
@@ -1136,7 +1261,7 @@ function GroupHistoryCard() {
       <CardHeader>
         <CardTitle className="flex items-center gap-2"><BarChart3 className="h-5 w-5" /> Group attendance history</CardTitle>
         <p className="text-sm text-muted-foreground">
-          A one-time pull of weekly attendance for every Planning Center group since Jan 1, 2024, in the same
+          Pulls weekly attendance for every Planning Center group for the quarters you check below, in the same
           Monday-to-Monday weeks. Counts people marked present; weeks where no attendance was taken are left blank,
           not zero. Read-only in Planning Center. Safe to run again.
         </p>
@@ -1147,6 +1272,7 @@ function GroupHistoryCard() {
             ? `${summary.rows} group-weeks saved across ${summary.groups} groups (${summary.firstWeek} to ${summary.lastWeek}).`
             : "No group history pulled yet."}
         </p>
+        <TimeframePicker selected={timeframe} onChange={setTimeframe} disabled={running} />
         {running && (
           <p className="flex items-center gap-2 text-sm">
             <Loader2 className="h-4 w-4 animate-spin" /> {progress} Keep this tab open.
@@ -1164,8 +1290,8 @@ function GroupHistoryCard() {
           {running ? (
             <Button variant="outline" onClick={() => { stopRequested.current = true; }}>Stop</Button>
           ) : (
-            <Button onClick={runPull}>
-              <RefreshCw className="mr-2 h-4 w-4" /> Pull group history since Jan 1, 2024
+            <Button onClick={runPull} disabled={!timeframe.size}>
+              <RefreshCw className="mr-2 h-4 w-4" /> Pull selected timeframe
             </Button>
           )}
           <Button variant="outline" onClick={downloadHistory} disabled={running || !summary?.rows}>
