@@ -75,6 +75,8 @@ const env = ambientEnv as unknown as Env;
 // Must match the Wiki Drive sync's entry in wrangler.toml's [triggers]
 // crons array exactly (string equality against ScheduledController.cron).
 const WIKI_DRIVE_SYNC_CRON = "0 6 * * *";
+// Same rule for the weekly group attendance auto-sync (routes/groupHistory.ts).
+const GROUP_HISTORY_SYNC_CRON = "0 7 * * 1";
 
 export class TransformChurchContainer extends Container<Env> {
   defaultPort = 3000;
@@ -233,6 +235,20 @@ export default {
           if (!response.ok) {
             const body = await response.text().catch(() => "");
             console.error(`Wiki Drive scheduled sync failed: ${response.status} ${body.slice(0, 500)}`);
+          }
+          return;
+        }
+        if (controller.cron === GROUP_HISTORY_SYNC_CRON) {
+          // Reuses the Weekly Pulse's internal secret rather than adding a
+          // new one; the container route checks the same env var.
+          const request = new Request("https://internal/api/group-history/run-scheduled", {
+            method: "POST",
+            headers: { "x-internal-secret": workerEnv.WEEKLY_PULSE_RUN_SECRET ?? "" },
+          });
+          const response = await getContainer(workerEnv.API_CONTAINER, "primary").fetch(request);
+          if (!response.ok) {
+            const body = await response.text().catch(() => "");
+            console.error(`Group history auto-sync failed: ${response.status} ${body.slice(0, 500)}`);
           }
           return;
         }

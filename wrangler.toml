@@ -86,8 +86,13 @@ bucket_name = "transform-church-storage"
 # fallback scheduler -- see WIKI_DRIVE_SYNC_HOUR_UTC in
 # lib/wikiDriveSync.ts's startWikiDriveScheduler()). Adjust here (and
 # redeploy) if a different time is wanted for either.
+# "0 7 * * 1" -> the weekly group attendance auto-sync,
+# POST /api/group-history/run-scheduled (GROUP_HISTORY_SYNC_CRON in
+# worker.ts must match). 07:00 UTC Monday is 3am US Eastern during daylight
+# saving time and 2am in winter. It does nothing unless an admin has turned
+# "Update automatically every week" on in Group attendance history.
 [triggers]
-crons = ["0 11 * * 1", "0 6 * * *"]
+crons = ["0 11 * * 1", "0 6 * * *", "0 7 * * 1"]
 
 [vars]
 NODE_ENV = "production"

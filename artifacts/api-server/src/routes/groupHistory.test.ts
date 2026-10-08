@@ -38,3 +38,22 @@ test("group history CSV marks weeks where attendance wasn't taken", () => {
   assert.equal(lines[1], "Fall 2026: James - Olive,5,No,2026-09-07,2026-09-14,1,12,Yes");
   assert.equal(lines[2], "'=bad,6,Yes,2026-09-07,2026-09-14,1,,No");
 });
+
+import { groupActiveInRange, weeksToSync } from "./groupHistory";
+
+test("groupActiveInRange skips groups created after or archived before the timeframe", () => {
+  const range = ["2025-01-01", "2025-04-01"] as const;
+  assert.equal(groupActiveInRange({ createdAt: "2024-08-01T00:00:00Z", archivedAt: null }, ...range), true);
+  assert.equal(groupActiveInRange({ createdAt: "2025-05-01T00:00:00Z", archivedAt: null }, ...range), false); // created later
+  assert.equal(groupActiveInRange({ createdAt: "2023-01-01T00:00:00Z", archivedAt: "2024-12-15T00:00:00Z" }, ...range), false); // archived before
+  assert.equal(groupActiveInRange({ createdAt: "2023-01-01T00:00:00Z", archivedAt: "2025-02-10T00:00:00Z" }, ...range), true); // archived during
+  assert.equal(groupActiveInRange({ createdAt: null, archivedAt: null }, ...range), true); // unknown dates never exclude
+});
+
+test("weeksToSync always refreshes recent weeks and fills older gaps only", () => {
+  const week = (weekStart: string) => ({ weekStart, weekEnd: "", meetingIds: ["1"] });
+  const weeks = [week("2026-08-10"), week("2026-08-17"), week("2026-09-21"), week("2026-09-28")];
+  const saved = new Set(["2026-08-10", "2026-09-21", "2026-09-28"]);
+  assert.deepEqual(weeksToSync(weeks, saved, "2026-09-21").map((w) => w.weekStart), ["2026-08-17", "2026-09-21", "2026-09-28"]);
+  assert.deepEqual(weeksToSync(weeks, undefined, "2026-09-21").map((w) => w.weekStart), weeks.map((w) => w.weekStart));
+});

@@ -14,7 +14,8 @@ export async function api(path: string, options?: RequestInit): Promise<Response
   });
   if (!response.ok) {
     const body = await response.json().catch(() => ({ error: "Request failed." }));
-    throw new Error(body.error || "Request failed.");
+    // status lets callers tell "retry later" (429/5xx) from "won't work" (403).
+    throw Object.assign(new Error(body.error || "Request failed."), { status: response.status });
   }
   return response;
 }

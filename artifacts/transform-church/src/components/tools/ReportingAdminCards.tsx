@@ -926,6 +926,11 @@ function quarterRange(key: QuarterKey): [string, string] {
   return [start, end];
 }
 
+function timeframeEnd(selected: Set<QuarterKey>): string | null {
+  const keys = [...selected].sort();
+  return keys.length ? quarterRange(keys[keys.length - 1])[1] : null;
+}
+
 function timeframeStart(selected: Set<QuarterKey>): string | null {
   const keys = [...selected].sort();
   return keys.length ? quarterRange(keys[0])[0] : null;
@@ -1148,6 +1153,38 @@ const GROUP_HISTORY_MAX_WEEKS_PER_CALL = 8;
 const GROUP_HISTORY_MAX_MEETINGS_PER_CALL = 20;
 
 type HistoryGroup = { id: string; name: string; archived: boolean };
+type GroupAutoSyncRun = {
+  startedAt: string;
+  finishedAt: string | null;
+  status: "running" | "success" | "partial" | "error";
+  groupsChecked: number;
+  weeksSaved: number;
+  failures: { group: string; error: string }[];
+  message?: string;
+};
+type GroupAutoSync = { enabled: boolean; lastRun: GroupAutoSyncRun | null; usesYourConnection: boolean };
+
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+// Pacing for manual group pulls: a short pause between Planning Center calls,
+// and on a rate-limit/server error a longer wait before retrying, so a big
+// pull slows down instead of losing groups.
+const GROUP_PULL_PAUSE_MS = 400;
+const GROUP_PULL_RETRY_WAITS_MS = [20_000, 60_000, 120_000];
+
+async function apiWithRetry(path: string, options: RequestInit | undefined, onWait: (seconds: number) => void): Promise<Response> {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await wait(GROUP_PULL_PAUSE_MS);
+      return await api(path, options);
+    } catch (error) {
+      const status = (error as { status?: number }).status;
+      const retryable = status === undefined || status === 429 || status >= 500;
+      if (!retryable || attempt >= GROUP_PULL_RETRY_WAITS_MS.length) throw error;
+      onWait(GROUP_PULL_RETRY_WAITS_MS[attempt] / 1000);
+      await wait(GROUP_PULL_RETRY_WAITS_MS[attempt]);
+    }
+  }
+}
 type GroupHistoryWeek = { weekStart: string; weekEnd: string; meetingIds: string[] };
 type GroupHistorySummary = { rows: number; groups: number; firstWeek: string | null; lastWeek: string | null; lastFetchedAt: string | null };
 
@@ -1175,6 +1212,9 @@ function GroupHistoryCard() {
   const [progress, setProgress] = useState("");
   const [failures, setFailures] = useState<{ groupName: string; error: string }[]>([]);
   const [timeframe, setTimeframe] = useState<Set<QuarterKey>>(defaultTimeframe);
+  const [onlyMissing, setOnlyMissing] = useState(true);
+  const [autoSync, setAutoSync] = useState<GroupAutoSync | null>(null);
+  const [savingAutoSync, setSavingAutoSync] = useState(false);
   const stopRequested = useRef(false);
 
   const loadSummary = async () => {
@@ -1186,50 +1226,95 @@ function GroupHistoryCard() {
     }
   };
 
+  const loadAutoSync = async () => {
+    try {
+      const response = await api("/api/group-history/auto-sync");
+      setAutoSync(await response.json() as GroupAutoSync);
+    } catch {
+      setAutoSync(null);
+    }
+  };
+
   useEffect(() => {
     loadSummary();
+    loadAutoSync();
   }, []);
+
+  const toggleAutoSync = async (enabled: boolean) => {
+    setSavingAutoSync(true);
+    try {
+      const response = await api("/api/group-history/auto-sync", { method: "POST", body: JSON.stringify({ enabled }) });
+      setAutoSync(await response.json() as GroupAutoSync);
+      toast({ title: enabled ? "Weekly group sync turned on" : "Weekly group sync turned off" });
+    } catch (error) {
+      toast({ title: "Could not save the weekly sync setting", description: error instanceof Error ? error.message : "Request failed.", variant: "destructive" });
+    } finally {
+      setSavingAutoSync(false);
+    }
+  };
 
   const runPull = async () => {
     const since = timeframeStart(timeframe);
-    if (!since) return;
+    const until = timeframeEnd(timeframe);
+    if (!since || !until) return;
     const selection = new Set(timeframe);
-    if (!window.confirm(`Pull weekly attendance for every Planning Center group for ${describeTimeframe(selection)}? This can take a while. Keep this tab open until it finishes.`)) return;
+    const what = onlyMissing ? "missing weeks of group attendance" : "weekly group attendance (re-pulling saved weeks too)";
+    if (!window.confirm(`Pull ${what} for ${describeTimeframe(selection)}? Only groups that existed in that timeframe are checked. This can take a while. Keep this tab open until it finishes.`)) return;
     stopRequested.current = false;
     setRunning(true);
     setFailures([]);
     let weeksSaved = 0;
+    let upToDate = 0;
+    let consecutiveFailures = 0;
     const failed: { groupName: string; error: string }[] = [];
     try {
-      setProgress("Loading Planning Center groups…");
-      const groups = await (await api("/api/group-history/groups")).json() as HistoryGroup[];
+      setProgress("Finding groups that existed in this timeframe…");
+      const { groups, total } = await (await api(
+        `/api/group-history/groups?since=${since}&until=${until}`,
+      )).json() as { groups: HistoryGroup[]; total: number };
+      const saved: Record<string, string[]> = onlyMissing
+        ? await (await api(`/api/group-history/saved-weeks?since=${since}&until=${until}`)).json()
+        : {};
+      const skippedInactive = total - groups.length;
       for (const [index, group] of groups.entries()) {
         if (stopRequested.current) break;
         const label = `Group ${index + 1} of ${groups.length}: ${group.name}`;
+        const onWait = (seconds: number) => setProgress(`${label}: Planning Center is busy, waiting ${seconds}s before retrying…`);
         try {
           setProgress(`${label} (finding meetings…)`);
-          const weeks = (await (await api(
-            `/api/group-history/groups/${encodeURIComponent(group.id)}/weeks?since=${since}`,
-          )).json() as GroupHistoryWeek[]).filter((week) => weekInTimeframe(week.weekStart, selection));
+          const savedWeeks = new Set(saved[group.id] ?? []);
+          const weeks = (await (await apiWithRetry(
+            `/api/group-history/groups/${encodeURIComponent(group.id)}/weeks?since=${since}`, undefined, onWait,
+          )).json() as GroupHistoryWeek[])
+            .filter((week) => weekInTimeframe(week.weekStart, selection))
+            .filter((week) => !onlyMissing || !savedWeeks.has(week.weekStart));
+          if (!weeks.length) upToDate += 1;
           let done = 0;
           for (const batch of batchGroupWeeks(weeks)) {
             if (stopRequested.current) break;
             setProgress(`${label} (${done} of ${weeks.length} weeks)`);
-            await api(`/api/group-history/groups/${encodeURIComponent(group.id)}/weeks`, {
+            await apiWithRetry(`/api/group-history/groups/${encodeURIComponent(group.id)}/weeks`, {
               method: "POST",
               body: JSON.stringify({ groupName: group.name, archived: group.archived, weeks: batch }),
-            });
+            }, onWait);
             done += batch.length;
             weeksSaved += batch.length;
           }
+          consecutiveFailures = 0;
         } catch (error) {
           failed.push({ groupName: group.name, error: error instanceof Error ? error.message : "Request failed." });
           setFailures([...failed]);
+          consecutiveFailures += 1;
+          if (consecutiveFailures >= 3 && !stopRequested.current) {
+            setProgress("Several groups failed in a row; pausing 2 minutes to let Planning Center recover…");
+            await wait(120_000);
+            consecutiveFailures = 0;
+          }
         }
       }
       toast({
         title: stopRequested.current ? "Group history pull stopped" : "Group history pull finished",
-        description: `${weeksSaved} group-weeks saved${failed.length ? `, ${failed.length} group${failed.length === 1 ? "" : "s"} failed` : ""}.`,
+        description: `${weeksSaved} group-weeks saved, ${upToDate} group${upToDate === 1 ? "" : "s"} already up to date, ${skippedInactive} skipped as inactive in this timeframe${failed.length ? `, ${failed.length} failed (run again to retry them)` : ""}.`,
         variant: failed.length ? "destructive" : undefined,
       });
     } catch (error) {
@@ -1261,9 +1346,10 @@ function GroupHistoryCard() {
       <CardHeader>
         <CardTitle className="flex items-center gap-2"><BarChart3 className="h-5 w-5" /> Group attendance history</CardTitle>
         <p className="text-sm text-muted-foreground">
-          Pulls weekly attendance for every Planning Center group for the quarters you check below, in the same
-          Monday-to-Monday weeks. Counts people marked present; weeks where no attendance was taken are left blank,
-          not zero. Read-only in Planning Center. Safe to run again.
+          Pulls weekly attendance for Planning Center groups for the quarters you check below, in the same
+          Monday-to-Monday weeks. Only groups that existed in that timeframe are checked, and by default only weeks
+          that aren't saved yet, so running it again fills gaps. Counts people marked present; weeks where no
+          attendance was taken are left blank, not zero. Read-only in Planning Center.
         </p>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -1273,6 +1359,16 @@ function GroupHistoryCard() {
             : "No group history pulled yet."}
         </p>
         <TimeframePicker selected={timeframe} onChange={setTimeframe} disabled={running} />
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            className="h-4 w-4 rounded border-input"
+            checked={onlyMissing}
+            disabled={running}
+            onChange={(event) => setOnlyMissing(event.target.checked)}
+          />
+          Only pull weeks that aren't saved yet (fill gaps)
+        </label>
         {running && (
           <p className="flex items-center gap-2 text-sm">
             <Loader2 className="h-4 w-4 animate-spin" /> {progress} Keep this tab open.
@@ -1280,7 +1376,7 @@ function GroupHistoryCard() {
         )}
         {failures.length > 0 && (
           <div className="rounded-md border border-destructive/40 p-3 text-sm">
-            <p className="font-medium text-destructive">Some groups could not be pulled (run again to retry them):</p>
+            <p className="font-medium text-destructive">Some groups could not be pulled (run again with "Only pull weeks that aren't saved yet" to retry just those):</p>
             <ul className="mt-1 list-disc pl-5 text-muted-foreground">
               {failures.map((failure) => <li key={failure.groupName}>{failure.groupName}: {failure.error}</li>)}
             </ul>
@@ -1297,6 +1393,32 @@ function GroupHistoryCard() {
           <Button variant="outline" onClick={downloadHistory} disabled={running || !summary?.rows}>
             <Download className="mr-2 h-4 w-4" /> Download group history CSV
           </Button>
+        </div>
+        <div className="space-y-2 rounded-md border p-3 text-sm">
+          <label className="flex items-center gap-2 font-medium">
+            <input
+              type="checkbox"
+              className="h-4 w-4 rounded border-input"
+              checked={!!autoSync?.enabled}
+              disabled={savingAutoSync || !autoSync}
+              onChange={(event) => toggleAutoSync(event.target.checked)}
+            />
+            Update automatically every week (Mondays around 3am)
+          </label>
+          <p className="text-xs text-muted-foreground">
+            Slowly re-pulls the last 3 weeks for groups that are active now (leaders often enter attendance late) and
+            fills any missing week from the last 12, adding new weeks to this tracker. Uses the Planning Center
+            connection of the admin who turns it on{autoSync?.enabled && !autoSync.usesYourConnection ? " (currently another admin's)" : ""}.
+          </p>
+          {autoSync?.lastRun && (
+            <p className="text-xs text-muted-foreground">
+              Last run {new Date(autoSync.lastRun.startedAt).toLocaleString()}: {autoSync.lastRun.status === "running"
+                ? "still running"
+                : `${autoSync.lastRun.status}, ${autoSync.lastRun.weeksSaved} weeks saved from ${autoSync.lastRun.groupsChecked} groups`}
+              {autoSync.lastRun.failures.length ? `, ${autoSync.lastRun.failures.length} failed (${autoSync.lastRun.failures.slice(0, 3).map((f) => f.group).join(", ")}${autoSync.lastRun.failures.length > 3 ? "…" : ""})` : ""}
+              {autoSync.lastRun.message ? ` — ${autoSync.lastRun.message}` : ""}
+            </p>
+          )}
         </div>
       </CardContent>
     </Card>
