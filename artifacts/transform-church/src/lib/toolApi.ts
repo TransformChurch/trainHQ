@@ -14,6 +14,7 @@ export async function api(path: string, options?: RequestInit): Promise<Response
   });
   if (!response.ok) {
     const body = await response.json().catch(() => ({ error: "Request failed." }));
+    if (response.status === 401) body.error = "Your sign-in has expired. Refresh the page and sign in again.";
     // status lets callers tell "retry later" (429/5xx) from "won't work" (403).
     throw Object.assign(new Error(body.error || "Request failed."), { status: response.status });
   }

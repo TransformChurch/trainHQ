@@ -20,9 +20,12 @@ import { checkinsWeeklyHistoryTable, db } from "@workspace/db";
 import {
   addDays,
   genderByPersonFromIncluded,
+  readWeekOverrides,
   saveHistoryRows,
   summarizeCheckIns,
+  trackerRowsFor,
   weekStartFor,
+  writeWeekOverrides,
 } from "../lib/checkinsHistory";
 import { asc, count, countDistinct, max, sql } from "drizzle-orm";
 import { requireAdmin } from "../middlewares/requireAuth";
@@ -108,6 +111,61 @@ export function buildHistoryCsv(rows: {
   return [header, ...lines].map((line) => line.map(csvCell).join(",")).join("\r\n") + "\r\n";
 }
 
+// An event's sessions (event periods) starting on/after `since`.
+async function listEventPeriods(accessToken: string, eventId: string, since: string) {
+  const sinceIso = `${since}T00:00:00Z`;
+  const periods: { id: string; startsAt: string }[] = [];
+  let url: string | null =
+    `${CHECK_INS_BASE}/events/${encodeURIComponent(eventId)}/event_periods?order=-starts_at&per_page=100`;
+  const visited = new Set<string>();
+  while (url && !visited.has(url)) {
+    visited.add(url);
+    const page = await planningCenterRequest(url, accessToken);
+    const rows: JsonApiResource[] = Array.isArray(page.data) ? page.data : [];
+    let reachedOlder = false;
+    for (const row of rows) {
+      const startsAt = text(row.attributes?.starts_at);
+      if (!startsAt) continue;
+      if (startsAt < sinceIso) { reachedOlder = true; continue; }
+      periods.push({ id: row.id, startsAt });
+    }
+    // Newest first, so once a session is older than `since` the rest are too.
+    if (reachedOlder || periods.length > 20_000) break;
+    url = typeof page.links?.next === "string" && page.links.next ? page.links.next : null;
+  }
+  return periods;
+}
+
+// Attendee check-ins for the given weeks' sessions -> one tracker row per week.
+async function pullEventWeeks(
+  accessToken: string,
+  eventId: string,
+  weeks: { weekStart: string; periodIds: string[] }[],
+) {
+  const rows = [];
+  for (const week of weeks) {
+    const checkIns: JsonApiResource[] = [];
+    const included: JsonApiResource[] = [];
+    for (const periodId of week.periodIds) {
+      const collection = await fetchCollection(
+        `${CHECK_INS_BASE}/events/${encodeURIComponent(eventId)}/event_periods/${encodeURIComponent(periodId)}/check_ins?filter=attendee&include=person&per_page=100`,
+        accessToken,
+      );
+      checkIns.push(...collection.data);
+      included.push(...collection.included);
+    }
+    rows.push({
+      weekStart: week.weekStart,
+      weekEnd: addDays(week.weekStart, 7),
+      sessions: week.periodIds.length,
+      ...summarizeCheckIns(checkIns, genderByPersonFromIncluded(included)),
+      firstTimers: null,
+      firstTimersReturned: null,
+    });
+  }
+  return rows;
+}
+
 // ── GET /api/attendance-history/events ──────────────────────────────────────
 // Every Check-Ins event, active and archived.
 router.get("/events", requireAdmin, async (req, res) => {
@@ -148,27 +206,7 @@ router.get("/events/:eventId/weeks", requireAdmin, async (req, res) => {
       return;
     }
     const accessToken = await getValidPlanningCenterAccessToken(res.locals.dbUser.id);
-    const sinceIso = `${since}T00:00:00Z`;
-    const periods: { id: string; startsAt: string }[] = [];
-    let url: string | null =
-      `${CHECK_INS_BASE}/events/${encodeURIComponent(eventId)}/event_periods?order=-starts_at&per_page=100`;
-    const visited = new Set<string>();
-    while (url && !visited.has(url)) {
-      visited.add(url);
-      const page = await planningCenterRequest(url, accessToken);
-      const rows: JsonApiResource[] = Array.isArray(page.data) ? page.data : [];
-      let reachedOlder = false;
-      for (const row of rows) {
-        const startsAt = text(row.attributes?.starts_at);
-        if (!startsAt) continue;
-        if (startsAt < sinceIso) { reachedOlder = true; continue; }
-        periods.push({ id: row.id, startsAt });
-      }
-      // Newest first, so once a session is older than `since` the rest are too.
-      if (reachedOlder || periods.length > 20_000) break;
-      url = typeof page.links?.next === "string" && page.links.next ? page.links.next : null;
-    }
-    res.json(groupPeriodsByWeek(periods, since));
+    res.json(groupPeriodsByWeek(await listEventPeriods(accessToken, eventId, since), since));
   } catch (error) {
     sendError(req, res, error, "Failed to load this event's sessions");
   }
@@ -208,27 +246,7 @@ router.post("/events/:eventId/weeks", requireAdmin, async (req, res) => {
     }
 
     const accessToken = await getValidPlanningCenterAccessToken(res.locals.dbUser.id);
-    const rows = [];
-    for (const week of weeks) {
-      const checkIns: JsonApiResource[] = [];
-      const included: JsonApiResource[] = [];
-      for (const periodId of week.periodIds) {
-        const collection = await fetchCollection(
-          `${CHECK_INS_BASE}/events/${encodeURIComponent(eventId)}/event_periods/${encodeURIComponent(periodId)}/check_ins?filter=attendee&include=person&per_page=100`,
-          accessToken,
-        );
-        checkIns.push(...collection.data);
-        included.push(...collection.included);
-      }
-      rows.push({
-        weekStart: week.weekStart,
-        weekEnd: addDays(week.weekStart, 7),
-        sessions: week.periodIds.length,
-        ...summarizeCheckIns(checkIns, genderByPersonFromIncluded(included)),
-        firstTimers: null,
-        firstTimersReturned: null,
-      });
-    }
+    const rows = await pullEventWeeks(accessToken, eventId, weeks);
     await saveHistoryRows({ eventId, eventName, archived }, rows);
     const saved = rows.map((row) => ({
       weekStart: row.weekStart,
@@ -239,6 +257,72 @@ router.post("/events/:eventId/weeks", requireAdmin, async (req, res) => {
     res.json({ saved });
   } catch (error) {
     sendError(req, res, error, "Failed to pull attendance for these weeks");
+  }
+});
+
+// ── Week substitutions: GET/POST/DELETE /api/attendance-history/overrides ───
+// "For this event, the week of <date>, use that other event's numbers" -- see
+// lib/checkinsHistory.ts. Adding one pulls the source event's sessions for
+// that week from Planning Center (read-only) into the tracker first.
+async function overridesWithNumbers() {
+  const overrides = await readWeekOverrides();
+  const rows = await trackerRowsFor(overrides.flatMap((o) => [
+    { eventId: o.eventId, weekStart: o.weekStart },
+    { eventId: o.sourceEventId, weekStart: o.weekStart },
+  ]));
+  const find = (eventId: string, weekStart: string) =>
+    rows.find((row) => row.eventId === eventId && row.weekStart === weekStart)?.uniqueAttendees ?? null;
+  return overrides
+    .sort((a, b) => b.weekStart.localeCompare(a.weekStart))
+    .map((o) => ({ ...o, ownAttendees: find(o.eventId, o.weekStart), sourceAttendees: find(o.sourceEventId, o.weekStart) }));
+}
+
+router.get("/overrides", requireAdmin, async (req, res) => {
+  try {
+    res.json(await overridesWithNumbers());
+  } catch (error) {
+    sendError(req, res, error, "Failed to load week substitutions");
+  }
+});
+
+router.post("/overrides", requireAdmin, async (req, res) => {
+  try {
+    const eventId = text(req.body?.eventId);
+    const sourceEventId = text(req.body?.sourceEventId);
+    const date = text(req.body?.date);
+    if (!PCO_ID.test(eventId) || !PCO_ID.test(sourceEventId) || !DATE_ONLY.test(date) || eventId === sourceEventId) {
+      res.status(400).json({ error: "Pick two different events and a date." });
+      return;
+    }
+    const eventName = text(req.body?.eventName).slice(0, 300) || `Event ${eventId}`;
+    const sourceEventName = text(req.body?.sourceEventName).slice(0, 300) || `Event ${sourceEventId}`;
+    const weekStart = weekStartFor(`${date}T12:00:00Z`);
+    const accessToken = await getValidPlanningCenterAccessToken(res.locals.dbUser.id);
+    const sessions = (await listEventPeriods(accessToken, sourceEventId, weekStart))
+      .filter((period) => weekStartFor(period.startsAt) === weekStart);
+    if (!sessions.length) {
+      res.status(404).json({ error: `${sourceEventName} has no sessions in the week of ${weekStart}.` });
+      return;
+    }
+    const rows = await pullEventWeeks(accessToken, sourceEventId, [{ weekStart, periodIds: sessions.map((p) => p.id) }]);
+    await saveHistoryRows({ eventId: sourceEventId, eventName: sourceEventName, archived: req.body?.sourceArchived === true }, rows);
+    const overrides = (await readWeekOverrides()).filter((o) => !(o.eventId === eventId && o.weekStart === weekStart));
+    overrides.push({ eventId, eventName, weekStart, sourceEventId, sourceEventName, createdAt: new Date().toISOString() });
+    await writeWeekOverrides(overrides);
+    res.json(await overridesWithNumbers());
+  } catch (error) {
+    sendError(req, res, error, "Failed to save the week substitution");
+  }
+});
+
+router.delete("/overrides", requireAdmin, async (req, res) => {
+  try {
+    const eventId = text(req.query.eventId);
+    const weekStart = text(req.query.weekStart);
+    await writeWeekOverrides((await readWeekOverrides()).filter((o) => !(o.eventId === eventId && o.weekStart === weekStart)));
+    res.json(await overridesWithNumbers());
+  } catch (error) {
+    sendError(req, res, error, "Failed to remove the week substitution");
   }
 });
 

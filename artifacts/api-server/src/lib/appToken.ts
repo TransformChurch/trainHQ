@@ -6,6 +6,10 @@ type AppTokenClaims = {
   given_name: string;
   family_name: string;
   phone_number?: string;
+  // When the person actually signed in with Church Center (unix seconds).
+  // Carried unchanged through token refreshes so a session can't be renewed
+  // forever -- see MAX_SESSION_SECONDS in routes/planningCenterAuth.ts.
+  auth_time?: number;
 };
 
 function encode(value: unknown): string {
@@ -22,6 +26,7 @@ export function issueAppToken(claims: AppTokenClaims, lifetimeSeconds = 60 * 60)
   const header = encode({ alg: "HS256", typ: "JWT" });
   const payload = encode({
     ...claims,
+    auth_time: claims.auth_time ?? now,
     iat: now,
     exp: now + lifetimeSeconds,
   });

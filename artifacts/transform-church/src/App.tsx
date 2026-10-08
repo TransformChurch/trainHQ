@@ -126,6 +126,57 @@ function AuthProvider({ children }: { children: ReactNode }) {
     sessionStorage.removeItem(TOKEN_STORAGE_KEY);
     setToken(null);
   };
+
+  // App tokens last one hour. While the site is open, swap the token for a
+  // fresh one before it runs out (the server allows this for up to 12 hours
+  // after the Church Center sign-in), so long tasks like a report pull don't
+  // start failing with "Unauthorized" partway through. If it has already
+  // expired, sign out so the sign-in page shows instead of silent failures.
+  useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
+    const expiresAt = (() => {
+      try {
+        const part = token.split(".")[1] ?? "";
+        const normalized = part.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(part.length / 4) * 4, "=");
+        const exp = (JSON.parse(atob(normalized)) as { exp?: unknown }).exp;
+        return typeof exp === "number" ? exp : null;
+      } catch {
+        return null;
+      }
+    })();
+    const check = async () => {
+      if (cancelled || expiresAt === null) return;
+      const secondsLeft = expiresAt - Date.now() / 1000;
+      if (secondsLeft <= 0) {
+        signOut();
+        return;
+      }
+      if (secondsLeft > 25 * 60) return;
+      try {
+        const response = await fetch(`${apiUrl ?? basePath}/api/auth/refresh`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!response.ok || cancelled) return;
+        const body = await response.json() as { token?: string };
+        if (body.token) {
+          sessionStorage.setItem(TOKEN_STORAGE_KEY, body.token);
+          setToken(body.token);
+        }
+      } catch {
+        // Network blip: try again on the next check.
+      }
+    };
+    check();
+    const interval = window.setInterval(check, 5 * 60 * 1000);
+    window.addEventListener("focus", check);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+      window.removeEventListener("focus", check);
+    };
+  }, [token]);
   return <AuthContext.Provider value={{ isLoaded: true, isSignedIn: !!user, user, signOut }}>{children}</AuthContext.Provider>;
 }
 

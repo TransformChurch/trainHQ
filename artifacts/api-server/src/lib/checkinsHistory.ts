@@ -5,8 +5,8 @@
 // time a report is prepared, and reads them back for the trend chart).
 //
 // Kept free of route imports so both routes can use it without a cycle.
-import { checkinsWeeklyHistoryTable, db } from "@workspace/db";
-import { and, asc, eq, gte, lte } from "drizzle-orm";
+import { checkinsWeeklyHistoryTable, db, settingsTable } from "@workspace/db";
+import { and, asc, eq, gte, inArray, lte } from "drizzle-orm";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -219,13 +219,27 @@ export async function saveHistoryRows(
 export async function loadTrendRows(eventId: string, endDate: string, weeks = 13) {
   const lastWeek = weekStartFor(`${endDate}T12:00:00Z`);
   const firstWeek = addDays(lastWeek, -7 * (weeks - 1));
-  const rows = await db.select().from(checkinsWeeklyHistoryTable)
+  const own = await db.select().from(checkinsWeeklyHistoryTable)
     .where(and(
       eq(checkinsWeeklyHistoryTable.eventId, eventId),
       gte(checkinsWeeklyHistoryTable.weekStart, firstWeek),
       lte(checkinsWeeklyHistoryTable.weekStart, lastWeek),
-    ))
-    .orderBy(asc(checkinsWeeklyHistoryTable.weekStart));
+    ));
+  // Week substitutions: for an overridden week, use the source event's row
+  // (e.g. a one-off concert that replaced the normal service that week).
+  const overrides = (await readWeekOverrides())
+    .filter((o) => o.eventId === eventId && o.weekStart >= firstWeek && o.weekStart <= lastWeek);
+  const byWeek = new Map(own.map((row) => [row.weekStart, row]));
+  for (const override of overrides) {
+    const [source] = await db.select().from(checkinsWeeklyHistoryTable)
+      .where(and(
+        eq(checkinsWeeklyHistoryTable.eventId, override.sourceEventId),
+        eq(checkinsWeeklyHistoryTable.weekStart, override.weekStart),
+      ))
+      .limit(1);
+    if (source) byWeek.set(override.weekStart, source);
+  }
+  const rows = [...byWeek.values()].sort((a, b) => a.weekStart.localeCompare(b.weekStart));
   return rows.map((row) => ({
     weekStart: row.weekStart,
     total: row.uniqueAttendees,
@@ -235,4 +249,45 @@ export async function loadTrendRows(eventId: string, endDate: string, weeks = 13
     firstTimers: row.firstTimers,
     firstTimersReturned: row.firstTimersReturned,
   }));
+}
+
+// ── Week substitutions ──────────────────────────────────────────────────────
+// "For event X, the week of W, use event Y's numbers" -- for a one-off event
+// (a concert, a combined night) that replaced an event's normal service.
+// Stored in the settings key/value table (no migration). Only the tracker-
+// based charts (attendance trend, first-timer trend) use them; Planning
+// Center itself is never changed.
+const WEEK_OVERRIDES_KEY = "checkins_week_overrides";
+
+export type WeekOverride = {
+  eventId: string;
+  eventName: string;
+  weekStart: string;
+  sourceEventId: string;
+  sourceEventName: string;
+  createdAt: string;
+};
+
+export async function readWeekOverrides(): Promise<WeekOverride[]> {
+  const rows = await db.select().from(settingsTable).where(eq(settingsTable.key, WEEK_OVERRIDES_KEY)).limit(1);
+  try {
+    const parsed = rows[0] ? JSON.parse(rows[0].value) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function writeWeekOverrides(overrides: WeekOverride[]): Promise<void> {
+  const value = JSON.stringify(overrides);
+  await db.insert(settingsTable).values({ key: WEEK_OVERRIDES_KEY, value })
+    .onConflictDoUpdate({ target: settingsTable.key, set: { value } });
+}
+
+// Saved tracker numbers for the given (eventId, weekStart) pairs, for display.
+export async function trackerRowsFor(pairs: { eventId: string; weekStart: string }[]) {
+  if (!pairs.length) return [];
+  const rows = await db.select().from(checkinsWeeklyHistoryTable)
+    .where(inArray(checkinsWeeklyHistoryTable.eventId, [...new Set(pairs.map((p) => p.eventId))]));
+  return rows.filter((row) => pairs.some((p) => p.eventId === row.eventId && p.weekStart === row.weekStart));
 }

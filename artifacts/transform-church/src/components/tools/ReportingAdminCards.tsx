@@ -1143,8 +1143,152 @@ function AttendanceHistoryCard() {
             <Download className="mr-2 h-4 w-4" /> Download history CSV
           </Button>
         </div>
+        <WeekSubstitutions />
       </CardContent>
     </Card>
+  );
+}
+
+type WeekSubstitution = {
+  eventId: string;
+  eventName: string;
+  weekStart: string;
+  sourceEventId: string;
+  sourceEventName: string;
+  ownAttendees: number | null;
+  sourceAttendees: number | null;
+};
+
+// "Use another event's numbers for one week" -- e.g. the Summer Finale
+// Concert stood in for a normal Youth night. Only the report trend charts
+// use these; Planning Center itself is never changed.
+function WeekSubstitutions() {
+  const { toast } = useToast();
+  const [items, setItems] = useState<WeekSubstitution[]>([]);
+  const [events, setEvents] = useState<HistoryEvent[] | null>(null);
+  const [loadingEvents, setLoadingEvents] = useState(false);
+  const [targetId, setTargetId] = useState("");
+  const [sourceId, setSourceId] = useState("");
+  const [sourceFilter, setSourceFilter] = useState("");
+  const [date, setDate] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    api("/api/attendance-history/overrides")
+      .then((response) => response.json())
+      .then((data) => setItems(data as WeekSubstitution[]))
+      .catch(() => setItems([]));
+  }, []);
+
+  const loadEvents = async () => {
+    setLoadingEvents(true);
+    try {
+      setEvents(await (await api("/api/attendance-history/events")).json() as HistoryEvent[]);
+    } catch (error) {
+      toast({ title: "Could not load Check-Ins events", description: error instanceof Error ? error.message : "Request failed.", variant: "destructive" });
+    } finally {
+      setLoadingEvents(false);
+    }
+  };
+
+  const save = async () => {
+    const target = events?.find((event) => event.id === targetId);
+    const source = events?.find((event) => event.id === sourceId);
+    if (!target || !source || !date) return;
+    setSaving(true);
+    try {
+      const response = await api("/api/attendance-history/overrides", {
+        method: "POST",
+        body: JSON.stringify({
+          eventId: target.id, eventName: target.name,
+          sourceEventId: source.id, sourceEventName: source.name, sourceArchived: source.archived,
+          date,
+        }),
+      });
+      setItems(await response.json() as WeekSubstitution[]);
+      toast({ title: "Week substitution saved", description: `${target.name} will use ${source.name}'s numbers for that week.` });
+      setSourceId("");
+      setDate("");
+    } catch (error) {
+      toast({ title: "Could not save the substitution", description: error instanceof Error ? error.message : "Request failed.", variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const remove = async (item: WeekSubstitution) => {
+    try {
+      const response = await api(`/api/attendance-history/overrides?eventId=${encodeURIComponent(item.eventId)}&weekStart=${item.weekStart}`, { method: "DELETE" });
+      setItems(await response.json() as WeekSubstitution[]);
+    } catch (error) {
+      toast({ title: "Could not remove the substitution", description: error instanceof Error ? error.message : "Request failed.", variant: "destructive" });
+    }
+  };
+
+  const filteredSources = (events ?? []).filter((event) =>
+    event.id !== targetId && event.name.toLowerCase().includes(sourceFilter.trim().toLowerCase()));
+  const selectClass = "flex h-9 w-full rounded-md border border-input bg-background px-2 text-sm";
+
+  return (
+    <div className="space-y-3 rounded-md border p-3 text-sm">
+      <div>
+        <p className="font-medium">Week substitutions</p>
+        <p className="text-xs text-muted-foreground">
+          When a one-off event replaced an event's normal service (for example a concert instead of a regular Youth
+          night), use that event's attendance for the week in the reports' trend charts. Planning Center isn't changed.
+        </p>
+      </div>
+      {items.length > 0 && (
+        <ul className="space-y-1">
+          {items.map((item) => (
+            <li key={`${item.eventId}-${item.weekStart}`} className="flex flex-wrap items-center justify-between gap-2 rounded bg-muted/40 px-2 py-1">
+              <span>
+                <strong>{item.eventName}</strong>, week of {item.weekStart}: using <strong>{item.sourceEventName}</strong>
+                {item.sourceAttendees !== null ? ` (${item.sourceAttendees} attendees` : ""}
+                {item.sourceAttendees !== null && item.ownAttendees !== null ? ` instead of ${item.ownAttendees})` : item.sourceAttendees !== null ? ")" : ""}
+              </span>
+              <Button size="sm" variant="ghost" onClick={() => remove(item)}><Trash2 className="h-4 w-4" /></Button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {events === null ? (
+        <Button size="sm" variant="outline" onClick={loadEvents} disabled={loadingEvents}>
+          {loadingEvents ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Plus className="mr-2 h-4 w-4" />}
+          Add a week substitution
+        </Button>
+      ) : (
+        <div className="grid gap-2 md:grid-cols-3">
+          <div className="space-y-1">
+            <Label htmlFor="sub-target">Event to fix</Label>
+            <select id="sub-target" className={selectClass} value={targetId} onChange={(event) => setTargetId(event.target.value)}>
+              <option value="">Choose…</option>
+              {events.filter((event) => !event.archived).map((event) => <option key={event.id} value={event.id}>{event.name}</option>)}
+            </select>
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="sub-date">Date (any day that week)</Label>
+            <Input id="sub-date" type="date" value={date} onChange={(event) => setDate(event.target.value)} />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="sub-source">Use numbers from</Label>
+            <Input placeholder="Search events…" value={sourceFilter} onChange={(event) => setSourceFilter(event.target.value)} />
+            <select id="sub-source" className={selectClass} value={sourceId} onChange={(event) => setSourceId(event.target.value)}>
+              <option value="">Choose…</option>
+              {filteredSources.map((event) => (
+                <option key={event.id} value={event.id}>{event.name}{event.archived ? " (archived)" : ""}</option>
+              ))}
+            </select>
+          </div>
+          <div className="md:col-span-3">
+            <Button size="sm" onClick={save} disabled={saving || !targetId || !sourceId || !date}>
+              {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}
+              Save substitution
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
