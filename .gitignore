@@ -64,3 +64,4 @@ Thumbs.db
 # transfer artifacts for applying commits from another machine, not source
 # that belongs in the repo's history.
 *.bundle
+replitsite/
