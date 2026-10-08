@@ -16,7 +16,7 @@ import { FIELD_OPTIONS, type AvailableField, type ReportFieldKey } from "@/lib/r
 // report templates + scripts, Weekly Pulse, and the Attendance history pull.
 
 type CleanupMode = "month_quarter" | "all_dates";
-type ReportEngine = "youth_quarterly" | "youth_monthly" | "kids_rutherford" | "kids_lyndhurst";
+type ReportEngine = "youth_quarterly" | "youth_monthly" | "kids_rutherford" | "kids_lyndhurst" | "kids_rutherford_quarterly" | "kids_lyndhurst_quarterly";
 type ReportTemplate = {
   id: number;
   name: string;
@@ -33,6 +33,8 @@ const REPORT_ENGINE_OPTIONS: Array<{ value: ReportEngine; label: string }> = [
   { value: "youth_monthly", label: "Youth Monthly Report" },
   { value: "kids_rutherford", label: "Kids Rutherford Report" },
   { value: "kids_lyndhurst", label: "Kids Lyndhurst Report" },
+  { value: "kids_rutherford_quarterly", label: "Kids Rutherford Quarterly Report" },
+  { value: "kids_lyndhurst_quarterly", label: "Kids Lyndhurst Quarterly Report" },
 ];
 const reportEngineLabel = (engine: ReportEngine | null) =>
   REPORT_ENGINE_OPTIONS.find((option) => option.value === engine)?.label ?? null;

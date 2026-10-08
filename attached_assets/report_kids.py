@@ -135,7 +135,13 @@ def prepare(data: CleanedData, config: CampusConfig, as_of: dt.date | None = Non
 
 def render(data: CleanedData, config: CampusConfig, period_label: str | None = None,
            as_of: dt.date | None = None, logo_path: str | Path | None = DEFAULT_LOGO,
-           orientation: str = "portrait", trend_path: str | Path | None = None) -> list:
+           orientation: str = "portrait", trend_path: str | Path | None = None,
+           period: str = "monthly") -> list:
+    """period: "monthly" (one month of Sundays) or "quarterly" (a quarter,
+    ~13 Sundays). Quarterly adds an Age Group Average Attendance chart and a
+    Notable First-Time Kids page, the same additions the Youth Quarterly
+    report has over Youth Monthly."""
+    quarterly = period == "quarterly"
     setup_style()
     df = prepare(data, config, as_of)
     week_dates = data.week_dates
@@ -145,7 +151,8 @@ def render(data: CleanedData, config: CampusConfig, period_label: str | None = N
     figs = []
     logo = str(logo_path) if logo_path and Path(logo_path).exists() else None
     figsize = (8.5, 11) if orientation == "portrait" else (11, 8.5)
-    report_name = f"{config.campus_name} Kids Attendance Report"
+    report_name = (f"{config.campus_name} Kids Quarterly Report" if quarterly
+                   else f"{config.campus_name} Kids Attendance Report")
 
     def page():
         return new_page(figsize=figsize)
@@ -216,7 +223,19 @@ def render(data: CleanedData, config: CampusConfig, period_label: str | None = N
     age_donut = nonzero_slices(band_labels, band_counts(df), band_colors)
     summary_colors = [CATEGORICAL[3], CATEGORICAL[0], UNKNOWN_COLOR]
 
+    # Quarterly only: average attendance rate per age group, and the top 10
+    # first-time kids by attendance rate.
+    avg_by_band = [df.loc[df["_chart_band"] == b, "Attendance Rate"].mean() if (df["_chart_band"] == b).any() else 0.0
+                   for b in config.chart_band_order]
+
     ft_df = df[df["_first_timer"]]
+    notable_rows = [
+        [r["First Name"], r["Last Name"],
+         "Unknown" if pd.isna(r["_gender"]) else r["_gender"],
+         "Unknown" if pd.isna(r["_chart_band"]) else r["_chart_band"],
+         f"{r['Attendance Rate']:.0%}"]
+        for _, r in ft_df.sort_values("Attendance Rate", ascending=False).head(10).iterrows()
+    ]
     ft_stats = first_timer_stats(ft_df, week_cols, week_dates)
     ft_breakdowns = [
         ("By gender", ["Male", "Female", "Unknown"],
@@ -291,8 +310,25 @@ def render(data: CleanedData, config: CampusConfig, period_label: str | None = N
         ax_p2 = figC.add_axes((0.08, 0.60, 0.22, 0.23))
         draw_pie(ax_p2, bucket_lbls, bucket_counts, colors=grade_colors(len(bucket_lbls), False, CATEGORICAL[2]),
                  legend_fontsize=9)
-        draw_trend(figC, (0.10, 0.08, 0.80, 0.42), trend)
+        if quarterly:
+            section_title(figC, 0.06, 0.48, "Age Group Average Attendance",
+                          "Average share of this quarter's services each age group attended")
+            ax_avg = figC.add_axes((0.10, 0.35, 0.80, 0.11))
+            draw_ordinal_bar(ax_avg, config.chart_band_order, [v * 100 for v in avg_by_band], color=CATEGORICAL[2],
+                              horizontal=False, value_fmt=lambda v: f"{v:.0f}%")
+            draw_trend(figC, (0.10, 0.07, 0.80, 0.17), trend)
+        else:
+            draw_trend(figC, (0.10, 0.08, 0.80, 0.42), trend)
         figs.append(figC)
+
+        # ---- Quarterly only: notable first-time kids ----
+        if quarterly:
+            figD = page()
+            draw_report_header(figD, report_name, label, logo_path=logo)
+            draw_table(figD, (0.08, 0.50, 0.84, 0.32),
+                       ["First Name", "Last Name", "Gender", "Age Group", "Attendance Rate"], notable_rows,
+                       title="Notable First-Time Kids (top 10 by attendance rate)")
+            figs.append(figD)
 
         # ---- Last page: first-time guest analytics ----
         figE = page()
@@ -377,6 +413,7 @@ def main():
     ap.add_argument("--no-logo", action="store_true", help="omit the logo entirely")
     ap.add_argument("--orientation", choices=["landscape", "portrait"], default="portrait")
     ap.add_argument("--trend-json", help="weekly totals from the saved attendance tracker, for the trend chart")
+    ap.add_argument("--period", choices=["monthly", "quarterly"], default="monthly")
     args = ap.parse_args()
 
     from report_kids_rutherford import CONFIG as RUTHERFORD_CONFIG
@@ -387,7 +424,7 @@ def main():
     as_of = dt.datetime.strptime(args.as_of, "%Y-%m-%d").date() if args.as_of else None
     logo_path = None if args.no_logo else (args.logo or DEFAULT_LOGO)
     figs = render(data, config, period_label=args.period_label, as_of=as_of, logo_path=logo_path,
-                  orientation=args.orientation, trend_path=args.trend_json)
+                  orientation=args.orientation, trend_path=args.trend_json, period=args.period)
     save_pdf(figs, args.out_pdf)
     print(f"Wrote {args.out_pdf}")
 

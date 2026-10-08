@@ -629,7 +629,10 @@ def draw_trend_lines(ax: plt.Axes, week_dates: list, series: dict, colors: dict,
                 color=colors[name], label=name, zorder=3 if heavy else 2,
                 alpha=1.0 if heavy or emphasize is None else 0.9)
         if heavy:
-            for xi, v in zip(x, values):
+            step = 2 if len(values) > 16 else 1   # keep long (e.g. 26-week) trends legible
+            for i, (xi, v) in enumerate(zip(x, values)):
+                if (len(values) - 1 - i) % step:
+                    continue
                 ax.annotate(f"{v:,.0f}", (xi, v), textcoords="offset points", xytext=(0, 5),
                             ha="center", fontsize=6.5, color=INK_SECONDARY)
     ymax = max((max(v) for v in series.values() if len(v)), default=0)
@@ -846,8 +849,9 @@ def draw_first_timer_trend(fig: plt.Figure, rect: tuple, trend: "TrendData | Non
     ax.fill_between(x, returned, color=RETURNED_COLOR, alpha=0.12, linewidth=0)
     ax.plot(x, firsts, marker="o", markersize=5, linewidth=2.4, color=FIRST_TIMER_COLOR, label="First-time guests", zorder=3)
     ax.plot(x, returned, marker="o", markersize=4, linewidth=1.8, color=RETURNED_COLOR, label="Came back", zorder=3)
-    for xi, v in zip(x, firsts):
-        if v:
+    step = 2 if len(firsts) > 16 else 1
+    for i, (xi, v) in enumerate(zip(x, firsts)):
+        if v and not (len(firsts) - 1 - i) % step:
             ax.annotate(f"{v}", (xi, v), textcoords="offset points", xytext=(0, 5), ha="center",
                         fontsize=7, color=INK_SECONDARY)
     ax.set_xticks(x)

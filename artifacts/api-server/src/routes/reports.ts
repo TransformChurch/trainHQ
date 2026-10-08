@@ -41,10 +41,10 @@ type CleanupMode = "month_quarter" | "all_dates";
 // reporting path. See REPORT_ENGINES: every template is now one of the 4
 // built-in pure-Python engines.
 type ScriptSlot = CleanupMode;
-// The four built-in, pure-Python (no Excel/LibreOffice) report renderers.
+// The built-in, pure-Python (no Excel/LibreOffice) report renderers.
 // A template row with one of these set skips the generic
 // upload-your-own-xlsx-workbook pipeline entirely -- see REPORT_ENGINES.
-type ReportEngine = "youth_quarterly" | "youth_monthly" | "kids_rutherford" | "kids_lyndhurst";
+type ReportEngine = "youth_quarterly" | "youth_monthly" | "kids_rutherford" | "kids_lyndhurst" | "kids_rutherford_quarterly" | "kids_lyndhurst_quarterly";
 type PreparationProgress = {
   stage: "loading" | "profiles" | "complete" | "failed";
   completedBatches: number;
@@ -493,11 +493,16 @@ async function pythonScript(name: ScriptSlot): Promise<string> {
   }
 }
 
-const REPORT_ENGINES: Array<{ engine: ReportEngine; label: string; script: string; args: string[] }> = [
-  { engine: "youth_quarterly", label: "Youth Quarterly Report", script: "report_youth.py", args: ["--period", "quarterly"] },
-  { engine: "youth_monthly", label: "Youth Monthly Report", script: "report_youth.py", args: ["--period", "monthly"] },
-  { engine: "kids_rutherford", label: "Kids Rutherford Report", script: "report_kids.py", args: ["--campus", "rutherford"] },
-  { engine: "kids_lyndhurst", label: "Kids Lyndhurst Report", script: "report_kids.py", args: ["--campus", "lyndhurst"] },
+// trendWeeks: how many weeks of the saved attendance tracker the report's
+// trend charts show -- 13 (a quarter) for monthly reports, 26 (this quarter
+// and the one before) for quarterly ones, whose own weeks already cover 13.
+const REPORT_ENGINES: Array<{ engine: ReportEngine; label: string; script: string; args: string[]; trendWeeks: number }> = [
+  { engine: "youth_quarterly", label: "Youth Quarterly Report", script: "report_youth.py", args: ["--period", "quarterly"], trendWeeks: 26 },
+  { engine: "youth_monthly", label: "Youth Monthly Report", script: "report_youth.py", args: ["--period", "monthly"], trendWeeks: 13 },
+  { engine: "kids_rutherford", label: "Kids Rutherford Report", script: "report_kids.py", args: ["--campus", "rutherford"], trendWeeks: 13 },
+  { engine: "kids_lyndhurst", label: "Kids Lyndhurst Report", script: "report_kids.py", args: ["--campus", "lyndhurst"], trendWeeks: 13 },
+  { engine: "kids_rutherford_quarterly", label: "Kids Rutherford Quarterly Report", script: "report_kids.py", args: ["--campus", "rutherford", "--period", "quarterly"], trendWeeks: 26 },
+  { engine: "kids_lyndhurst_quarterly", label: "Kids Lyndhurst Quarterly Report", script: "report_kids.py", args: ["--campus", "lyndhurst", "--period", "quarterly"], trendWeeks: 26 },
 ];
 
 function isReportEngine(value: unknown): value is ReportEngine {
@@ -1125,7 +1130,7 @@ async function generateReportPdf(
     await writeFile(cleanedPath, await readFile(cleanedFile.path));
 
     if (!isReportEngine(template!.engine)) {
-      // Every template is created with one of the 4 built-in engines now
+      // Every template is created with one of the built-in engines now
       // (see POST /templates) -- the legacy upload-your-own-xlsx +
       // LibreOffice pipeline was removed, so a template with no engine set
       // is just a broken/legacy row that can't be rendered anymore.
@@ -1137,7 +1142,7 @@ async function generateReportPdf(
     // engine falls back to the report's own weeks.
     const trendArgs: string[] = [];
     try {
-      const trendRows = await loadTrendRows(run!.eventId, run!.endDate, 13);
+      const trendRows = await loadTrendRows(run!.eventId, run!.endDate, definition.trendWeeks);
       if (trendRows.length >= 2) {
         const trendPath = join(workDir, "trend.json");
         await writeFile(trendPath, JSON.stringify(trendRows));

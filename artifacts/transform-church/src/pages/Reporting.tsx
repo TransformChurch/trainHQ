@@ -12,7 +12,7 @@ import { FIELD_OPTIONS, type AvailableField, type ReportFieldKey } from "@/lib/r
 
 type EventOption = { id: string; name: string; frequency: string };
 type CleanupMode = "month_quarter" | "all_dates";
-type ReportEngine = "youth_quarterly" | "youth_monthly" | "kids_rutherford" | "kids_lyndhurst";
+type ReportEngine = "youth_quarterly" | "youth_monthly" | "kids_rutherford" | "kids_lyndhurst" | "kids_rutherford_quarterly" | "kids_lyndhurst_quarterly";
 type ReportTemplate = {
   id: number;
   name: string;

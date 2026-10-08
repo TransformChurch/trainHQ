@@ -281,10 +281,10 @@ def render(data: CleanedData, config: YouthConfig, period_label: str | None = No
                  legend_fontsize=9)
         if avg_by_grade is not None:
             section_title(figC, 0.06, 0.48, "Grade Average Attendance")
-            ax_avg = figC.add_axes((0.10, 0.33, 0.80, 0.14))
+            ax_avg = figC.add_axes((0.10, 0.35, 0.80, 0.12))
             draw_ordinal_bar(ax_avg, GRADE_ORDER, [v * 100 for v in avg_by_grade], color=CATEGORICAL[2],
                               horizontal=False, value_fmt=lambda v: f"{v:.0f}%")
-            draw_trend(figC, (0.10, 0.07, 0.80, 0.18), trend)
+            draw_trend(figC, (0.10, 0.07, 0.80, 0.17), trend)
         else:
             draw_trend(figC, (0.10, 0.08, 0.80, 0.42), trend)
         figs.append(figC)
