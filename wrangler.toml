@@ -91,8 +91,13 @@ bucket_name = "transform-church-storage"
 # worker.ts must match). 07:00 UTC Monday is 3am US Eastern during daylight
 # saving time and 2am in winter. It does nothing unless an admin has turned
 # "Update automatically every week" on in Group attendance history.
+# "0 8 * * 1" -> the weekly Check-Ins attendance auto-sync,
+# POST /api/attendance-history/run-scheduled (CHECKINS_HISTORY_SYNC_CRON in
+# worker.ts must match), an hour after the group sync: 4am US Eastern in
+# daylight saving time, 3am in winter. Off unless an admin turns on
+# "Update automatically every week" in Attendance history.
 [triggers]
-crons = ["0 11 * * 1", "0 6 * * *", "0 7 * * 1"]
+crons = ["0 11 * * 1", "0 6 * * *", "0 7 * * 1", "0 8 * * 1"]
 
 [vars]
 NODE_ENV = "production"

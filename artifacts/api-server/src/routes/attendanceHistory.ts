@@ -11,12 +11,18 @@
 // limit is respected (planningCenterRequest backs off on 429), and a stopped
 // or failed pull can simply be re-run: rows are upserted per event + week.
 //
+// Like Group attendance history, a manual pull only visits events that
+// existed in the chosen timeframe and (by default) only weeks not saved yet,
+// and an optional weekly auto-sync (Worker Cron Trigger, Monday ~4am
+// Eastern) slowly re-pulls the last few weeks and fills recent gaps.
+//
 // Weeks use the Weekly Pulse's Monday-00:00-UTC boundaries (see
 // computeWeekRange in weeklyPulse.ts) so history lines up with the tracker.
 // Counting matches fetchCheckInsWeeklyCount there: attendee check-ins only
 // (no volunteers), unique people across all of the week's sessions.
 import { Router, type IRouter, type Request, type Response } from "express";
-import { checkinsWeeklyHistoryTable, db } from "@workspace/db";
+import { timingSafeEqual } from "node:crypto";
+import { checkinsWeeklyHistoryTable, db, settingsTable } from "@workspace/db";
 import {
   addDays,
   genderByPersonFromIncluded,
@@ -27,9 +33,11 @@ import {
   weekStartFor,
   writeWeekOverrides,
 } from "../lib/checkinsHistory";
-import { asc, count, countDistinct, max, sql } from "drizzle-orm";
+import { and, asc, count, countDistinct, eq, gte, lt, max, sql } from "drizzle-orm";
 import { requireAdmin } from "../middlewares/requireAuth";
+import { logger } from "../lib/logger";
 import { getValidPlanningCenterAccessToken } from "../lib/planningCenter";
+import { groupActiveInRange } from "./groupHistory";
 import {
   CHECK_INS_BASE,
   type JsonApiResource,
@@ -55,6 +63,14 @@ function sendError(req: Request, res: Response, error: unknown, fallback: string
   req.log.error({ err: error, details: typed.details }, fallback);
   res.status(typed.status ?? 500).json({ error: typed.message || fallback });
 }
+
+function errorMessage(error: unknown, fallback: string): string {
+  const typed = error as Error & { status?: number };
+  if (typed.status === 403) return "Planning Center refused access (403).";
+  return typed.message || fallback;
+}
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export type HistoryWeek = { weekStart: string; weekEnd: string; periodIds: string[] };
 
@@ -111,8 +127,35 @@ export function buildHistoryCsv(rows: {
   return [header, ...lines].map((line) => line.map(csvCell).join(",")).join("\r\n") + "\r\n";
 }
 
+export type CheckInsEvent = { id: string; name: string; archived: boolean; createdAt: string | null; archivedAt: string | null };
+
+// Every Check-Ins event, active and archived, sorted by name.
+export async function listCheckInsEvents(accessToken: string): Promise<CheckInsEvent[]> {
+  const [active, archived] = await Promise.all([
+    fetchCollection(`${CHECK_INS_BASE}/events?filter=not_archived&order=name&per_page=100`, accessToken),
+    fetchCollection(`${CHECK_INS_BASE}/events?filter=archived&order=name&per_page=100`, accessToken),
+  ]);
+  const seen = new Set<string>();
+  const events: CheckInsEvent[] = [];
+  for (const [collection, isArchived] of [[active, false], [archived, true]] as const) {
+    for (const event of collection.data) {
+      if (seen.has(event.id)) continue;
+      seen.add(event.id);
+      const archivedAt = text(event.attributes?.archived_at) || null;
+      events.push({
+        id: event.id,
+        name: firstValue(event.attributes ?? {}, "name") || `Event ${event.id}`,
+        archived: isArchived || !!archivedAt,
+        createdAt: text(event.attributes?.created_at) || null,
+        archivedAt,
+      });
+    }
+  }
+  return events.sort((a, b) => a.name.localeCompare(b.name));
+}
+
 // An event's sessions (event periods) starting on/after `since`.
-async function listEventPeriods(accessToken: string, eventId: string, since: string) {
+async function listEventPeriods(accessToken: string, eventId: string, since: string, delayMs = 0) {
   const sinceIso = `${since}T00:00:00Z`;
   const periods: { id: string; startsAt: string }[] = [];
   let url: string | null =
@@ -120,6 +163,7 @@ async function listEventPeriods(accessToken: string, eventId: string, since: str
   const visited = new Set<string>();
   while (url && !visited.has(url)) {
     visited.add(url);
+    if (delayMs && visited.size > 1) await sleep(delayMs);
     const page = await planningCenterRequest(url, accessToken);
     const rows: JsonApiResource[] = Array.isArray(page.data) ? page.data : [];
     let reachedOlder = false;
@@ -141,12 +185,14 @@ async function pullEventWeeks(
   accessToken: string,
   eventId: string,
   weeks: { weekStart: string; periodIds: string[] }[],
+  delayMs = 0,
 ) {
   const rows = [];
   for (const week of weeks) {
     const checkIns: JsonApiResource[] = [];
     const included: JsonApiResource[] = [];
     for (const periodId of week.periodIds) {
+      if (delayMs) await sleep(delayMs);
       const collection = await fetchCollection(
         `${CHECK_INS_BASE}/events/${encodeURIComponent(eventId)}/event_periods/${encodeURIComponent(periodId)}/check_ins?filter=attendee&include=person&per_page=100`,
         accessToken,
@@ -166,33 +212,197 @@ async function pullEventWeeks(
   return rows;
 }
 
+// eventId -> week starts already saved in [since, until).
+export async function savedEventWeeks(since: string, until: string): Promise<Map<string, Set<string>>> {
+  const rows = await db.select({ eventId: checkinsWeeklyHistoryTable.eventId, weekStart: checkinsWeeklyHistoryTable.weekStart })
+    .from(checkinsWeeklyHistoryTable)
+    .where(and(gte(checkinsWeeklyHistoryTable.weekStart, since), lt(checkinsWeeklyHistoryTable.weekStart, until)));
+  const map = new Map<string, Set<string>>();
+  for (const row of rows) {
+    const set = map.get(row.eventId) ?? new Set<string>();
+    set.add(row.weekStart);
+    map.set(row.eventId, set);
+  }
+  return map;
+}
+
+// ── Weekly auto-sync ────────────────────────────────────────────────────────
+// Same approach as the group auto-sync (routes/groupHistory.ts): settings in
+// the settings key/value table; each run re-pulls the last REFRESH_WEEKS weeks
+// (late check-in edits) and fills any missing week in the last
+// GAP_WINDOW_WEEKS, pausing between Planning Center calls. It never touches
+// the first-timer columns a report prepare saved (saveHistoryRows keeps them).
+const AUTO_SYNC_KEY = "checkins_history_auto_sync";
+export const CHECKINS_AUTO_SYNC_REFRESH_WEEKS = 3;
+export const CHECKINS_AUTO_SYNC_GAP_WINDOW_WEEKS = 12;
+const AUTO_SYNC_DELAY_MS = 800;
+
+type AutoSyncRun = {
+  startedAt: string;
+  finishedAt: string | null;
+  status: "running" | "success" | "partial" | "error";
+  eventsChecked: number;
+  weeksSaved: number;
+  failures: { event: string; error: string }[];
+  message?: string;
+};
+type AutoSyncSettings = { enabled: boolean; userId: string | null; lastRun: AutoSyncRun | null };
+
+export async function readCheckinsAutoSync(): Promise<AutoSyncSettings> {
+  const rows = await db.select().from(settingsTable).where(eq(settingsTable.key, AUTO_SYNC_KEY)).limit(1);
+  try {
+    const parsed = rows[0] ? JSON.parse(rows[0].value) : {};
+    return { enabled: parsed.enabled === true, userId: parsed.userId ?? null, lastRun: parsed.lastRun ?? null };
+  } catch {
+    return { enabled: false, userId: null, lastRun: null };
+  }
+}
+
+async function writeCheckinsAutoSync(settings: AutoSyncSettings): Promise<void> {
+  const value = JSON.stringify(settings);
+  await db.insert(settingsTable).values({ key: AUTO_SYNC_KEY, value })
+    .onConflictDoUpdate({ target: settingsTable.key, set: { value } });
+}
+
+// Weeks the auto-sync pulls for one event: every recent week, plus any older
+// week in the gap window that has sessions but no saved row.
+export function eventWeeksToSync(weeks: HistoryWeek[], saved: Set<string> | undefined, refreshFrom: string): HistoryWeek[] {
+  return weeks.filter((week) => week.weekStart >= refreshFrom || !saved?.has(week.weekStart));
+}
+
+let autoSyncRunning = false;
+
+export async function runCheckinsAutoSync(
+  now: Date = new Date(),
+  getToken: (userId: string) => Promise<string> = getValidPlanningCenterAccessToken,
+  delayMs: number = AUTO_SYNC_DELAY_MS,
+): Promise<AutoSyncRun> {
+  const settings = await readCheckinsAutoSync();
+  const startedAt = new Date().toISOString();
+  if (!settings.enabled || !settings.userId) {
+    return { startedAt, finishedAt: startedAt, status: "error", eventsChecked: 0, weeksSaved: 0, failures: [], message: "Automatic sync is turned off." };
+  }
+  if (autoSyncRunning) {
+    return { startedAt, finishedAt: startedAt, status: "error", eventsChecked: 0, weeksSaved: 0, failures: [], message: "A sync is already running." };
+  }
+  autoSyncRunning = true;
+  const run: AutoSyncRun = { startedAt, finishedAt: null, status: "running", eventsChecked: 0, weeksSaved: 0, failures: [] };
+  try {
+    await writeCheckinsAutoSync({ ...settings, lastRun: run });
+    const thisWeek = weekStartFor(now.toISOString());
+    const refreshFrom = addDays(thisWeek, -7 * CHECKINS_AUTO_SYNC_REFRESH_WEEKS);
+    const gapFrom = addDays(thisWeek, -7 * CHECKINS_AUTO_SYNC_GAP_WINDOW_WEEKS);
+    const until = addDays(thisWeek, 7);
+    let accessToken = await getToken(settings.userId);
+    const events = (await listCheckInsEvents(accessToken)).filter((event) => groupActiveInRange(event, gapFrom, until));
+    const saved = await savedEventWeeks(gapFrom, until);
+    let consecutiveFailures = 0;
+    for (const event of events) {
+      try {
+        accessToken = await getToken(settings.userId);
+        await sleep(delayMs);
+        const weeks = eventWeeksToSync(
+          groupPeriodsByWeek(await listEventPeriods(accessToken, event.id, gapFrom, delayMs), gapFrom, now),
+          saved.get(event.id),
+          refreshFrom,
+        );
+        if (weeks.length) {
+          const rows = await pullEventWeeks(accessToken, event.id, weeks, delayMs);
+          await saveHistoryRows({ eventId: event.id, eventName: event.name, archived: event.archived }, rows);
+          run.weeksSaved += rows.length;
+        }
+        consecutiveFailures = 0;
+      } catch (error) {
+        run.failures.push({ event: event.name, error: errorMessage(error, "Request failed") });
+        consecutiveFailures += 1;
+        if (consecutiveFailures >= 3) await sleep(delayMs ? 60_000 : 0);
+      } finally {
+        run.eventsChecked += 1;
+      }
+    }
+    run.status = run.failures.length ? (run.failures.length === events.length && events.length ? "error" : "partial") : "success";
+  } catch (error) {
+    run.status = "error";
+    run.message = errorMessage(error, "Automatic sync failed");
+  } finally {
+    run.finishedAt = new Date().toISOString();
+    autoSyncRunning = false;
+    const latest = await readCheckinsAutoSync().catch(() => settings);
+    await writeCheckinsAutoSync({ ...latest, lastRun: run }).catch((error) => logger.error({ err: error }, "Could not save attendance auto-sync result"));
+  }
+  return run;
+}
+
+function secretsMatch(a: string, b: string): boolean {
+  const bufferA = Buffer.from(a);
+  const bufferB = Buffer.from(b);
+  if (bufferA.length !== bufferB.length) return false;
+  return timingSafeEqual(bufferA, bufferB);
+}
+
 // ── GET /api/attendance-history/events ──────────────────────────────────────
-// Every Check-Ins event, active and archived.
+// Every Check-Ins event, active and archived (with created/archived dates so
+// the page can skip events that didn't exist in a timeframe).
 router.get("/events", requireAdmin, async (req, res) => {
   try {
     const accessToken = await getValidPlanningCenterAccessToken(res.locals.dbUser.id);
-    const [active, archived] = await Promise.all([
-      fetchCollection(`${CHECK_INS_BASE}/events?filter=not_archived&order=name&per_page=100`, accessToken),
-      fetchCollection(`${CHECK_INS_BASE}/events?filter=archived&order=name&per_page=100`, accessToken),
-    ]);
-    const seen = new Set<string>();
-    const events: { id: string; name: string; archived: boolean }[] = [];
-    for (const [collection, isArchived] of [[active, false], [archived, true]] as const) {
-      for (const event of collection.data) {
-        if (seen.has(event.id)) continue;
-        seen.add(event.id);
-        events.push({
-          id: event.id,
-          name: firstValue(event.attributes ?? {}, "name") || `Event ${event.id}`,
-          archived: isArchived || !!text(event.attributes?.archived_at),
-        });
-      }
-    }
-    events.sort((a, b) => a.name.localeCompare(b.name));
-    res.json(events);
+    res.json(await listCheckInsEvents(accessToken));
   } catch (error) {
     sendError(req, res, error, "Failed to load Check-Ins events");
   }
+});
+
+// ── GET /api/attendance-history/saved-weeks?since=&until= ───────────────────
+// { [eventId]: weekStart[] } already saved -- lets a manual pull skip them.
+router.get("/saved-weeks", requireAdmin, async (req, res) => {
+  try {
+    const since = text(req.query.since);
+    const until = text(req.query.until);
+    if (!DATE_ONLY.test(since) || !DATE_ONLY.test(until)) {
+      res.status(400).json({ error: "since and until (YYYY-MM-DD) are required." });
+      return;
+    }
+    const saved = await savedEventWeeks(since, until);
+    res.json(Object.fromEntries([...saved].map(([eventId, weeks]) => [eventId, [...weeks].sort()])));
+  } catch (error) {
+    sendError(req, res, error, "Failed to load saved weeks");
+  }
+});
+
+// ── GET/POST /api/attendance-history/auto-sync ──────────────────────────────
+router.get("/auto-sync", requireAdmin, async (req, res) => {
+  try {
+    const settings = await readCheckinsAutoSync();
+    res.json({ enabled: settings.enabled, lastRun: settings.lastRun, usesYourConnection: settings.userId === res.locals.dbUser.id });
+  } catch (error) {
+    sendError(req, res, error, "Failed to load automatic sync settings");
+  }
+});
+
+router.post("/auto-sync", requireAdmin, async (req, res) => {
+  try {
+    const current = await readCheckinsAutoSync();
+    const enabled = req.body?.enabled === true;
+    await writeCheckinsAutoSync({ ...current, enabled, userId: enabled ? res.locals.dbUser.id : current.userId });
+    res.json({ enabled, lastRun: current.lastRun, usesYourConnection: enabled });
+  } catch (error) {
+    sendError(req, res, error, "Failed to save automatic sync settings");
+  }
+});
+
+// ── POST /api/attendance-history/run-scheduled ──────────────────────────────
+// Called by the Worker's weekly Cron Trigger (src/worker.ts), guarded by the
+// Weekly Pulse's internal secret like the group auto-sync.
+router.post("/run-scheduled", async (req, res) => {
+  const expectedSecret = process.env.WEEKLY_PULSE_RUN_SECRET;
+  const providedSecret = req.header("x-internal-secret") ?? "";
+  if (!expectedSecret || !providedSecret || !secretsMatch(providedSecret, expectedSecret)) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  const run = await runCheckinsAutoSync();
+  req.log.info({ run: { ...run, failures: run.failures.length } }, "Attendance history auto-sync finished");
+  res.json(run);
 });
 
 // ── GET /api/attendance-history/events/:eventId/weeks?since=YYYY-MM-DD ──────

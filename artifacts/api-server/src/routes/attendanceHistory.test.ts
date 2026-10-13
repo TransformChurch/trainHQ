@@ -48,3 +48,13 @@ test("history CSV has one row per event-week", () => {
   }]);
   assert.equal(csv, 'Event,Event ID,Archived,Week start (Mon),Week end,Unique attendees,Total check-ins,Sessions\r\n"TC Kids, Sundays",7,Yes,2024-01-01,2024-01-08,180,190,2\r\n');
 });
+
+import { eventWeeksToSync } from "./attendanceHistory";
+
+test("eventWeeksToSync always refreshes recent weeks and fills older gaps only", () => {
+  const week = (weekStart: string) => ({ weekStart, weekEnd: "", periodIds: ["1"] });
+  const weeks = [week("2026-08-10"), week("2026-08-17"), week("2026-09-21"), week("2026-09-28")];
+  const saved = new Set(["2026-08-10", "2026-09-21", "2026-09-28"]);
+  assert.deepEqual(eventWeeksToSync(weeks, saved, "2026-09-21").map((w) => w.weekStart), ["2026-08-17", "2026-09-21", "2026-09-28"]);
+  assert.deepEqual(eventWeeksToSync(weeks, undefined, "2026-09-21").map((w) => w.weekStart), weeks.map((w) => w.weekStart));
+});

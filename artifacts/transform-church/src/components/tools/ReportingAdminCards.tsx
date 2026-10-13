@@ -869,7 +869,25 @@ export function ReportingAdminCards() {
 const HISTORY_MAX_WEEKS_PER_CALL = 8;
 const HISTORY_MAX_PERIODS_PER_CALL = 60;
 
-type HistoryEvent = { id: string; name: string; archived: boolean };
+type HistoryEvent = { id: string; name: string; archived: boolean; createdAt?: string | null; archivedAt?: string | null };
+type CheckinsAutoSyncRun = {
+  startedAt: string;
+  finishedAt: string | null;
+  status: "running" | "success" | "partial" | "error";
+  eventsChecked: number;
+  weeksSaved: number;
+  failures: { event: string; error: string }[];
+  message?: string;
+};
+type CheckinsAutoSync = { enabled: boolean; lastRun: CheckinsAutoSyncRun | null; usesYourConnection: boolean };
+
+// Same rule as the server's groupActiveInRange: skip an event created after
+// the timeframe ended or archived before it began. Missing dates never skip.
+function eventActiveInRange(event: HistoryEvent, since: string, until: string): boolean {
+  if (event.createdAt && event.createdAt.slice(0, 10) >= until) return false;
+  if (event.archivedAt && event.archivedAt.slice(0, 10) < since) return false;
+  return true;
+}
 type HistoryWeek = { weekStart: string; weekEnd: string; periodIds: string[] };
 type HistorySummary = { rows: number; events: number; firstWeek: string | null; lastWeek: string | null; lastFetchedAt: string | null };
 
@@ -1019,6 +1037,9 @@ function AttendanceHistoryCard() {
   const [progress, setProgress] = useState("");
   const [failures, setFailures] = useState<{ eventName: string; error: string }[]>([]);
   const [timeframe, setTimeframe] = useState<Set<QuarterKey>>(defaultTimeframe);
+  const [onlyMissing, setOnlyMissing] = useState(true);
+  const [autoSync, setAutoSync] = useState<CheckinsAutoSync | null>(null);
+  const [savingAutoSync, setSavingAutoSync] = useState(false);
   const stopRequested = useRef(false);
 
   const loadSummary = async () => {
@@ -1030,51 +1051,94 @@ function AttendanceHistoryCard() {
     }
   };
 
+  const loadAutoSync = async () => {
+    try {
+      const response = await api("/api/attendance-history/auto-sync");
+      setAutoSync(await response.json() as CheckinsAutoSync);
+    } catch {
+      setAutoSync(null);
+    }
+  };
+
   useEffect(() => {
     loadSummary();
+    loadAutoSync();
   }, []);
+
+  const toggleAutoSync = async (enabled: boolean) => {
+    setSavingAutoSync(true);
+    try {
+      const response = await api("/api/attendance-history/auto-sync", { method: "POST", body: JSON.stringify({ enabled }) });
+      setAutoSync(await response.json() as CheckinsAutoSync);
+      toast({ title: enabled ? "Weekly attendance sync turned on" : "Weekly attendance sync turned off" });
+    } catch (error) {
+      toast({ title: "Could not save the weekly sync setting", description: error instanceof Error ? error.message : "Request failed.", variant: "destructive" });
+    } finally {
+      setSavingAutoSync(false);
+    }
+  };
 
   const runPull = async () => {
     const since = timeframeStart(timeframe);
-    if (!since) return;
+    const until = timeframeEnd(timeframe);
+    if (!since || !until) return;
     const selection = new Set(timeframe);
-    if (!window.confirm(`Pull weekly attendance for every Check-Ins event for ${describeTimeframe(selection)}? This can take a while. Keep this tab open until it finishes.`)) return;
+    const what = onlyMissing ? "missing weeks of attendance" : "weekly attendance (re-pulling saved weeks too)";
+    if (!window.confirm(`Pull ${what} for every Check-Ins event that existed in ${describeTimeframe(selection)}? This can take a while. Keep this tab open until it finishes.`)) return;
     stopRequested.current = false;
     setRunning(true);
     setFailures([]);
     let weeksSaved = 0;
+    let upToDate = 0;
+    let consecutiveFailures = 0;
     const failed: { eventName: string; error: string }[] = [];
     try {
-      setProgress("Loading Check-Ins events…");
-      const events = await (await api("/api/attendance-history/events")).json() as HistoryEvent[];
+      setProgress("Finding events that existed in this timeframe…");
+      const allEvents = await (await api("/api/attendance-history/events")).json() as HistoryEvent[];
+      const events = allEvents.filter((event) => eventActiveInRange(event, since, until));
+      const skippedInactive = allEvents.length - events.length;
+      const saved: Record<string, string[]> = onlyMissing
+        ? await (await api(`/api/attendance-history/saved-weeks?since=${since}&until=${until}`)).json()
+        : {};
       for (const [index, event] of events.entries()) {
         if (stopRequested.current) break;
         const label = `Event ${index + 1} of ${events.length}: ${event.name}`;
+        const onWait = (seconds: number) => setProgress(`${label}: Planning Center is busy, waiting ${seconds}s before retrying…`);
         try {
           setProgress(`${label} (finding sessions…)`);
-          const weeks = (await (await api(
-            `/api/attendance-history/events/${encodeURIComponent(event.id)}/weeks?since=${since}`,
-          )).json() as HistoryWeek[]).filter((week) => weekInTimeframe(week.weekStart, selection));
-          const batches = batchHistoryWeeks(weeks);
+          const savedWeeks = new Set(saved[event.id] ?? []);
+          const weeks = (await (await apiWithRetry(
+            `/api/attendance-history/events/${encodeURIComponent(event.id)}/weeks?since=${since}`, undefined, onWait,
+          )).json() as HistoryWeek[])
+            .filter((week) => weekInTimeframe(week.weekStart, selection))
+            .filter((week) => !onlyMissing || !savedWeeks.has(week.weekStart));
+          if (!weeks.length) upToDate += 1;
           let done = 0;
-          for (const batch of batches) {
+          for (const batch of batchHistoryWeeks(weeks)) {
             if (stopRequested.current) break;
             setProgress(`${label} (${done} of ${weeks.length} weeks)`);
-            await api(`/api/attendance-history/events/${encodeURIComponent(event.id)}/weeks`, {
+            await apiWithRetry(`/api/attendance-history/events/${encodeURIComponent(event.id)}/weeks`, {
               method: "POST",
               body: JSON.stringify({ eventName: event.name, archived: event.archived, weeks: batch }),
-            });
+            }, onWait);
             done += batch.length;
             weeksSaved += batch.length;
           }
+          consecutiveFailures = 0;
         } catch (error) {
           failed.push({ eventName: event.name, error: error instanceof Error ? error.message : "Request failed." });
           setFailures([...failed]);
+          consecutiveFailures += 1;
+          if (consecutiveFailures >= 3 && !stopRequested.current) {
+            setProgress("Several events failed in a row; pausing 2 minutes to let Planning Center recover…");
+            await wait(120_000);
+            consecutiveFailures = 0;
+          }
         }
       }
       toast({
         title: stopRequested.current ? "Attendance history pull stopped" : "Attendance history pull finished",
-        description: `${weeksSaved} event-weeks saved${failed.length ? `, ${failed.length} event${failed.length === 1 ? "" : "s"} failed` : ""}.`,
+        description: `${weeksSaved} event-weeks saved, ${upToDate} event${upToDate === 1 ? "" : "s"} already up to date, ${skippedInactive} skipped as inactive in this timeframe${failed.length ? `, ${failed.length} failed (run again to retry them)` : ""}.`,
         variant: failed.length ? "destructive" : undefined,
       });
     } catch (error) {
@@ -1106,9 +1170,9 @@ function AttendanceHistoryCard() {
       <CardHeader>
         <CardTitle className="flex items-center gap-2"><BarChart3 className="h-5 w-5" /> Attendance history</CardTitle>
         <p className="text-sm text-muted-foreground">
-          Pulls weekly Check-Ins attendance for every event, active and archived, for the quarters you check below,
-          using the same Monday-to-Monday weeks as the Weekly Pulse. Read-only in Planning Center. Safe to run again:
-          it refreshes the weeks it already has.
+          Pulls weekly Check-Ins attendance for events, active and archived, for the quarters you check below, using
+          the same Monday-to-Monday weeks as the Weekly Pulse. Only events that existed in that timeframe are checked,
+          and by default only weeks that aren't saved yet, so running it again fills gaps. Read-only in Planning Center.
         </p>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -1118,6 +1182,16 @@ function AttendanceHistoryCard() {
             : "No history pulled yet."}
         </p>
         <TimeframePicker selected={timeframe} onChange={setTimeframe} disabled={running} />
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            className="h-4 w-4 rounded border-input"
+            checked={onlyMissing}
+            disabled={running}
+            onChange={(event) => setOnlyMissing(event.target.checked)}
+          />
+          Only pull weeks that aren't saved yet (fill gaps)
+        </label>
         {running && (
           <p className="flex items-center gap-2 text-sm">
             <Loader2 className="h-4 w-4 animate-spin" /> {progress} Keep this tab open.
@@ -1125,7 +1199,7 @@ function AttendanceHistoryCard() {
         )}
         {failures.length > 0 && (
           <div className="rounded-md border border-destructive/40 p-3 text-sm">
-            <p className="font-medium text-destructive">Some events could not be pulled (run again to retry them):</p>
+            <p className="font-medium text-destructive">Some events could not be pulled (run again with "Only pull weeks that aren't saved yet" to retry just those):</p>
             <ul className="mt-1 list-disc pl-5 text-muted-foreground">
               {failures.map((failure) => <li key={failure.eventName}>{failure.eventName}: {failure.error}</li>)}
             </ul>
@@ -1142,6 +1216,32 @@ function AttendanceHistoryCard() {
           <Button variant="outline" onClick={downloadHistory} disabled={running || !summary?.rows}>
             <Download className="mr-2 h-4 w-4" /> Download history CSV
           </Button>
+        </div>
+        <div className="space-y-2 rounded-md border p-3 text-sm">
+          <label className="flex items-center gap-2 font-medium">
+            <input
+              type="checkbox"
+              className="h-4 w-4 rounded border-input"
+              checked={!!autoSync?.enabled}
+              disabled={savingAutoSync || !autoSync}
+              onChange={(event) => toggleAutoSync(event.target.checked)}
+            />
+            Update automatically every week (Mondays around 4am)
+          </label>
+          <p className="text-xs text-muted-foreground">
+            Slowly re-pulls the last 3 weeks for events that are active now and fills any missing week from the last
+            12, adding new weeks to this tracker. Keeps the first-timer numbers saved by report runs. Uses the Planning
+            Center connection of the admin who turns it on{autoSync?.enabled && !autoSync.usesYourConnection ? " (currently another admin's)" : ""}.
+          </p>
+          {autoSync?.lastRun && (
+            <p className="text-xs text-muted-foreground">
+              Last run {new Date(autoSync.lastRun.startedAt).toLocaleString()}: {autoSync.lastRun.status === "running"
+                ? "still running"
+                : `${autoSync.lastRun.status}, ${autoSync.lastRun.weeksSaved} weeks saved from ${autoSync.lastRun.eventsChecked} events`}
+              {autoSync.lastRun.failures.length ? `, ${autoSync.lastRun.failures.length} failed (${autoSync.lastRun.failures.slice(0, 3).map((f) => f.event).join(", ")}${autoSync.lastRun.failures.length > 3 ? "…" : ""})` : ""}
+              {autoSync.lastRun.message ? ` — ${autoSync.lastRun.message}` : ""}
+            </p>
+          )}
         </div>
         <WeekSubstitutions />
       </CardContent>
