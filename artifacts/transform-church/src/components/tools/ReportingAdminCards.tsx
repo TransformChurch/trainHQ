@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useUpload } from "@workspace/object-storage-web";
-import { AlertTriangle, BarChart3, Check, CheckCircle2, ChevronDown, Clock, ChevronUp, Download, Loader2, Mail, Plus, RefreshCw, Send, Settings2, Trash2, Upload } from "lucide-react";
+import { AlertTriangle, BarChart3, Check, CheckCircle2, ChevronDown, Clock, Users, ChevronUp, Download, Loader2, Mail, Plus, RefreshCw, Send, Settings2, Trash2, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -856,6 +856,8 @@ export function ReportingAdminCards() {
         </Card>
 
       <ScheduledJobsCard />
+
+      <PeopleSyncCard />
 
       <AttendanceHistoryCard />
 
@@ -1963,6 +1965,313 @@ function ScheduledJobsCard() {
             </div>
           );
         })}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ── Planning Center people sync ─────────────────────────────────────────────
+// Picks which Planning Center profile fields are copied into the local
+// people_profiles table (API: routes/peopleSync.ts), runs a pull on demand,
+// and turns the Monday 05:00 UTC weekly pull on or off. Picked fields are
+// stored as extra columns in the table's `fields` jsonb, so adding one is
+// just a checkbox here -- it fills in on the next pull.
+type PeopleField = { key: string; label: string };
+type CustomPeopleField = PeopleField & { tab: string; dataType: string | null; standard?: boolean };
+type StandardPeopleField = { label: string; key: string | null };
+type PeopleSyncRun = {
+  startedAt: string;
+  finishedAt: string | null;
+  status: "running" | "success" | "error";
+  trigger: "manual" | "scheduled";
+  pages: number;
+  people: number;
+  removed: number;
+  message?: string;
+  missingStandard?: string[];
+};
+type PeopleSyncState = {
+  enabled: boolean;
+  fields: PeopleField[];
+  standard: StandardPeopleField[] | null;
+  lastRun: PeopleSyncRun | null;
+  running: boolean;
+  usesYourConnection: boolean;
+  summary: { people: number; removed: number; lastSyncedAt: string | null };
+};
+
+const PEOPLE_BASIC_COLUMNS = [
+  "Planning Center ID", "First name", "Last name", "Birthdate", "Gender", "Grade", "Child",
+  "Membership", "Status", "Campus", "City", "State", "Zip", "Created / updated dates",
+];
+// Church-standard custom fields (matched by name in Planning Center; see the
+// API's STANDARD_CUSTOM_FIELDS in lib/peopleSync.ts).
+const PEOPLE_STANDARD_LABELS = ["Baptized?", "Thrive", "Serve Class", "Last Served"];
+
+function PeopleSyncCard() {
+  const { toast } = useToast();
+  const [state, setState] = useState<PeopleSyncState | null>(null);
+  const [loadError, setLoadError] = useState("");
+  const [picking, setPicking] = useState(false);
+  const [available, setAvailable] = useState<{ builtIn: PeopleField[]; custom: CustomPeopleField[] } | null>(null);
+  const [availableError, setAvailableError] = useState("");
+  const [loadingAvailable, setLoadingAvailable] = useState(false);
+  const [draft, setDraft] = useState<Map<string, string>>(new Map());
+  const [filter, setFilter] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [starting, setStarting] = useState(false);
+
+  const load = async () => {
+    try {
+      const response = await api("/api/people-sync/settings");
+      setState(await response.json() as PeopleSyncState);
+      setLoadError("");
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : "Could not load the people sync.");
+    }
+  };
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  // Poll while a pull is running (this also keeps the API awake for it).
+  const running = !!state?.running || state?.lastRun?.status === "running";
+  useEffect(() => {
+    if (!running) return;
+    const timer = window.setInterval(load, 4000);
+    return () => window.clearInterval(timer);
+  }, [running]);
+
+  const openPicker = async () => {
+    setPicking(true);
+    setDraft(new Map((state?.fields ?? []).map((field) => [field.key, field.label])));
+    if (available) return;
+    setLoadingAvailable(true);
+    setAvailableError("");
+    try {
+      const response = await api("/api/people-sync/available-fields");
+      const body = await response.json() as { builtIn: PeopleField[]; custom: CustomPeopleField[]; standard: StandardPeopleField[] };
+      setAvailable(body);
+      setState((current) => current ? { ...current, standard: body.standard } : current);
+    } catch (error) {
+      setAvailableError(error instanceof Error ? error.message : "Could not load Planning Center fields.");
+    } finally {
+      setLoadingAvailable(false);
+    }
+  };
+
+  const toggleField = (field: PeopleField, checked: boolean) => {
+    setDraft((current) => {
+      const next = new Map(current);
+      if (checked) next.set(field.key, field.label);
+      else next.delete(field.key);
+      return next;
+    });
+  };
+
+  const saveSettings = async (body: { fields?: PeopleField[]; enabled?: boolean }, successTitle: string) => {
+    setSaving(true);
+    try {
+      const response = await api("/api/people-sync/settings", { method: "POST", body: JSON.stringify(body) });
+      setState(await response.json() as PeopleSyncState);
+      toast({ title: successTitle });
+      return true;
+    } catch (error) {
+      toast({ title: "Could not save", description: error instanceof Error ? error.message : "Request failed.", variant: "destructive" });
+      return false;
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const saveFields = async () => {
+    const fields = Array.from(draft, ([key, label]) => ({ key, label }));
+    if (await saveSettings({ fields }, "Columns saved -- they fill in on the next pull")) setPicking(false);
+  };
+
+  const pullNow = async () => {
+    setStarting(true);
+    try {
+      await api("/api/people-sync/run", { method: "POST" });
+      toast({ title: "People pull started" });
+      await load();
+    } catch (error) {
+      toast({ title: "Could not start the pull", description: error instanceof Error ? error.message : "Request failed.", variant: "destructive" });
+    } finally {
+      setStarting(false);
+    }
+  };
+
+  const downloadCsv = async () => {
+    try {
+      const response = await api("/api/people-sync/people.csv");
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = "planning-center-people.csv";
+      anchor.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      toast({ title: "Could not download people", description: error instanceof Error ? error.message : "Request failed.", variant: "destructive" });
+    }
+  };
+
+  const filterText = filter.trim().toLowerCase();
+  const customByTab = useMemo(() => {
+    const groups = new Map<string, CustomPeopleField[]>();
+    for (const field of available?.custom ?? []) {
+      if (filterText && !`${field.label} ${field.tab}`.toLowerCase().includes(filterText)) continue;
+      groups.set(field.tab, [...(groups.get(field.tab) ?? []), field]);
+    }
+    return Array.from(groups);
+  }, [available, filterText]);
+
+  const lastRun = state?.lastRun;
+  const standard: StandardPeopleField[] = state?.standard ?? PEOPLE_STANDARD_LABELS.map((label) => ({ label, key: "" }));
+  const missingStandard = (state?.standard ?? []).filter((field) => !field.key).map((field) => field.label);
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2"><Users className="h-5 w-5" /> Planning Center people sync</CardTitle>
+        <p className="text-sm text-muted-foreground">
+          Keeps a copy of Planning Center profiles here so reports can look people up by their Planning Center ID
+          without asking Planning Center each time. Contact details and medical notes are never copied.
+        </p>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {loadError && <p className="text-sm text-destructive">{loadError}</p>}
+        {state && (
+          <>
+            <div className="grid gap-3 sm:grid-cols-3">
+              <div className="rounded-md border p-3">
+                <p className="text-xs text-muted-foreground">People saved</p>
+                <p className="text-2xl font-semibold">{state.summary.people.toLocaleString()}</p>
+              </div>
+              <div className="rounded-md border p-3">
+                <p className="text-xs text-muted-foreground">Last pulled</p>
+                <p className="text-sm font-medium">{formatJobTime(state.summary.lastSyncedAt)}</p>
+              </div>
+              <div className="rounded-md border p-3">
+                <p className="text-xs text-muted-foreground">Extra columns</p>
+                <p className="text-2xl font-semibold">{state.fields.length}</p>
+              </div>
+            </div>
+
+            {lastRun && (
+              <p className={`text-sm ${lastRun.status === "error" ? "text-destructive" : "text-muted-foreground"}`}>
+                {lastRun.status === "running"
+                  ? `Pulling now... ${lastRun.people.toLocaleString()} people so far (page ${lastRun.pages}).`
+                  : lastRun.status === "success"
+                    ? `Last ${lastRun.trigger} pull finished ${formatJobTime(lastRun.finishedAt)}: ${lastRun.people.toLocaleString()} people${lastRun.removed ? `, ${lastRun.removed} no longer in Planning Center` : ""}.`
+                    : `Last ${lastRun.trigger} pull failed ${formatJobTime(lastRun.finishedAt)}: ${lastRun.message ?? "unknown error"}`}
+              </p>
+            )}
+
+            {missingStandard.length > 0 && (
+              <div className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>
+                  No Planning Center custom field is named {missingStandard.map((label) => `"${label}"`).join(", ")}, so
+                  {missingStandard.length === 1 ? " that column stays" : " those columns stay"} empty. Check the field's exact name in
+                  Planning Center People, or tell us where it's recorded instead.
+                </span>
+              </div>
+            )}
+
+            <div className="space-y-2">
+              <p className="text-sm font-medium">Columns</p>
+              <div className="flex flex-wrap gap-1.5">
+                {PEOPLE_BASIC_COLUMNS.map((column) => (
+                  <span key={column} className="rounded-full border bg-muted px-2.5 py-0.5 text-xs text-muted-foreground">{column}</span>
+                ))}
+                {standard.map((field) => (
+                  <span
+                    key={field.label}
+                    className={`rounded-full border px-2.5 py-0.5 text-xs ${field.key === null ? "border-amber-300 bg-amber-50 text-amber-900 line-through dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200" : "bg-muted text-muted-foreground"}`}
+                    title={field.key === null ? "Not found in Planning Center" : "Standard column"}
+                  >
+                    {field.label}
+                  </span>
+                ))}
+                {state.fields.map((field) => (
+                  <span key={field.key} className="rounded-full border border-primary/40 bg-primary/10 px-2.5 py-0.5 text-xs">{field.label}</span>
+                ))}
+              </div>
+            </div>
+
+            {picking ? (
+              <div className="space-y-3 rounded-md border p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-sm font-medium">Choose extra columns</p>
+                  <Input className="h-8 w-full sm:w-64" placeholder="Search custom fields" value={filter} onChange={(event) => setFilter(event.target.value)} />
+                </div>
+                {loadingAvailable && <p className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> Loading fields from Planning Center...</p>}
+                {availableError && <p className="text-sm text-destructive">{availableError}</p>}
+                {available && (
+                  <div className="max-h-96 space-y-4 overflow-y-auto pr-1">
+                    <div className="space-y-1.5">
+                      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Profile fields</p>
+                      {available.builtIn.map((field) => (
+                        <label key={field.key} className="flex cursor-pointer items-center gap-2 text-sm">
+                          <input type="checkbox" className="h-4 w-4 rounded border-input" checked={draft.has(field.key)} onChange={(event) => toggleField(field, event.target.checked)} />
+                          {field.label}
+                        </label>
+                      ))}
+                    </div>
+                    {customByTab.map(([tab, fields]) => (
+                      <div key={tab} className="space-y-1.5">
+                        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Custom fields · {tab}</p>
+                        {fields.map((field) => (
+                          <label key={field.key} className={`flex items-center gap-2 text-sm ${field.standard ? "" : "cursor-pointer"}`}>
+                            <input
+                              type="checkbox"
+                              className="h-4 w-4 rounded border-input"
+                              checked={field.standard || draft.has(field.key)}
+                              disabled={field.standard}
+                              onChange={(event) => toggleField(field, event.target.checked)}
+                            />
+                            <span>{field.label}</span>
+                            {field.standard && <span className="rounded-full border px-1.5 text-[10px] uppercase tracking-wide text-muted-foreground">Standard</span>}
+                            {field.dataType && <span className="text-xs text-muted-foreground">{field.dataType}</span>}
+                          </label>
+                        ))}
+                      </div>
+                    ))}
+                    {available.custom.length === 0 && <p className="text-sm text-muted-foreground">No custom fields found in Planning Center People.</p>}
+                  </div>
+                )}
+                <div className="flex flex-wrap gap-2">
+                  <Button size="sm" onClick={saveFields} disabled={saving || !available}>
+                    {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />} Save columns ({draft.size})
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={() => setPicking(false)} disabled={saving}>Cancel</Button>
+                </div>
+              </div>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                <Button size="sm" variant="outline" onClick={openPicker}><Settings2 className="mr-2 h-4 w-4" /> Choose columns</Button>
+                <Button size="sm" onClick={pullNow} disabled={starting || running}>
+                  {starting || running ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />} Pull now
+                </Button>
+                <Button size="sm" variant="outline" onClick={downloadCsv} disabled={!state.summary.people}><Download className="mr-2 h-4 w-4" /> Download CSV</Button>
+              </div>
+            )}
+
+            <div className="flex items-start justify-between gap-3 rounded-md border p-3">
+              <div>
+                <Label htmlFor="people-sync-weekly">Update automatically every week</Label>
+                <p className="text-xs text-muted-foreground">
+                  Mondays 05:00 UTC, before the attendance syncs.
+                  {state.enabled && !state.usesYourConnection ? " Uses the Planning Center connection of the admin who turned it on." : ""}
+                </p>
+              </div>
+              <Switch id="people-sync-weekly" checked={state.enabled} disabled={saving} onCheckedChange={(enabled) => saveSettings({ enabled }, enabled ? "Weekly people sync turned on" : "Weekly people sync turned off")} />
+            </div>
+          </>
+        )}
       </CardContent>
     </Card>
   );

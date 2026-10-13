@@ -80,6 +80,9 @@ const GROUP_HISTORY_SYNC_CRON = "0 7 * * 1";
 // And for the weekly Check-Ins attendance auto-sync (routes/attendanceHistory.ts),
 // an hour after the group sync so the two never compete for Planning Center.
 const CHECKINS_HISTORY_SYNC_CRON = "0 8 * * 1";
+// And for the weekly Planning Center people sync (routes/peopleSync.ts),
+// before both attendance syncs so reports that morning see fresh profiles.
+const PEOPLE_SYNC_CRON = "0 5 * * 1";
 
 export class TransformChurchContainer extends Container<Env> {
   defaultPort = 3000;
@@ -252,6 +255,18 @@ export default {
           if (!response.ok) {
             const body = await response.text().catch(() => "");
             console.error(`Group history auto-sync failed: ${response.status} ${body.slice(0, 500)}`);
+          }
+          return;
+        }
+        if (controller.cron === PEOPLE_SYNC_CRON) {
+          const request = new Request("https://internal/api/people-sync/run-scheduled", {
+            method: "POST",
+            headers: { "x-internal-secret": workerEnv.WEEKLY_PULSE_RUN_SECRET ?? "" },
+          });
+          const response = await getContainer(workerEnv.API_CONTAINER, "primary").fetch(request);
+          if (!response.ok) {
+            const body = await response.text().catch(() => "");
+            console.error(`People sync failed: ${response.status} ${body.slice(0, 500)}`);
           }
           return;
         }

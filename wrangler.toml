@@ -96,8 +96,13 @@ bucket_name = "transform-church-storage"
 # worker.ts must match), an hour after the group sync: 4am US Eastern in
 # daylight saving time, 3am in winter. Off unless an admin turns on
 # "Update automatically every week" in Attendance history.
+# "0 5 * * 1" -> the weekly Planning Center people sync,
+# POST /api/people-sync/run-scheduled (PEOPLE_SYNC_CRON in worker.ts must
+# match), before the attendance syncs: 1am US Eastern in daylight saving
+# time, midnight in winter. Off unless an admin turns on the weekly sync in
+# "Planning Center people sync" on the Reporting page.
 [triggers]
-crons = ["0 11 * * 1", "0 6 * * *", "0 7 * * 1", "0 8 * * 1"]
+crons = ["0 11 * * 1", "0 6 * * *", "0 7 * * 1", "0 8 * * 1", "0 5 * * 1"]
 
 [vars]
 NODE_ENV = "production"

@@ -19,3 +19,4 @@ export * from "./wiki";
 export * from "./trackProgress";
 export * from "./weeklyPulse";
 export * from "./groupBroadcasts";
+export * from "./people";

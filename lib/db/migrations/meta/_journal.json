@@ -274,6 +274,13 @@
       "when": 1791058200005,
       "tag": "0038_groups_weekly_history",
       "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1791058200006,
+      "tag": "0039_people_profiles",
+      "breakpoints": true
     }
   ]
 }

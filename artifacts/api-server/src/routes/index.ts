@@ -23,6 +23,7 @@ import attendanceHistoryRouter from "./attendanceHistory";
 import groupHistoryRouter from "./groupHistory";
 import groupBroadcastsRouter from "./groupBroadcasts";
 import toolAccessRouter from "./toolAccess";
+import peopleSyncRouter from "./peopleSync";
 
 const router: IRouter = Router();
 
@@ -51,5 +52,6 @@ router.use("/attendance-history", attendanceHistoryRouter);
 router.use("/group-history", groupHistoryRouter);
 router.use("/group-broadcasts", groupBroadcastsRouter);
 router.use("/tool-access", toolAccessRouter);
+router.use("/people-sync", peopleSyncRouter);
 
 export default router;
