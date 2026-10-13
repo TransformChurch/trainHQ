@@ -18,7 +18,6 @@
 // unique people marked present; a week whose meetings returned no records at
 // all is saved as attendees = NULL (attendance not taken), not 0.
 import { Router, type IRouter, type Request, type Response } from "express";
-import { timingSafeEqual } from "node:crypto";
 import { db, groupsWeeklyHistoryTable, settingsTable } from "@workspace/db";
 import { and, asc, count, countDistinct, eq, gte, lt, max, sql } from "drizzle-orm";
 import { requireAdmin } from "../middlewares/requireAuth";
@@ -26,6 +25,7 @@ import { logger } from "../lib/logger";
 import { getValidPlanningCenterAccessToken } from "../lib/planningCenter";
 import { addDays, weekStartFor } from "../lib/checkinsHistory";
 import { summarizeGroupAttendance } from "../lib/groupAttendance";
+import { authorizeScheduledCall, autoSyncOutcome, recordScheduledJob } from "../lib/scheduledJobs";
 import { type JsonApiResource, fetchCollection, firstValue, planningCenterRequest, text } from "./reports";
 
 const router: IRouter = Router();
@@ -337,13 +337,6 @@ export async function runGroupAutoSync(
   return run;
 }
 
-function secretsMatch(a: string, b: string): boolean {
-  const bufferA = Buffer.from(a);
-  const bufferB = Buffer.from(b);
-  if (bufferA.length !== bufferB.length) return false;
-  return timingSafeEqual(bufferA, bufferB);
-}
-
 // ── GET /api/group-history/groups?since=&until= ─────────────────────────────
 // Every group; with since/until, only groups that existed in that window.
 router.get("/groups", requireAdmin, async (req, res) => {
@@ -463,15 +456,19 @@ router.post("/auto-sync", requireAdmin, async (req, res) => {
 // for the run to finish (it's slow on purpose; well inside the Cron
 // Trigger's time limit for a normal week).
 router.post("/run-scheduled", async (req, res) => {
-  const expectedSecret = process.env.WEEKLY_PULSE_RUN_SECRET;
-  const providedSecret = req.header("x-internal-secret") ?? "";
-  if (!expectedSecret || !providedSecret || !secretsMatch(providedSecret, expectedSecret)) {
-    res.status(401).json({ error: "Unauthorized" });
-    return;
+  if (!(await authorizeScheduledCall(req, res, "group_history_sync"))) return;
+  await recordScheduledJob("group_history_sync", "running");
+  try {
+    const run = await runGroupAutoSync();
+    req.log.info({ run: { ...run, failures: run.failures.length } }, "Group history auto-sync finished");
+    const outcome = autoSyncOutcome(run, `${run.groupsChecked} groups checked, ${run.weeksSaved} weeks saved`);
+    await recordScheduledJob("group_history_sync", outcome.result, outcome.detail);
+    res.json(run);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await recordScheduledJob("group_history_sync", "error", message);
+    sendError(req, res, error, "Group history auto-sync failed");
   }
-  const run = await runGroupAutoSync();
-  req.log.info({ run: { ...run, failures: run.failures.length } }, "Group history auto-sync finished");
-  res.json(run);
 });
 
 // ── GET /api/group-history/summary ──────────────────────────────────────────

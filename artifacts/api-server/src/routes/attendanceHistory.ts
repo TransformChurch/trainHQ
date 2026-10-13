@@ -21,7 +21,6 @@
 // Counting matches fetchCheckInsWeeklyCount there: attendee check-ins only
 // (no volunteers), unique people across all of the week's sessions.
 import { Router, type IRouter, type Request, type Response } from "express";
-import { timingSafeEqual } from "node:crypto";
 import { checkinsWeeklyHistoryTable, db, settingsTable } from "@workspace/db";
 import {
   addDays,
@@ -37,6 +36,7 @@ import { and, asc, count, countDistinct, eq, gte, lt, max, sql } from "drizzle-o
 import { requireAdmin } from "../middlewares/requireAuth";
 import { logger } from "../lib/logger";
 import { getValidPlanningCenterAccessToken } from "../lib/planningCenter";
+import { authorizeScheduledCall, autoSyncOutcome, recordScheduledJob } from "../lib/scheduledJobs";
 import { groupActiveInRange } from "./groupHistory";
 import {
   CHECK_INS_BASE,
@@ -333,13 +333,6 @@ export async function runCheckinsAutoSync(
   return run;
 }
 
-function secretsMatch(a: string, b: string): boolean {
-  const bufferA = Buffer.from(a);
-  const bufferB = Buffer.from(b);
-  if (bufferA.length !== bufferB.length) return false;
-  return timingSafeEqual(bufferA, bufferB);
-}
-
 // ── GET /api/attendance-history/events ──────────────────────────────────────
 // Every Check-Ins event, active and archived (with created/archived dates so
 // the page can skip events that didn't exist in a timeframe).
@@ -394,15 +387,19 @@ router.post("/auto-sync", requireAdmin, async (req, res) => {
 // Called by the Worker's weekly Cron Trigger (src/worker.ts), guarded by the
 // Weekly Pulse's internal secret like the group auto-sync.
 router.post("/run-scheduled", async (req, res) => {
-  const expectedSecret = process.env.WEEKLY_PULSE_RUN_SECRET;
-  const providedSecret = req.header("x-internal-secret") ?? "";
-  if (!expectedSecret || !providedSecret || !secretsMatch(providedSecret, expectedSecret)) {
-    res.status(401).json({ error: "Unauthorized" });
-    return;
+  if (!(await authorizeScheduledCall(req, res, "checkins_history_sync"))) return;
+  await recordScheduledJob("checkins_history_sync", "running");
+  try {
+    const run = await runCheckinsAutoSync();
+    req.log.info({ run: { ...run, failures: run.failures.length } }, "Attendance history auto-sync finished");
+    const outcome = autoSyncOutcome(run, `${run.eventsChecked} events checked, ${run.weeksSaved} weeks saved`);
+    await recordScheduledJob("checkins_history_sync", outcome.result, outcome.detail);
+    res.json(run);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await recordScheduledJob("checkins_history_sync", "error", message);
+    sendError(req, res, error, "Attendance history auto-sync failed");
   }
-  const run = await runCheckinsAutoSync();
-  req.log.info({ run: { ...run, failures: run.failures.length } }, "Attendance history auto-sync finished");
-  res.json(run);
 });
 
 // ── GET /api/attendance-history/events/:eventId/weeks?since=YYYY-MM-DD ──────

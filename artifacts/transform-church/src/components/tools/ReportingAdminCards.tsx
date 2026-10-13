@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useUpload } from "@workspace/object-storage-web";
-import { BarChart3, Check, ChevronDown, ChevronUp, Download, Loader2, Mail, Plus, RefreshCw, Send, Settings2, Trash2, Upload } from "lucide-react";
+import { AlertTriangle, BarChart3, Check, CheckCircle2, ChevronDown, Clock, ChevronUp, Download, Loader2, Mail, Plus, RefreshCw, Send, Settings2, Trash2, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -854,6 +854,8 @@ export function ReportingAdminCards() {
             )}
           </CardContent>
         </Card>
+
+      <ScheduledJobsCard />
 
       <AttendanceHistoryCard />
 
@@ -1860,4 +1862,108 @@ function PulseConfigForm({
       )}
     </div>
   );
-}
+}
+
+// ── Scheduled jobs health ───────────────────────────────────────────────────
+// Shows whether each Cron Trigger job (Weekly Pulse, both attendance
+// auto-syncs, Wiki Drive sync) actually ran at its last scheduled time --
+// see the API's lib/scheduledJobs.ts. Added after the Monday 10/12 jobs were
+// silently rejected because WEEKLY_PULSE_RUN_SECRET wasn't set.
+type ScheduledJobHealth = {
+  id: string;
+  label: string;
+  schedule: string;
+  lastExpectedAt: string;
+  status: "ok" | "running" | "warning" | "failed" | "missed" | "never";
+  message: string;
+  record: { lastAttemptAt: string; finishedAt: string | null; lastOkAt: string | null } | null;
+};
+
+const JOB_STATUS_STYLE: Record<ScheduledJobHealth["status"], { label: string; className: string }> = {
+  ok: { label: "OK", className: "border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-200" },
+  running: { label: "Running", className: "border-sky-300 bg-sky-50 text-sky-800 dark:border-sky-800 dark:bg-sky-950 dark:text-sky-200" },
+  warning: { label: "Problems", className: "border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200" },
+  failed: { label: "Failed", className: "border-red-300 bg-red-50 text-red-800 dark:border-red-800 dark:bg-red-950 dark:text-red-200" },
+  missed: { label: "Missed", className: "border-red-300 bg-red-50 text-red-800 dark:border-red-800 dark:bg-red-950 dark:text-red-200" },
+  never: { label: "No runs yet", className: "border-border bg-muted text-muted-foreground" },
+};
+
+function formatJobTime(iso: string | null | undefined): string {
+  if (!iso) return "never";
+  return new Date(iso).toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+}
+
+function ScheduledJobsCard() {
+  const [jobs, setJobs] = useState<ScheduledJobHealth[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const load = async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const response = await api("/api/weekly-pulse/scheduled-jobs");
+      const body = await response.json() as { jobs: ScheduledJobHealth[] };
+      setJobs(body.jobs);
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "Could not load scheduled job status.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  const problems = (jobs ?? []).filter((job) => job.status === "failed" || job.status === "missed" || job.status === "warning");
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <CardTitle className="flex items-center gap-2"><Clock className="h-5 w-5" /> Scheduled jobs</CardTitle>
+            <p className="text-sm text-muted-foreground">Whether each automatic job ran at its last scheduled time.</p>
+          </div>
+          <Button variant="outline" size="sm" onClick={load} disabled={loading}>
+            {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />} Refresh
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {error && <p className="text-sm text-destructive">{error}</p>}
+        {jobs && (problems.length ? (
+          <div className="flex items-start gap-2 rounded-md border border-red-300 bg-red-50 p-3 text-sm text-red-800 dark:border-red-800 dark:bg-red-950 dark:text-red-200">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>{problems.length === 1 ? "1 job needs attention." : `${problems.length} jobs need attention.`} Details below.</span>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <CheckCircle2 className="h-4 w-4" /> Nothing needs attention.
+          </div>
+        ))}
+        {jobs?.map((job) => {
+          const style = JOB_STATUS_STYLE[job.status];
+          return (
+            <div key={job.id} className="rounded-md border p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="font-medium">{job.label}</p>
+                  <p className="text-xs text-muted-foreground">{job.schedule} · last scheduled {formatJobTime(job.lastExpectedAt)}</p>
+                </div>
+                <span className={`rounded-full border px-2.5 py-0.5 text-xs font-medium ${style.className}`}>{style.label}</span>
+              </div>
+              <p className="mt-2 break-words text-sm">{job.message}</p>
+              {job.record && (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Last attempt {formatJobTime(job.record.lastAttemptAt)} · last success {formatJobTime(job.record.lastOkAt)}
+                </p>
+              )}
+            </div>
+          );
+        })}
+      </CardContent>
+    </Card>
+  );
+}

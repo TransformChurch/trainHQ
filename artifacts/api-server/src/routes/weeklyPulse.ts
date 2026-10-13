@@ -15,7 +15,6 @@
 // test now" from the admin UI against real data once configured to confirm
 // both before relying on the Monday automation.
 import { Router, type IRouter, type Request, type Response } from "express";
-import { timingSafeEqual } from "node:crypto";
 import {
   db,
   weeklyPulseConfigTable,
@@ -29,6 +28,7 @@ import { getValidPlanningCenterAccessToken } from "../lib/planningCenter";
 import { sendEmail } from "../lib/email";
 import { summarizeGroupAttendance } from "../lib/groupAttendance";
 import { logger } from "../lib/logger";
+import { authorizeScheduledCall, getScheduledJobsHealth, recordScheduledJob } from "../lib/scheduledJobs";
 import {
   CHECK_INS_BASE,
   PEOPLE_BASE,
@@ -86,13 +86,6 @@ function parsePcoForms(raw: string | null | undefined): WeeklyPulseFormEntry[] {
   } catch {
     return [];
   }
-}
-
-function secretsMatch(a: string, b: string): boolean {
-  const bufferA = Buffer.from(a);
-  const bufferB = Buffer.from(b);
-  if (bufferA.length !== bufferB.length) return false;
-  return timingSafeEqual(bufferA, bufferB);
 }
 
 function escapeHtml(value: string): string {
@@ -869,6 +862,17 @@ router.get("/config/:id/latest-report.csv", requireAdmin, async (req, res) => {
   }
 });
 
+// ── GET /api/weekly-pulse/scheduled-jobs ────────────────────────────────────
+// Health of every Cron Trigger job (Pulse, both attendance auto-syncs, Wiki
+// Drive sync) for the Reporting page -- see lib/scheduledJobs.ts.
+router.get("/scheduled-jobs", requireAdmin, async (req, res) => {
+  try {
+    res.json({ jobs: await getScheduledJobsHealth() });
+  } catch (error) {
+    sendError(req, res, error, "Failed to load scheduled job status");
+  }
+});
+
 // ── POST /api/weekly-pulse/run-scheduled ────────────────────────────────────
 // Internal endpoint called by the Worker's scheduled() Cron Trigger handler
 // (see src/worker.ts), not reachable by normal users -- this Container has no
@@ -878,12 +882,8 @@ router.get("/config/:id/latest-report.csv", requireAdmin, async (req, res) => {
 // request to this same route; it must be set as WEEKLY_PULSE_RUN_SECRET in
 // both the container's env and the Worker's envVars passed to it.
 router.post("/run-scheduled", async (req, res) => {
-  const expectedSecret = process.env.WEEKLY_PULSE_RUN_SECRET;
-  const providedSecret = req.header("x-internal-secret") ?? "";
-  if (!expectedSecret || !providedSecret || !secretsMatch(providedSecret, expectedSecret)) {
-    res.status(401).json({ error: "Unauthorized" });
-    return;
-  }
+  if (!(await authorizeScheduledCall(req, res, "weekly_pulse"))) return;
+  await recordScheduledJob("weekly_pulse", "running");
 
   const configs = await db.select().from(weeklyPulseConfigTable).where(eq(weeklyPulseConfigTable.enabled, true));
   const results: { id: number; sent: boolean; error?: string }[] = [];
@@ -903,6 +903,17 @@ router.post("/run-scheduled", async (req, res) => {
     }
   }
   req.log.info({ ranConfigs: results.length, results }, "Weekly pulse scheduled run complete");
+  const sent = results.filter((result) => result.sent).length;
+  const problems = results.filter((result) => !result.sent && !result.error?.startsWith("Skipped:"));
+  await recordScheduledJob(
+    "weekly_pulse",
+    !results.length ? "skipped" : !problems.length ? "ok" : sent ? "partial" : "error",
+    !results.length
+      ? "No Weekly Pulse is turned on."
+      : problems.length
+        ? `${sent} of ${results.length} sent. ${problems.map((result) => result.error ?? "Not sent").join(" | ")}`
+        : `${sent} of ${results.length} sent.`,
+  );
   res.json({ ranConfigs: results.length, results });
 });
 

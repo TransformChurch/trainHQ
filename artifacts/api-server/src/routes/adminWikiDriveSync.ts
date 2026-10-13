@@ -1,6 +1,6 @@
 import { Router } from "express";
-import { timingSafeEqual } from "node:crypto";
 import { requireAdmin } from "../middlewares/requireAuth";
+import { authorizeScheduledCall, recordScheduledJob } from "../lib/scheduledJobs";
 import { db, settingsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import {
@@ -63,13 +63,6 @@ router.post("/run", requireAdmin, async (req, res) => {
   }
 });
 
-function secretsMatch(a: string, b: string): boolean {
-  const bufferA = Buffer.from(a);
-  const bufferB = Buffer.from(b);
-  if (bufferA.length !== bufferB.length) return false;
-  return timingSafeEqual(bufferA, bufferB);
-}
-
 // ── POST /api/admin/wiki-drive-sync/run-scheduled ───────────────────────────
 // Internal endpoint called by the Worker's scheduled() Cron Trigger handler
 // (see src/worker.ts), not reachable by normal users -- this Container has no
@@ -90,16 +83,14 @@ function secretsMatch(a: string, b: string): boolean {
 // same reason noted there: a scale-to-zero Container can't guarantee it's
 // awake at any particular moment.
 router.post("/run-scheduled", async (req, res) => {
-  const expectedSecret = process.env.WIKI_DRIVE_SYNC_RUN_SECRET;
-  const providedSecret = req.header("x-internal-secret") ?? "";
-  if (!expectedSecret || !providedSecret || !secretsMatch(providedSecret, expectedSecret)) {
-    res.status(401).json({ error: "Unauthorized" });
-    return;
-  }
+  if (!(await authorizeScheduledCall(req, res, "wiki_drive_sync"))) return;
+  await recordScheduledJob("wiki_drive_sync", "running");
   try {
     const stats = await runWikiDriveSync();
+    await recordScheduledJob("wiki_drive_sync", "ok");
     res.json({ ok: true, stats });
   } catch (error) {
+    await recordScheduledJob("wiki_drive_sync", "error", error instanceof Error ? error.message : "Sync failed");
     req.log.error({ error }, "Scheduled Wiki Drive sync failed");
     res.status(500).json({ ok: false, error: error instanceof Error ? error.message : "Sync failed" });
   }
