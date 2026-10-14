@@ -72,11 +72,11 @@ const SCRIPT_SLOTS: Array<{ slot: ScriptSlot; label: string }> = [
 ];
 const preparationProgress = new Map<string, PreparationProgress>();
 
-function progressKey(userId: number, progressId: string): string {
+function progressKey(userId: string, progressId: string): string {
   return `${userId}:${progressId}`;
 }
 
-function setPreparationProgress(userId: number, progressId: string, progress: Omit<PreparationProgress, "expiresAt">) {
+function setPreparationProgress(userId: string, progressId: string, progress: Omit<PreparationProgress, "expiresAt">) {
   preparationProgress.set(progressKey(userId, progressId), {
     ...progress,
     expiresAt: Date.now() + PROGRESS_TTL_MS,
@@ -100,7 +100,7 @@ function cleanPreparationProgress() {
 // cycles and can each end up slower than the timeout they were each given
 // individually -- turning "redundant" into "both fail." Tracked per-user
 // (not globally) so one admin's long-running pull never blocks another's.
-const activePrepareRuns = new Set<number>();
+const activePrepareRuns = new Set<string>();
 const PREPARE_IN_PROGRESS_MESSAGE =
   "A report is already being prepared for your account -- wait for it to finish (or fail) before starting another.";
 const REPORT_FIELDS = [
@@ -615,6 +615,26 @@ function sendError(req: Request, res: Response, error: unknown, fallback: string
   res.status(typed.status ?? 500).json({ error: typed.message || fallback });
 }
 
+export type ReportLog = { info: (obj: unknown, msg?: string) => void; warn: (obj: unknown, msg?: string) => void };
+
+export type PreparedReport = {
+  runId: string;
+  eventName: string;
+  rawRows: number;
+  peopleCount: number;
+  serviceDates: string[];
+  sessionCount: number;
+  pullFields: ReportFieldKey[];
+  pullFieldLabels: string[];
+  reviewCount: number;
+  flags: string;
+  expiresAt: string;
+};
+
+function reportError(status: number, message: string): Error & { status: number } {
+  return Object.assign(new Error(message), { status });
+}
+
 export const MAX_JOINED_EVENTS = 10;
 
 // The Check-Ins event ids a prepare request asks for: `eventIds` (array or
@@ -905,14 +925,14 @@ router.get("/prepare-progress/:progressId", requireToolAccess("reporting"), (req
   res.json(response);
 });
 
-router.post("/prepare", requireToolAccess("reporting"), async (req, res) => {
+export async function prepareReportRun(
+  body: Record<string, unknown>,
+  userId: string,
+  log: ReportLog,
+): Promise<PreparedReport> {
   let workDir = "";
-  const progressId = text(req.body?.progressId);
-  const userId = res.locals.dbUser.id;
-  if (activePrepareRuns.has(userId)) {
-    res.status(409).json({ error: PREPARE_IN_PROGRESS_MESSAGE });
-    return;
-  }
+  const progressId = text(body?.progressId);
+  if (activePrepareRuns.has(userId)) throw reportError(409, PREPARE_IN_PROGRESS_MESSAGE);
   activePrepareRuns.add(userId);
   try {
     await cleanExpiredRuns();
@@ -925,18 +945,16 @@ router.post("/prepare", requireToolAccess("reporting"), async (req, res) => {
         message: "Loading attendance data…",
       });
     }
-    const eventIdList = parseEventIds(req.body);
+    const eventIdList = parseEventIds(body);
     const eventId = eventIdList.join(",");
-    const requestedStartDate = dateOnly(req.body?.startDate);
-    const endDate = dateOnly(req.body?.endDate);
-    const templateId = Number(req.body?.templateId);
+    const requestedStartDate = dateOnly(body?.startDate);
+    const endDate = dateOnly(body?.endDate);
+    const templateId = Number(body?.templateId);
     if (!eventId || !endDate || !Number.isInteger(templateId)) {
-      res.status(400).json({ error: "Select an event, template, and valid end date." });
-      return;
+      throw reportError(400, "Select an event, template, and valid end date.");
     }
     if (eventIdList.length > MAX_JOINED_EVENTS) {
-      res.status(400).json({ error: `Join at most ${MAX_JOINED_EVENTS} events in one report.` });
-      return;
+      throw reportError(400, `Join at most ${MAX_JOINED_EVENTS} events in one report.`);
     }
 
     const templates = await db.select().from(reportTemplatesTable)
@@ -944,17 +962,24 @@ router.post("/prepare", requireToolAccess("reporting"), async (req, res) => {
       .limit(1);
     const template = templates[0];
     if (!template) {
-      res.status(404).json({ error: "Report template not found." });
-      return;
+      throw reportError(404, "Report template not found.");
     }
     const pullFields = normalizePullFields(template.pullFields);
     const sessionCount = normalizeSessionCount(template.sessionCount);
     const cleanupMode = normalizeCleanupMode(template.cleanupMode);
-    if (cleanupMode === "all_dates" && (!requestedStartDate || requestedStartDate > endDate)) {
-      res.status(400).json({ error: "Select a valid start and end date for an All Dates template." });
-      return;
+    // "range": every session from startDate through endDate (a calendar
+    // month/quarter/week, so 4- and 5-week months both come out whole)
+    // instead of the template's last N sessions. All Dates templates are
+    // always a range. Added 2026-10-14 for previous-month/quarter defaults
+    // and scheduled reports.
+    const useRange = cleanupMode === "all_dates" || text(body?.period) === "range";
+    if (useRange && cleanupMode !== "all_dates" && (!requestedStartDate || requestedStartDate > endDate)) {
+      throw reportError(400, "Select a valid start and end date for this report period.");
     }
-    const accessToken = await getValidPlanningCenterAccessToken(res.locals.dbUser.id);
+    if (cleanupMode === "all_dates" && (!requestedStartDate || requestedStartDate > endDate)) {
+      throw reportError(400, "Select a valid start and end date for an All Dates template.");
+    }
+    const accessToken = await getValidPlanningCenterAccessToken(userId);
     // Audit finding 1.12 (Medium): this always fetched the full, paginated
     // list of Planning Center custom field definitions, even when the
     // report template doesn't pull any custom fields -- selectedCustomFields
@@ -969,13 +994,13 @@ router.post("/prepare", requireToolAccess("reporting"), async (req, res) => {
     const customLabels = new Map(customFieldDefinitions.map((field) => [field.key, field.label]));
     const loadedEvents: EventData[] = [];
     for (const id of eventIdList) loadedEvents.push(await loadEventData(id, accessToken));
-    const sessionOptions = { endDate, cleanupMode, startDate: requestedStartDate, sessionCount };
+    const sessionOptions = { endDate, cleanupMode: useRange ? "all_dates" as const : cleanupMode, startDate: requestedStartDate, sessionCount };
 
     // Week copies ("use event Y's check-ins for the week of W"): swap in the
     // source event's check-ins for any copied week that could be in this
     // report. Planning Center is only read, never written.
     const rawSessions = pickSessions(loadedEvents.flatMap((event) => event.periods), sessionOptions);
-    const copyWindowStart = cleanupMode === "all_dates"
+    const copyWindowStart = useRange
       ? weekStartFor(`${requestedStartDate}T12:00:00Z`)
       : rawSessions.length >= sessionCount
         ? addDays(weekStartFor(`${rawSessions[0].date}T12:00:00Z`), -7)
@@ -1003,12 +1028,9 @@ router.post("/prepare", requireToolAccess("reporting"), async (req, res) => {
 
     const sessions = pickSessions(combined.periods, sessionOptions);
     if (!sessions.length) {
-      res.status(404).json({
-        error: cleanupMode === "all_dates"
-          ? "No Planning Center sessions were found in that date range."
-          : "No Planning Center sessions were found on or before that end date.",
-      });
-      return;
+      throw reportError(404, useRange
+        ? "No Planning Center sessions were found in that date range."
+        : "No Planning Center sessions were found on or before that end date.");
     }
     const selectedSessionIds = new Set(sessions.flatMap((session) => session.periodIds));
     const sessionDateById = new Map(sessions.flatMap((session) => session.periodIds.map((id) => [id, session.date] as const)));
@@ -1017,8 +1039,7 @@ router.post("/prepare", requireToolAccess("reporting"), async (req, res) => {
       selectedSessionIds.has(relationshipId(checkIn, "event_period")),
     );
     if (!inRange.length) {
-      res.status(404).json({ error: "No attendee check-ins were found in the selected sessions." });
-      return;
+      throw reportError(404, "No attendee check-ins were found in the selected sessions.");
     }
 
     const includedPeople = new Map(
@@ -1030,7 +1051,7 @@ router.post("/prepare", requireToolAccess("reporting"), async (req, res) => {
     const peopleLookup = await lookupReportPeople(personIds, includedPeople, selectedCustomFields);
     const liveIds = peopleLookup.live;
     const totalProfileBatches = Math.ceil(liveIds.length / PEOPLE_BATCH_SIZE);
-    req.log.info(
+    log.info(
       { people: personIds.length, fromTable: peopleLookup.fromTable.size, live: liveIds.length, reason: peopleLookup.reason },
       "Report people lookup",
     );
@@ -1059,7 +1080,7 @@ router.post("/prepare", requireToolAccess("reporting"), async (req, res) => {
     const peopleDetails = new Map<string, Record<string, unknown>>(peopleLookup.fromTable);
     for (const [id, attributes] of liveDetails) peopleDetails.set(id, stripContactAttributes(attributes));
     const serviceDates = sessions.map((session) => session.date);
-    const startDate = cleanupMode === "all_dates" ? requestedStartDate : serviceDates[0];
+    const startDate = useRange ? requestedStartDate : serviceDates[0];
     const records = new Map<string, Record<string, string | boolean>>();
 
     for (const checkIn of inRange) {
@@ -1121,7 +1142,7 @@ router.post("/prepare", requireToolAccess("reporting"), async (req, res) => {
         await saveHistoryRows({ eventId: event.eventId, eventName: event.eventName, archived: false }, historyRows);
       }
     } catch (error) {
-      req.log.warn({ err: error, eventId }, "Could not refresh the attendance tracker for this event");
+      log.warn({ err: error, eventId }, "Could not refresh the attendance tracker for this event");
     }
 
     const headers = [
@@ -1158,7 +1179,7 @@ router.post("/prepare", requireToolAccess("reporting"), async (req, res) => {
       endDate,
       templateId,
       cleanedObjectPath,
-      requestedByUserId: res.locals.dbUser.id,
+      requestedByUserId: userId,
       expiresAt,
     });
     const reviewCount = Number(output.match(/ENTRIES NEEDING YOUR REVIEW:\s*(\d+)/)?.[1] ?? 0);
@@ -1170,7 +1191,7 @@ router.post("/prepare", requireToolAccess("reporting"), async (req, res) => {
         message: "All profile batches loaded",
       });
     }
-    res.json({
+    return {
       runId,
       eventName,
       rawRows: inRange.length,
@@ -1182,7 +1203,7 @@ router.post("/prepare", requireToolAccess("reporting"), async (req, res) => {
       reviewCount,
       flags,
       expiresAt: expiresAt.toISOString(),
-    });
+    };
   } catch (error) {
     if (progressId) {
       const current = preparationProgress.get(progressKey(userId, progressId));
@@ -1193,10 +1214,18 @@ router.post("/prepare", requireToolAccess("reporting"), async (req, res) => {
         message: "Report preparation stopped",
       });
     }
-    sendError(req, res, error, "Failed to prepare report data");
+    throw error;
   } finally {
     activePrepareRuns.delete(userId);
     if (workDir) await rm(workDir, { recursive: true, force: true }).catch(() => undefined);
+  }
+}
+
+router.post("/prepare", requireToolAccess("reporting"), async (req, res) => {
+  try {
+    res.json(await prepareReportRun(req.body ?? {}, res.locals.dbUser.id, req.log));
+  } catch (error) {
+    sendError(req, res, error, "Failed to prepare report data");
   }
 });
 
@@ -1311,6 +1340,33 @@ export function parseReportRecipients(raw: unknown): { recipients: string[] } | 
   return { recipients };
 }
 
+// Renders a prepared run and emails the PDF. Shared by POST /email-pdf and
+// scheduled reports (routes/scheduledReports.ts). `senderLine` is the
+// small-print line saying who/what sent it.
+export async function emailReportPdf(
+  runId: string,
+  templateId: number,
+  userId: string,
+  recipients: string[],
+  senderLine: string,
+): Promise<{ sent: boolean; error?: string; fileName: string }> {
+  const { pdf, fileName, run, templateName } = await generateReportPdf(runId, templateId, userId);
+  const escape = (value: string) => value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  const result = await sendEmail({
+    to: recipients,
+    subject: `${templateName}: ${run.eventName} (${run.startDate} to ${run.endDate})`,
+    html: `
+      <div style="font-family:Arial,Helvetica,sans-serif;max-width:480px;margin:0 auto;color:#111827;">
+        <p>The <strong>${escape(templateName)}</strong> report for <strong>${escape(run.eventName)}</strong>
+        (${escape(run.startDate)} to ${escape(run.endDate)}) is attached as a PDF.</p>
+        <p style="font-size:13px;color:#6b7280;">${escape(senderLine)}
+        This report contains attendee names, so please don't forward it outside the team.</p>
+      </div>`,
+    attachments: [{ filename: fileName, content: pdf }],
+  });
+  return { sent: result.sent, error: result.error, fileName };
+}
+
 // ── POST /api/reports/email-pdf ─────────────────────────────────────────────
 // Body: { runId, templateId, recipients }. Renders the same PDF as
 // /generate and emails it as an attachment. The report lists people
@@ -1329,21 +1385,8 @@ router.post("/email-pdf", requireToolAccess("reporting"), async (req, res) => {
       res.status(400).json({ error: parsed.error });
       return;
     }
-    const { pdf, fileName, run, templateName } = await generateReportPdf(runId, templateId, res.locals.dbUser.id);
     const sender = [res.locals.dbUser.firstName, res.locals.dbUser.lastName].filter(Boolean).join(" ") || "A Transform Church admin";
-    const escape = (value: string) => value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-    const result = await sendEmail({
-      to: parsed.recipients,
-      subject: `${templateName}: ${run.eventName} (${run.startDate} to ${run.endDate})`,
-      html: `
-        <div style="font-family:Arial,Helvetica,sans-serif;max-width:480px;margin:0 auto;color:#111827;">
-          <p>The <strong>${escape(templateName)}</strong> report for <strong>${escape(run.eventName)}</strong>
-          (${escape(run.startDate)} to ${escape(run.endDate)}) is attached as a PDF.</p>
-          <p style="font-size:13px;color:#6b7280;">Sent by ${escape(sender)} from the Transform Church reporting page.
-          This report contains attendee names, so please don't forward it outside the team.</p>
-        </div>`,
-      attachments: [{ filename: fileName, content: pdf }],
-    });
+    const result = await emailReportPdf(runId, templateId, res.locals.dbUser.id, parsed.recipients, `Sent by ${sender} from the Transform Church reporting page.`);
     req.log.info(
       { runId, templateId, actorId: res.locals.dbUser.id, recipientCount: parsed.recipients.length, sent: result.sent },
       "Report PDF email",

@@ -24,6 +24,7 @@ import groupHistoryRouter from "./groupHistory";
 import groupBroadcastsRouter from "./groupBroadcasts";
 import toolAccessRouter from "./toolAccess";
 import peopleSyncRouter from "./peopleSync";
+import scheduledReportsRouter from "./scheduledReports";
 
 const router: IRouter = Router();
 
@@ -53,5 +54,6 @@ router.use("/group-history", groupHistoryRouter);
 router.use("/group-broadcasts", groupBroadcastsRouter);
 router.use("/tool-access", toolAccessRouter);
 router.use("/people-sync", peopleSyncRouter);
+router.use("/scheduled-reports", scheduledReportsRouter);
 
 export default router;

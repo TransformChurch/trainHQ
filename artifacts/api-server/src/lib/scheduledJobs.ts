@@ -17,7 +17,7 @@ import { db, settingsTable } from "@workspace/db";
 import { inArray } from "drizzle-orm";
 import { logger } from "./logger";
 
-export type ScheduledJobId = "weekly_pulse" | "group_history_sync" | "checkins_history_sync" | "wiki_drive_sync" | "people_sync";
+export type ScheduledJobId = "weekly_pulse" | "group_history_sync" | "checkins_history_sync" | "wiki_drive_sync" | "people_sync" | "scheduled_reports";
 
 type ScheduledJobDefinition = {
   id: ScheduledJobId;
@@ -32,6 +32,9 @@ type ScheduledJobDefinition = {
 };
 
 export const SCHEDULED_JOBS: ScheduledJobDefinition[] = [
+  // Fires 12:00 and 13:00 UTC; acts at whichever is 8 AM Eastern, so the
+  // 13:00 winter run still lands inside this 90-minute grace window.
+  { id: "scheduled_reports", label: "Scheduled reports", cron: "0 12,13 * * *", hourUtc: 12, weekdayUtc: null, secretEnv: "WEEKLY_PULSE_RUN_SECRET", graceMinutes: 90 },
   { id: "people_sync", label: "Planning Center people sync", cron: "0 5 * * 1", hourUtc: 5, weekdayUtc: 1, secretEnv: "WEEKLY_PULSE_RUN_SECRET", graceMinutes: 60 },
   { id: "group_history_sync", label: "Group attendance auto-sync", cron: "0 7 * * 1", hourUtc: 7, weekdayUtc: 1, secretEnv: "WEEKLY_PULSE_RUN_SECRET", graceMinutes: 30 },
   { id: "checkins_history_sync", label: "Check-ins attendance auto-sync", cron: "0 8 * * 1", hourUtc: 8, weekdayUtc: 1, secretEnv: "WEEKLY_PULSE_RUN_SECRET", graceMinutes: 30 },
@@ -165,6 +168,7 @@ export function lastExpectedFire(id: ScheduledJobId, now: Date = new Date()): Da
 
 const SCHEDULE_TEXT: Record<ScheduledJobId, string> = {
   people_sync: "Mondays 05:00 UTC",
+  scheduled_reports: "Daily check at 8:00 AM Eastern",
   group_history_sync: "Mondays 07:00 UTC",
   checkins_history_sync: "Mondays 08:00 UTC",
   weekly_pulse: "Mondays 11:00 UTC",

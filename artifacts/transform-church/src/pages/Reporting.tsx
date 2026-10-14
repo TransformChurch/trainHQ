@@ -10,9 +10,14 @@ import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { api, BASE } from "@/lib/toolApi";
 import { FIELD_OPTIONS, type AvailableField, type ReportFieldKey } from "@/lib/reportFields";
+import { defaultPeriodKind, formatRange, localToday, previousPeriod } from "@/lib/reportPeriods";
 
 type EventOption = { id: string; name: string; frequency: string };
 type CleanupMode = "month_quarter" | "all_dates";
+// How a Monthly/Quarterly template picks its sessions: a whole calendar
+// month/quarter (default, so 4- and 5-week months both come out right), a
+// custom date range, or the template's last N sessions (the old behavior).
+type PeriodMode = "month" | "quarter" | "custom" | "sessions";
 type ReportEngine = "youth_quarterly" | "youth_monthly" | "kids_rutherford" | "kids_lyndhurst" | "kids_rutherford_quarterly" | "kids_lyndhurst_quarterly";
 type ReportTemplate = {
   id: number;
@@ -73,6 +78,7 @@ export default function Reporting() {
   const [startDate, setStartDate] = useState(defaultDate(-30));
   const [endDate, setEndDate] = useState(defaultDate(0));
   const [selectedTemplate, setSelectedTemplate] = useState("");
+  const [periodMode, setPeriodMode] = useState<PeriodMode>("month");
   const [prepared, setPrepared] = useState<PreparedRun | null>(null);
   const [eventsLoading, setEventsLoading] = useState(true);
   const [eventsError, setEventsError] = useState("");
@@ -105,6 +111,29 @@ export default function Reporting() {
     () => templates.find((template) => String(template.id) === selectedTemplate),
     [templates, selectedTemplate],
   );
+
+  const isAllDates = activeTemplate?.cleanupMode === "all_dates";
+  // Calendar-period modes send a start + end date; "sessions" keeps the
+  // template's last-N-sessions behavior.
+  const usesRange = isAllDates || periodMode !== "sessions";
+
+  const choosePeriod = (mode: PeriodMode) => {
+    setPeriodMode(mode);
+    setPrepared(null);
+    if (mode === "month" || mode === "quarter") {
+      const period = previousPeriod(mode, localToday());
+      setStartDate(period.startDate);
+      setEndDate(period.endDate);
+    }
+  };
+
+  // Each template defaults to the period it reports on: quarterly engines
+  // the previous quarter, everything else the previous month.
+  useEffect(() => {
+    if (!activeTemplate || activeTemplate.cleanupMode === "all_dates") return;
+    choosePeriod(defaultPeriodKind(activeTemplate.engine));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTemplate?.id]);
 
   const loadTemplates = async () => {
     const response = await api("/api/reports/templates");
@@ -179,7 +208,7 @@ export default function Reporting() {
   };
 
   const prepare = async () => {
-    if (!eventIds.length || !endDate || !selectedTemplate || (activeTemplate?.cleanupMode === "all_dates" && !startDate)) return;
+    if (!eventIds.length || !endDate || !selectedTemplate || (usesRange && (!startDate || startDate > endDate))) return;
     if (preparingRef.current) return; // already running -- see preparingRef comment above
     if (emailReportWhenReady && !reportRecipients.trim()) {
       toast({ title: "No email recipients", description: "Add an address in step 3, or turn off emailing.", variant: "destructive" });
@@ -211,7 +240,8 @@ export default function Reporting() {
         body: JSON.stringify({
           progressId,
           eventIds,
-          startDate: activeTemplate?.cleanupMode === "all_dates" ? startDate : undefined,
+          startDate: usesRange ? startDate : undefined,
+          period: !isAllDates && periodMode !== "sessions" ? "range" : undefined,
           endDate,
           templateId: Number(selectedTemplate),
         }),
@@ -299,7 +329,7 @@ export default function Reporting() {
             Select attendance cutoff
           </CardTitle>
         </CardHeader>
-        <CardContent className={`grid gap-4 ${activeTemplate?.cleanupMode === "all_dates" ? "md:grid-cols-3" : "md:grid-cols-2"}`}>
+        <CardContent className="grid gap-4 md:grid-cols-3">
           <div className="space-y-2 md:col-span-full">
             <Label htmlFor="report-event-filter">
               Active events{eventIds.length > 1 ? ` (${eventIds.length} joined into one report)` : ""}
@@ -333,21 +363,42 @@ export default function Reporting() {
               on the same date share a column). Works best for events that meet on the same day.
             </p>
           </div>
-          {activeTemplate?.cleanupMode === "all_dates" && (
+          {!isAllDates && (
+            <div className="space-y-2">
+              <Label htmlFor="report-period">Report period</Label>
+              <select
+                id="report-period"
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                value={periodMode}
+                onChange={(event) => choosePeriod(event.target.value as PeriodMode)}
+              >
+                <option value="month">Previous month ({previousPeriod("month", localToday()).label})</option>
+                <option value="quarter">Previous quarter ({previousPeriod("quarter", localToday()).label})</option>
+                <option value="custom">Custom dates</option>
+                <option value="sessions">Last {activeTemplate?.sessionCount ?? 5} sessions up to an end date</option>
+              </select>
+              <p className="text-xs text-muted-foreground">
+                {periodMode === "sessions"
+                  ? "The template's session count decides how many previous Planning Center sessions are included."
+                  : periodMode === "custom"
+                    ? "Every Planning Center session in the dates you pick is included."
+                    : `${formatRange(startDate, endDate)}: every session in the ${periodMode}, whether it had 4 weeks or 5.`}
+              </p>
+            </div>
+          )}
+          {(isAllDates || periodMode === "custom") && (
             <div className="space-y-2">
               <Label htmlFor="report-start">Start date</Label>
               <Input id="report-start" type="date" value={startDate} max={endDate} onChange={(event) => { setStartDate(event.target.value); setPrepared(null); }} />
             </div>
           )}
-          <div className="space-y-2">
-            <Label htmlFor="report-end">End date</Label>
-            <Input id="report-end" type="date" value={endDate} onChange={(event) => { setEndDate(event.target.value); setPrepared(null); }} />
-            <p className="text-xs text-muted-foreground">
-              {activeTemplate?.cleanupMode === "all_dates"
-                ? "All Planning Center sessions in the selected date range are included."
-                : "The selected template determines how many previous Planning Center sessions are included."}
-            </p>
-          </div>
+          {(isAllDates || periodMode === "custom" || periodMode === "sessions") && (
+            <div className="space-y-2">
+              <Label htmlFor="report-end">End date</Label>
+              <Input id="report-end" type="date" value={endDate} onChange={(event) => { setEndDate(event.target.value); setPrepared(null); }} />
+              {isAllDates && <p className="text-xs text-muted-foreground">All Planning Center sessions in the selected date range are included.</p>}
+            </div>
+          )}
           {eventsLoading && <p className="flex items-center gap-2 text-sm text-muted-foreground md:col-span-3"><Loader2 className="h-4 w-4 animate-spin" /> Loading Planning Center events…</p>}
           {eventsError && (
             <div className="rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950 md:col-span-3">
@@ -390,7 +441,7 @@ export default function Reporting() {
                 .filter(Boolean)
                 .join(" → ")}
               <span className="mt-1 block text-muted-foreground">
-                {activeTemplate?.cleanupMode === "all_dates"
+                {usesRange
                   ? "Attendance: All sessions in the selected date range"
                   : `Sessions: ${activeTemplate?.sessionCount ?? 5}`}
               </span>
@@ -449,7 +500,7 @@ export default function Reporting() {
           <div className="flex flex-wrap items-center gap-3">
             <Button
               onClick={prepare}
-              disabled={preparing || !eventIds.length || !selectedTemplate || !!eventsError || (activeTemplate?.cleanupMode === "all_dates" && (!startDate || startDate > endDate))}
+              disabled={preparing || !eventIds.length || !selectedTemplate || !!eventsError || (usesRange && (!startDate || startDate > endDate))}
             >
               {preparing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
               {preparing ? "Pulling and formatting data…" : "Pull and prepare data"}

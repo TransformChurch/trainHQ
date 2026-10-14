@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useUpload } from "@workspace/object-storage-web";
-import { AlertTriangle, BarChart3, Check, CheckCircle2, ChevronDown, Clock, Users, ChevronUp, Download, Loader2, Mail, Plus, RefreshCw, Send, Settings2, Trash2, Upload } from "lucide-react";
+import { AlertTriangle, BarChart3, CalendarClock, Check, CheckCircle2, ChevronDown, Clock, Pencil, Play, Users, ChevronUp, Download, Loader2, Mail, Plus, RefreshCw, Send, Settings2, Trash2, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -856,6 +856,8 @@ export function ReportingAdminCards() {
         </Card>
 
       <ScheduledJobsCard />
+
+      <ScheduledReportsCard />
 
       <PeopleSyncCard />
 
@@ -2272,6 +2274,317 @@ function PeopleSyncCard() {
             </div>
           </>
         )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ── Scheduled reports ───────────────────────────────────────────────────────
+// Saved reports that prepare and email themselves at 8 AM Eastern: weekly
+// (Mondays), monthly (the 1st) or quarterly (Jan/Apr/Jul/Oct 1), always for
+// the whole period that just ended. API: routes/scheduledReports.ts.
+type ScheduleFrequency = "week" | "month" | "quarter";
+type ScheduleRun = {
+  at: string;
+  trigger: "scheduled" | "manual";
+  periodLabel: string;
+  status: "running" | "sent" | "error";
+  error?: string;
+  peopleCount?: number;
+  sessionCount?: number;
+};
+type ReportScheduleRow = {
+  id: string;
+  name: string;
+  templateId: number;
+  eventIds: string[];
+  eventNames: string[];
+  recipients: string[];
+  frequency: ScheduleFrequency;
+  enabled: boolean;
+  ownerName: string;
+  lastRun: ScheduleRun | null;
+  nextRunDate: string | null;
+  nextPeriod: { label: string };
+};
+type ScheduleDraft = { id: string | null; name: string; templateId: string; eventIds: string[]; recipients: string; frequency: ScheduleFrequency; enabled: boolean };
+type TemplateOption = { id: number; name: string; engine: string | null };
+type ScheduleEventOption = { id: string; name: string };
+
+const FREQUENCY_LABEL: Record<ScheduleFrequency, string> = {
+  week: "Weekly (Mondays)",
+  month: "Monthly (the 1st)",
+  quarter: "Quarterly (Jan, Apr, Jul, Oct 1)",
+};
+
+function formatRunDate(ymd: string | null): string {
+  if (!ymd) return "Paused";
+  return `${new Date(`${ymd}T12:00:00Z`).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", year: "numeric", timeZone: "UTC" })} at 8:00 AM Eastern`;
+}
+
+function ScheduledReportsCard() {
+  const { toast } = useToast();
+  const [schedules, setSchedules] = useState<ReportScheduleRow[] | null>(null);
+  const [templates, setTemplates] = useState<TemplateOption[]>([]);
+  const [events, setEvents] = useState<ScheduleEventOption[]>([]);
+  const [eventsError, setEventsError] = useState("");
+  const [draft, setDraft] = useState<ScheduleDraft | null>(null);
+  const [eventFilter, setEventFilter] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [runningId, setRunningId] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState("");
+
+  const load = async () => {
+    try {
+      const response = await api("/api/scheduled-reports");
+      setSchedules(((await response.json()) as { schedules: ReportScheduleRow[] }).schedules);
+      setLoadError("");
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : "Could not load scheduled reports.");
+    }
+  };
+
+  useEffect(() => {
+    load();
+    api("/api/reports/templates")
+      .then(async (response) => setTemplates(await response.json() as TemplateOption[]))
+      .catch(() => setTemplates([]));
+  }, []);
+
+  const loadEvents = async () => {
+    if (events.length) return;
+    try {
+      const response = await api("/api/reports/events");
+      setEvents(await response.json() as ScheduleEventOption[]);
+      setEventsError("");
+    } catch (error) {
+      setEventsError(error instanceof Error ? error.message : "Could not load Planning Center events.");
+    }
+  };
+
+  const startNew = () => {
+    loadEvents();
+    setEventFilter("");
+    setDraft({ id: null, name: "", templateId: templates[0] ? String(templates[0].id) : "", eventIds: [], recipients: "", frequency: "month", enabled: true });
+  };
+
+  const startEdit = (schedule: ReportScheduleRow) => {
+    loadEvents();
+    setEventFilter("");
+    setDraft({
+      id: schedule.id,
+      name: schedule.name,
+      templateId: String(schedule.templateId),
+      eventIds: schedule.eventIds,
+      recipients: schedule.recipients.join(", "),
+      frequency: schedule.frequency,
+      enabled: schedule.enabled,
+    });
+  };
+
+  // Picking a quarterly template suggests a quarterly schedule (and vice versa).
+  const chooseTemplate = (templateId: string) => {
+    const template = templates.find((entry) => String(entry.id) === templateId);
+    setDraft((current) => current && {
+      ...current,
+      templateId,
+      frequency: current.frequency === "week" ? "week" : (template?.engine ?? "").includes("quarterly") ? "quarter" : "month",
+    });
+  };
+
+  const save = async () => {
+    if (!draft) return;
+    setSaving(true);
+    try {
+      const eventNames = draft.eventIds.map((id) => events.find((event) => event.id === id)?.name
+        ?? schedules?.find((schedule) => schedule.id === draft.id)?.eventNames[schedules.find((schedule) => schedule.id === draft.id)!.eventIds.indexOf(id)]
+        ?? id);
+      const body = JSON.stringify({ ...draft, templateId: Number(draft.templateId), eventNames });
+      await api(draft.id ? `/api/scheduled-reports/${draft.id}` : "/api/scheduled-reports", { method: draft.id ? "PUT" : "POST", body });
+      toast({ title: draft.id ? "Scheduled report saved" : "Scheduled report added" });
+      setDraft(null);
+      await load();
+    } catch (error) {
+      toast({ title: "Could not save", description: error instanceof Error ? error.message : "Request failed.", variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const remove = async (schedule: ReportScheduleRow) => {
+    try {
+      await api(`/api/scheduled-reports/${schedule.id}`, { method: "DELETE" });
+      toast({ title: `Deleted "${schedule.name}"` });
+      await load();
+    } catch (error) {
+      toast({ title: "Could not delete", description: error instanceof Error ? error.message : "Request failed.", variant: "destructive" });
+    }
+  };
+
+  const setEnabled = async (schedule: ReportScheduleRow, enabled: boolean) => {
+    try {
+      await api(`/api/scheduled-reports/${schedule.id}`, {
+        method: "PUT",
+        body: JSON.stringify({ ...schedule, recipients: schedule.recipients.join(", "), enabled }),
+      });
+      await load();
+    } catch (error) {
+      toast({ title: "Could not save", description: error instanceof Error ? error.message : "Request failed.", variant: "destructive" });
+    }
+  };
+
+  const runNow = async (schedule: ReportScheduleRow) => {
+    setRunningId(schedule.id);
+    try {
+      const response = await api(`/api/scheduled-reports/${schedule.id}/run`, { method: "POST" });
+      const { run } = await response.json() as { run: ScheduleRun };
+      toast({ title: "Report sent", description: `${run.periodLabel}: emailed to ${schedule.recipients.length} ${schedule.recipients.length === 1 ? "person" : "people"}.` });
+    } catch (error) {
+      toast({ title: "Report not sent", description: error instanceof Error ? error.message : "Request failed.", variant: "destructive" });
+    } finally {
+      setRunningId(null);
+      await load();
+    }
+  };
+
+  const templateName = (id: number) => templates.find((template) => template.id === id)?.name ?? `Template ${id} (missing)`;
+  const filteredEvents = events.filter((event) => draft?.eventIds.includes(event.id) || event.name.toLowerCase().includes(eventFilter.trim().toLowerCase()));
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <CardTitle className="flex items-center gap-2"><CalendarClock className="h-5 w-5" /> Scheduled reports</CardTitle>
+            <p className="text-sm text-muted-foreground">
+              Reports that prepare and email themselves at 8:00 AM Eastern, always covering the whole week, month or quarter
+              that just ended.
+            </p>
+          </div>
+          {!draft && <Button size="sm" onClick={startNew} disabled={!templates.length}><Plus className="mr-2 h-4 w-4" /> Add scheduled report</Button>}
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {loadError && <p className="text-sm text-destructive">{loadError}</p>}
+
+        {draft && (
+          <div className="space-y-4 rounded-md border p-4">
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="schedule-name">Name</Label>
+                <Input id="schedule-name" value={draft.name} placeholder="Youth monthly report" onChange={(event) => setDraft({ ...draft, name: event.target.value })} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="schedule-template">Report template</Label>
+                <select
+                  id="schedule-template"
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  value={draft.templateId}
+                  onChange={(event) => chooseTemplate(event.target.value)}
+                >
+                  {templates.map((template) => <option key={template.id} value={template.id}>{template.name}</option>)}
+                </select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="schedule-frequency">How often</Label>
+                <select
+                  id="schedule-frequency"
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  value={draft.frequency}
+                  onChange={(event) => setDraft({ ...draft, frequency: event.target.value as ScheduleFrequency })}
+                >
+                  {(Object.keys(FREQUENCY_LABEL) as ScheduleFrequency[]).map((key) => <option key={key} value={key}>{FREQUENCY_LABEL[key]}</option>)}
+                </select>
+                <p className="text-xs text-muted-foreground">
+                  Covers the previous {draft.frequency === "week" ? "Monday–Sunday week" : draft.frequency}, every session in it.
+                </p>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="schedule-recipients">Email to (up to 10)</Label>
+                <Textarea id="schedule-recipients" rows={2} value={draft.recipients} placeholder="name@transformchurch.com, ..." onChange={(event) => setDraft({ ...draft, recipients: event.target.value })} />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="schedule-event-filter">Events{draft.eventIds.length > 1 ? ` (${draft.eventIds.length} joined into one report)` : ""}</Label>
+              {eventsError ? (
+                <p className="text-sm text-destructive">{eventsError}</p>
+              ) : (
+                <>
+                  <Input id="schedule-event-filter" placeholder="Search events…" value={eventFilter} onChange={(event) => setEventFilter(event.target.value)} />
+                  <div className="max-h-48 space-y-1 overflow-y-auto rounded-md border p-2">
+                    {!events.length && <p className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> Loading Planning Center events…</p>}
+                    {filteredEvents.map((event) => (
+                      <label key={event.id} className="flex cursor-pointer items-center gap-2 rounded px-1 py-1 text-sm hover:bg-muted/50">
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4 rounded border-input"
+                          checked={draft.eventIds.includes(event.id)}
+                          onChange={(change) => setDraft({
+                            ...draft,
+                            eventIds: change.target.checked ? [...draft.eventIds, event.id] : draft.eventIds.filter((id) => id !== event.id),
+                          })}
+                        />
+                        {event.name}
+                      </label>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <label className="flex items-center gap-2 text-sm">
+                <Switch checked={draft.enabled} onCheckedChange={(enabled) => setDraft({ ...draft, enabled })} /> Turned on
+              </label>
+              <div className="flex gap-2">
+                <Button size="sm" variant="outline" onClick={() => setDraft(null)} disabled={saving}>Cancel</Button>
+                <Button size="sm" onClick={save} disabled={saving || !draft.name.trim() || !draft.templateId || !draft.eventIds.length || !draft.recipients.trim()}>
+                  {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />} Save
+                </Button>
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Saving makes you the schedule's owner: your Planning Center connection prepares the report. The email says it was
+              sent automatically and that it contains attendee names.
+            </p>
+          </div>
+        )}
+
+        {schedules && !schedules.length && !draft && <p className="text-sm text-muted-foreground">No scheduled reports yet.</p>}
+        {schedules?.map((schedule) => (
+          <div key={schedule.id} className="rounded-md border p-3">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0 space-y-0.5">
+                <p className="font-medium">{schedule.name}</p>
+                <p className="text-xs text-muted-foreground">
+                  {FREQUENCY_LABEL[schedule.frequency]} · {templateName(schedule.templateId)} · {schedule.eventNames.join(" + ") || `${schedule.eventIds.length} event(s)`}
+                </p>
+                <p className="break-words text-xs text-muted-foreground">To: {schedule.recipients.join(", ")} · owner {schedule.ownerName}</p>
+              </div>
+              <Switch checked={schedule.enabled} onCheckedChange={(enabled) => setEnabled(schedule, enabled)} aria-label={`Turn ${schedule.name} ${schedule.enabled ? "off" : "on"}`} />
+            </div>
+            <p className="mt-2 text-sm">
+              Next: {schedule.enabled ? `${formatRunDate(schedule.nextRunDate)}, covering ${schedule.nextPeriod.label}` : "Paused"}
+            </p>
+            {schedule.lastRun && (
+              <p className={`text-xs ${schedule.lastRun.status === "error" ? "text-destructive" : "text-muted-foreground"}`}>
+                Last {schedule.lastRun.trigger === "manual" ? "test run" : "run"} {formatJobTime(schedule.lastRun.at)} ({schedule.lastRun.periodLabel}):{" "}
+                {schedule.lastRun.status === "sent"
+                  ? `sent${schedule.lastRun.peopleCount !== undefined ? `, ${schedule.lastRun.peopleCount} people over ${schedule.lastRun.sessionCount} sessions` : ""}`
+                  : schedule.lastRun.status === "running" ? "running…" : `failed: ${schedule.lastRun.error ?? "unknown error"}`}
+              </p>
+            )}
+            <div className="mt-2 flex flex-wrap gap-2">
+              <Button size="sm" variant="outline" onClick={() => runNow(schedule)} disabled={!!runningId}>
+                {runningId === schedule.id ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />} Run now
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => startEdit(schedule)} disabled={!!draft}><Pencil className="mr-2 h-4 w-4" /> Edit</Button>
+              <Button size="sm" variant="outline" onClick={() => remove(schedule)}><Trash2 className="mr-2 h-4 w-4" /> Delete</Button>
+            </div>
+          </div>
+        ))}
+        <p className="text-xs text-muted-foreground">
+          "Run now" emails the report for the most recent complete period right away, so you can check it before the first scheduled run.
+        </p>
       </CardContent>
     </Card>
   );

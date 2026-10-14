@@ -101,8 +101,12 @@ bucket_name = "transform-church-storage"
 # match), before the attendance syncs: 1am US Eastern in daylight saving
 # time, midnight in winter. Off unless an admin turns on the weekly sync in
 # "Planning Center people sync" on the Reporting page.
+# "0 12,13 * * *" -> scheduled reports, POST /api/scheduled-reports/run-scheduled
+# (SCHEDULED_REPORTS_CRON in worker.ts must match). Only the call that is
+# 8 AM US Eastern acts (12:00 UTC in daylight saving time, 13:00 in winter);
+# weekly schedules run Mondays, monthly on the 1st, quarterly on Jan/Apr/Jul/Oct 1.
 [triggers]
-crons = ["0 11 * * 1", "0 6 * * *", "0 7 * * 1", "0 8 * * 1", "0 5 * * 1"]
+crons = ["0 11 * * 1", "0 6 * * *", "0 7 * * 1", "0 8 * * 1", "0 5 * * 1", "0 12,13 * * *"]
 
 [vars]
 NODE_ENV = "production"

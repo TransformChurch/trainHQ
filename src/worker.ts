@@ -83,6 +83,9 @@ const CHECKINS_HISTORY_SYNC_CRON = "0 8 * * 1";
 // And for the weekly Planning Center people sync (routes/peopleSync.ts),
 // before both attendance syncs so reports that morning see fresh profiles.
 const PEOPLE_SYNC_CRON = "0 5 * * 1";
+// Scheduled reports (routes/scheduledReports.ts): 12:00 and 13:00 UTC daily;
+// the API acts only at the one that is 8 AM Eastern (DST-proof).
+const SCHEDULED_REPORTS_CRON = "0 12,13 * * *";
 
 export class TransformChurchContainer extends Container<Env> {
   defaultPort = 3000;
@@ -255,6 +258,18 @@ export default {
           if (!response.ok) {
             const body = await response.text().catch(() => "");
             console.error(`Group history auto-sync failed: ${response.status} ${body.slice(0, 500)}`);
+          }
+          return;
+        }
+        if (controller.cron === SCHEDULED_REPORTS_CRON) {
+          const request = new Request("https://internal/api/scheduled-reports/run-scheduled", {
+            method: "POST",
+            headers: { "x-internal-secret": workerEnv.WEEKLY_PULSE_RUN_SECRET ?? "" },
+          });
+          const response = await getContainer(workerEnv.API_CONTAINER, "primary").fetch(request);
+          if (!response.ok) {
+            const body = await response.text().catch(() => "");
+            console.error(`Scheduled reports failed: ${response.status} ${body.slice(0, 500)}`);
           }
           return;
         }
