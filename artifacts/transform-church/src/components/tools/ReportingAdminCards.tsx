@@ -2006,7 +2006,7 @@ const PEOPLE_BASIC_COLUMNS = [
 ];
 // Church-standard custom fields (matched by name in Planning Center; see the
 // API's STANDARD_CUSTOM_FIELDS in lib/peopleSync.ts).
-const PEOPLE_STANDARD_LABELS = ["Baptized?", "Thrive", "Serve Class", "Last Served"];
+const PEOPLE_STANDARD_LABELS = ["Baptized?", "Thrive", "Last Served"];
 
 function PeopleSyncCard() {
   const { toast } = useToast();

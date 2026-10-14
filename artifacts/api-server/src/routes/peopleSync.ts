@@ -29,6 +29,7 @@ import {
   normalizeSelectedFields,
   resolveStandardFields,
   safeNextLink,
+  STANDARD_CUSTOM_FIELDS,
   type SelectedPeopleField,
   type StandardFieldResolution,
 } from "../lib/peopleSync";
@@ -76,7 +77,11 @@ export async function readPeopleSync(): Promise<PeopleSyncSettings> {
       enabled: parsed.enabled === true,
       userId: typeof parsed.userId === "string" ? parsed.userId : null,
       fields: normalizeSelectedFields(parsed.fields),
-      standard: Array.isArray(parsed.standard) ? parsed.standard : null,
+      // Drop stored matches for columns no longer standard (e.g. Serve Class,
+      // removed 2026-10-14) so they vanish before the next pull re-matches.
+      standard: Array.isArray(parsed.standard)
+        ? parsed.standard.filter((field: { label?: unknown }) => STANDARD_CUSTOM_FIELDS.some((standard) => standard.label === field.label))
+        : null,
       lastRun: parsed.lastRun ?? null,
     };
   } catch {

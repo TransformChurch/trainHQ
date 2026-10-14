@@ -34,7 +34,6 @@ export type SelectedPeopleField = { key: string; label: string };
 export const STANDARD_CUSTOM_FIELDS: { label: string; names: string[] }[] = [
   { label: "Baptized?", names: ["Baptized?", "Baptized"] },
   { label: "Thrive", names: ["Thrive"] },
-  { label: "Serve Class", names: ["Serve Class"] },
   { label: "Last Served", names: ["Last Served"] },
 ];
 

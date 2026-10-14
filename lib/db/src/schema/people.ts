@@ -11,7 +11,7 @@ import { boolean, date, index, integer, jsonb, pgTable, text, timestamp } from "
 // fields) lands in `fields`, keyed by a stable key ("attr:anniversary",
 // "field:123456") -- so adding or removing a column is a settings change,
 // not a database migration. A few church-standard custom fields (Baptized?,
-// Thrive, Serve Class, Last Served) are always included, matched by name.
+// Thrive, Last Served) are always included, matched by name.
 // Emails, phones, street addresses and medical notes are deliberately not
 // pulled.
 //
