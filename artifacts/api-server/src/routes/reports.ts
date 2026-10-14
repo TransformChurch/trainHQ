@@ -21,10 +21,18 @@ import {
   addDays,
   buildWeeklyHistory,
   genderByPersonFromIncluded,
-  loadTrendRows,
+  loadTrendRowsForEvents,
+  readWeekOverrides,
   saveHistoryRows,
   weekStartFor,
 } from "../lib/checkinsHistory";
+import {
+  applyWeekCopy,
+  mergeEventData,
+  periodsInWeek,
+  pickSessions,
+  type EventData,
+} from "../lib/reportEvents";
 
 const router: IRouter = Router();
 const storage = new ObjectStorageService();
@@ -606,6 +614,73 @@ function sendError(req: Request, res: Response, error: unknown, fallback: string
   res.status(typed.status ?? 500).json({ error: typed.message || fallback });
 }
 
+export const MAX_JOINED_EVENTS = 10;
+
+// The Check-Ins event ids a prepare request asks for: `eventIds` (array or
+// comma-separated string) or the older single `eventId`; de-duplicated.
+export function parseEventIds(body: unknown): string[] {
+  const source = body as { eventIds?: unknown; eventId?: unknown } | null | undefined;
+  const raw = source?.eventIds ?? source?.eventId;
+  const list = Array.isArray(raw) ? raw : typeof raw === "string" ? raw.split(",") : [];
+  return [...new Set(list.map((value) => text(value)).filter(Boolean))];
+}
+
+// One event's periods, attendee check-ins (with people) and first-time
+// check-ins, straight from Planning Center.
+async function loadEventData(eventId: string, accessToken: string): Promise<EventData> {
+  const eventPage = await planningCenterRequest(`${CHECK_INS_BASE}/events/${encodeURIComponent(eventId)}`, accessToken);
+  const eventName = firstValue(eventPage.data?.attributes ?? {}, "name") || `Event ${eventId}`;
+  const [periodCollection, collection, firstTimeCollection] = await Promise.all([
+    fetchCollection(
+      `${CHECK_INS_BASE}/events/${encodeURIComponent(eventId)}/event_periods?order=-starts_at&per_page=100`,
+      accessToken,
+    ),
+    fetchCollection(
+      `${CHECK_INS_BASE}/events/${encodeURIComponent(eventId)}/check_ins?filter=attendee&include=person&per_page=100`,
+      accessToken,
+    ),
+    fetchCollection(
+      `${CHECK_INS_BASE}/events/${encodeURIComponent(eventId)}/check_ins?filter=first_time&per_page=100`,
+      accessToken,
+    ),
+  ]);
+  return {
+    eventId,
+    eventName,
+    periods: periodCollection.data,
+    checkIns: collection.data,
+    included: collection.included,
+    firstTime: firstTimeCollection.data,
+  };
+}
+
+// Only the sessions of `weekStart` for a week-copy's source event: its
+// periods that week and their check-ins (read-only calls).
+async function loadSourceWeek(
+  sourceEventId: string,
+  sourceEventName: string,
+  weekStart: string,
+  accessToken: string,
+): Promise<EventData> {
+  const periodCollection = await fetchCollection(
+    `${CHECK_INS_BASE}/events/${encodeURIComponent(sourceEventId)}/event_periods?order=-starts_at&per_page=100`,
+    accessToken,
+  );
+  const periods = periodsInWeek(periodCollection.data, weekStart);
+  const checkIns: EventData["checkIns"] = [];
+  const included: EventData["included"] = [];
+  const firstTime: EventData["firstTime"] = [];
+  for (const period of periods) {
+    const base = `${CHECK_INS_BASE}/events/${encodeURIComponent(sourceEventId)}/event_periods/${encodeURIComponent(period.id)}/check_ins`;
+    const attendees = await fetchCollection(`${base}?filter=attendee&include=person&per_page=100`, accessToken);
+    const firstTimers = await fetchCollection(`${base}?filter=first_time&per_page=100`, accessToken);
+    checkIns.push(...attendees.data);
+    included.push(...attendees.included);
+    firstTime.push(...firstTimers.data);
+  }
+  return { eventId: sourceEventId, eventName: sourceEventName, periods, checkIns, included, firstTime };
+}
+
 router.get("/events", requireToolAccess("reporting"), async (req, res) => {
   try {
     const accessToken = await getValidPlanningCenterAccessToken(res.locals.dbUser.id);
@@ -849,12 +924,17 @@ router.post("/prepare", requireToolAccess("reporting"), async (req, res) => {
         message: "Loading attendance data…",
       });
     }
-    const eventId = text(req.body?.eventId);
+    const eventIdList = parseEventIds(req.body);
+    const eventId = eventIdList.join(",");
     const requestedStartDate = dateOnly(req.body?.startDate);
     const endDate = dateOnly(req.body?.endDate);
     const templateId = Number(req.body?.templateId);
     if (!eventId || !endDate || !Number.isInteger(templateId)) {
       res.status(400).json({ error: "Select an event, template, and valid end date." });
+      return;
+    }
+    if (eventIdList.length > MAX_JOINED_EVENTS) {
+      res.status(400).json({ error: `Join at most ${MAX_JOINED_EVENTS} events in one report.` });
       return;
     }
 
@@ -886,37 +966,41 @@ router.post("/prepare", requireToolAccess("reporting"), async (req, res) => {
       ? await fetchReportFieldDefinitions(accessToken)
       : [];
     const customLabels = new Map(customFieldDefinitions.map((field) => [field.key, field.label]));
-    const eventPage = await planningCenterRequest(`${CHECK_INS_BASE}/events/${encodeURIComponent(eventId)}`, accessToken);
-    const eventName = firstValue(eventPage.data?.attributes ?? {}, "name") || `Event ${eventId}`;
-    const [periodCollection, collection, firstTimeCollection] = await Promise.all([
-      fetchCollection(
-        `${CHECK_INS_BASE}/events/${encodeURIComponent(eventId)}/event_periods?order=-starts_at&per_page=100`,
-        accessToken,
-      ),
-      fetchCollection(
-        `${CHECK_INS_BASE}/events/${encodeURIComponent(eventId)}/check_ins?filter=attendee&include=person&per_page=100`,
-        accessToken,
-      ),
-      fetchCollection(
-        `${CHECK_INS_BASE}/events/${encodeURIComponent(eventId)}/check_ins?filter=first_time&per_page=100`,
-        accessToken,
-      ),
-    ]);
-    const eligibleSessions = periodCollection.data
-      .map((period) => ({
-        id: period.id,
-        date: dateOnly(period.attributes?.starts_at),
-      }))
-      .filter((period) =>
-        period.id
-        && period.date
-        && period.date <= endDate
-        && (cleanupMode !== "all_dates" || period.date >= requestedStartDate),
-      )
-      .sort((a, b) => b.date.localeCompare(a.date));
-    const sessions = cleanupMode === "all_dates"
-      ? eligibleSessions.reverse()
-      : eligibleSessions.slice(0, sessionCount).reverse();
+    const loadedEvents: EventData[] = [];
+    for (const id of eventIdList) loadedEvents.push(await loadEventData(id, accessToken));
+    const sessionOptions = { endDate, cleanupMode, startDate: requestedStartDate, sessionCount };
+
+    // Week copies ("use event Y's check-ins for the week of W"): swap in the
+    // source event's check-ins for any copied week that could be in this
+    // report. Planning Center is only read, never written.
+    const rawSessions = pickSessions(loadedEvents.flatMap((event) => event.periods), sessionOptions);
+    const copyWindowStart = cleanupMode === "all_dates"
+      ? weekStartFor(`${requestedStartDate}T12:00:00Z`)
+      : rawSessions.length >= sessionCount
+        ? addDays(weekStartFor(`${rawSessions[0].date}T12:00:00Z`), -7)
+        : "0000-00-00";
+    const copyWindowEnd = weekStartFor(`${endDate}T12:00:00Z`);
+    const weekCopies = (await readWeekOverrides())
+      .filter((copy) => copy.weekStart >= copyWindowStart && copy.weekStart <= copyWindowEnd);
+    const sourceWeekCache = new Map<string, EventData>();
+    const preparedEvents: EventData[] = [];
+    for (const event of loadedEvents) {
+      let data = event;
+      for (const copy of weekCopies.filter((item) => item.eventId === event.eventId)) {
+        const cacheKey = `${copy.sourceEventId}:${copy.weekStart}`;
+        let source = sourceWeekCache.get(cacheKey);
+        if (!source) {
+          source = await loadSourceWeek(copy.sourceEventId, copy.sourceEventName, copy.weekStart, accessToken);
+          sourceWeekCache.set(cacheKey, source);
+        }
+        data = applyWeekCopy(data, copy.weekStart, source);
+      }
+      preparedEvents.push(data);
+    }
+    const combined = mergeEventData(preparedEvents);
+    const eventName = combined.eventName;
+
+    const sessions = pickSessions(combined.periods, sessionOptions);
     if (!sessions.length) {
       res.status(404).json({
         error: cleanupMode === "all_dates"
@@ -925,10 +1009,10 @@ router.post("/prepare", requireToolAccess("reporting"), async (req, res) => {
       });
       return;
     }
-    const selectedSessionIds = new Set(sessions.map((session) => session.id));
-    const sessionDateById = new Map(sessions.map((session) => [session.id, session.date]));
-    const firstTimeIds = new Set(firstTimeCollection.data.map((checkIn) => checkIn.id));
-    const inRange = collection.data.filter((checkIn) =>
+    const selectedSessionIds = new Set(sessions.flatMap((session) => session.periodIds));
+    const sessionDateById = new Map(sessions.flatMap((session) => session.periodIds.map((id) => [id, session.date] as const)));
+    const firstTimeIds = new Set(combined.firstTime.map((checkIn) => checkIn.id));
+    const inRange = combined.checkIns.filter((checkIn) =>
       selectedSessionIds.has(relationshipId(checkIn, "event_period")),
     );
     if (!inRange.length) {
@@ -937,7 +1021,7 @@ router.post("/prepare", requireToolAccess("reporting"), async (req, res) => {
     }
 
     const includedPeople = new Map(
-      collection.included.filter((resource) => resource.id).map((resource) => [resource.id, resource.attributes ?? {}]),
+      combined.included.filter((resource) => resource.id).map((resource) => [resource.id, resource.attributes ?? {}]),
     );
     const personIds = [...new Set(inRange.map((checkIn) => relationshipId(checkIn, "person")).filter(Boolean))];
     const totalProfileBatches = Math.ceil(personIds.length / PEOPLE_BATCH_SIZE);
@@ -1004,21 +1088,23 @@ router.post("/prepare", requireToolAccess("reporting"), async (req, res) => {
     // at generate time. Best-effort -- a tracker problem never blocks the
     // report itself.
     try {
-      const periodStartById = new Map<string, string>();
-      for (const period of periodCollection.data) {
-        const startsAt = text(period.attributes?.starts_at);
-        if (period.id && startsAt) periodStartById.set(period.id, startsAt);
-      }
       const sinceWeek = addDays(weekStartFor(`${endDate}T12:00:00Z`), -7 * 52);
-      const historyRows = buildWeeklyHistory(
-        collection.data,
-        periodStartById,
-        genderByPersonFromIncluded(collection.included),
-        sinceWeek,
-        new Date(),
-        firstTimeCollection.data,
-      );
-      await saveHistoryRows({ eventId, eventName, archived: false }, historyRows);
+      for (const event of loadedEvents) {
+        const periodStartById = new Map<string, string>();
+        for (const period of event.periods) {
+          const startsAt = text(period.attributes?.starts_at);
+          if (period.id && startsAt) periodStartById.set(period.id, startsAt);
+        }
+        const historyRows = buildWeeklyHistory(
+          event.checkIns,
+          periodStartById,
+          genderByPersonFromIncluded(event.included),
+          sinceWeek,
+          new Date(),
+          event.firstTime,
+        );
+        await saveHistoryRows({ eventId: event.eventId, eventName: event.eventName, archived: false }, historyRows);
+      }
     } catch (error) {
       req.log.warn({ err: error, eventId }, "Could not refresh the attendance tracker for this event");
     }
@@ -1142,7 +1228,7 @@ async function generateReportPdf(
     // engine falls back to the report's own weeks.
     const trendArgs: string[] = [];
     try {
-      const trendRows = await loadTrendRows(run!.eventId, run!.endDate, definition.trendWeeks);
+      const trendRows = await loadTrendRowsForEvents(run!.eventId.split(","), run!.endDate, definition.trendWeeks);
       if (trendRows.length >= 2) {
         const trendPath = join(workDir, "trend.json");
         await writeFile(trendPath, JSON.stringify(trendRows));

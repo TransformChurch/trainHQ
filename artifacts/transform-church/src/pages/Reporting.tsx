@@ -4,6 +4,7 @@ import { useGetMe } from "@workspace/api-client-react";
 import { BarChart3, Check, Download, Loader2, Mail, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
@@ -67,7 +68,8 @@ export default function Reporting() {
   const [events, setEvents] = useState<EventOption[]>([]);
   const [planningCenterFields, setPlanningCenterFields] = useState<AvailableField[]>([]);
   const [templates, setTemplates] = useState<ReportTemplate[]>([]);
-  const [eventId, setEventId] = useState("");
+  const [eventIds, setEventIds] = useState<string[]>([]);
+  const [eventFilter, setEventFilter] = useState("");
   const [startDate, setStartDate] = useState(defaultDate(-30));
   const [endDate, setEndDate] = useState(defaultDate(0));
   const [selectedTemplate, setSelectedTemplate] = useState("");
@@ -127,7 +129,7 @@ export default function Reporting() {
       const response = await api("/api/reports/events");
       const rows = await response.json() as EventOption[];
       setEvents(rows);
-      setEventId((current) => current || rows[0]?.id || "");
+      setEventIds((current) => (current.length ? current : rows[0] ? [rows[0].id] : []));
     } catch (error) {
       setEventsError(error instanceof Error ? error.message : "Could not load events.");
     } finally {
@@ -177,7 +179,7 @@ export default function Reporting() {
   };
 
   const prepare = async () => {
-    if (!eventId || !endDate || !selectedTemplate || (activeTemplate?.cleanupMode === "all_dates" && !startDate)) return;
+    if (!eventIds.length || !endDate || !selectedTemplate || (activeTemplate?.cleanupMode === "all_dates" && !startDate)) return;
     if (preparingRef.current) return; // already running -- see preparingRef comment above
     if (emailReportWhenReady && !reportRecipients.trim()) {
       toast({ title: "No email recipients", description: "Add an address in step 3, or turn off emailing.", variant: "destructive" });
@@ -208,7 +210,7 @@ export default function Reporting() {
         method: "POST",
         body: JSON.stringify({
           progressId,
-          eventId,
+          eventIds,
           startDate: activeTemplate?.cleanupMode === "all_dates" ? startDate : undefined,
           endDate,
           templateId: Number(selectedTemplate),
@@ -298,17 +300,38 @@ export default function Reporting() {
           </CardTitle>
         </CardHeader>
         <CardContent className={`grid gap-4 ${activeTemplate?.cleanupMode === "all_dates" ? "md:grid-cols-3" : "md:grid-cols-2"}`}>
-          <div className="space-y-2">
-            <Label htmlFor="report-event">Active event</Label>
-            <select
-              id="report-event"
-              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-              value={eventId}
-              onChange={(event) => { setEventId(event.target.value); setPrepared(null); }}
+          <div className="space-y-2 md:col-span-full">
+            <Label htmlFor="report-event-filter">
+              Active events{eventIds.length > 1 ? ` (${eventIds.length} joined into one report)` : ""}
+            </Label>
+            <Input
+              id="report-event-filter"
+              placeholder="Search events…"
+              value={eventFilter}
+              onChange={(event) => setEventFilter(event.target.value)}
               disabled={eventsLoading || !!eventsError}
-            >
-              {events.map((event) => <option key={event.id} value={event.id}>{event.name}</option>)}
-            </select>
+            />
+            <div className="max-h-48 space-y-1 overflow-y-auto rounded-md border p-2">
+              {events
+                .filter((event) => eventIds.includes(event.id) || event.name.toLowerCase().includes(eventFilter.trim().toLowerCase()))
+                .map((event) => (
+                  <label key={event.id} className="flex cursor-pointer items-center gap-2 rounded px-1 py-1 text-sm hover:bg-muted/50">
+                    <Checkbox
+                      checked={eventIds.includes(event.id)}
+                      onCheckedChange={(checked) => {
+                        setEventIds((current) => (checked === true ? [...current, event.id] : current.filter((id) => id !== event.id)));
+                        setPrepared(null);
+                      }}
+                      disabled={eventsLoading || !!eventsError}
+                    />
+                    {event.name}
+                  </label>
+                ))}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Pick one event, or several to combine them into a single report (their sessions and people are pooled; sessions
+              on the same date share a column). Works best for events that meet on the same day.
+            </p>
           </div>
           {activeTemplate?.cleanupMode === "all_dates" && (
             <div className="space-y-2">
@@ -342,7 +365,7 @@ export default function Reporting() {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-3">
-            <StepNumber number={2} active={!!eventId && !selectedTemplate} complete={!!selectedTemplate} />
+            <StepNumber number={2} active={eventIds.length > 0 && !selectedTemplate} complete={!!selectedTemplate} />
             Select template
           </CardTitle>
         </CardHeader>
@@ -426,7 +449,7 @@ export default function Reporting() {
           <div className="flex flex-wrap items-center gap-3">
             <Button
               onClick={prepare}
-              disabled={preparing || !eventId || !selectedTemplate || !!eventsError || (activeTemplate?.cleanupMode === "all_dates" && (!startDate || startDate > endDate))}
+              disabled={preparing || !eventIds.length || !selectedTemplate || !!eventsError || (activeTemplate?.cleanupMode === "all_dates" && (!startDate || startDate > endDate))}
             >
               {preparing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
               {preparing ? "Pulling and formatting data…" : "Pull and prepare data"}

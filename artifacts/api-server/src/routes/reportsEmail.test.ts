@@ -16,3 +16,13 @@ test("parseReportRecipients rejects empty, invalid, and too many addresses", () 
   const many = Array.from({ length: MAX_REPORT_EMAIL_RECIPIENTS + 1 }, (_, i) => `p${i}@example.com`);
   assert.ok("error" in parseReportRecipients(many));
 });
+
+import { parseEventIds } from "./reports";
+
+test("parseEventIds accepts eventIds (array or comma list) or the older eventId, de-duplicated", () => {
+  assert.deepEqual(parseEventIds({ eventIds: ["1", " 2 ", "1"] }), ["1", "2"]);
+  assert.deepEqual(parseEventIds({ eventIds: "3,4,,3" }), ["3", "4"]);
+  assert.deepEqual(parseEventIds({ eventId: "5" }), ["5"]);
+  assert.deepEqual(parseEventIds({}), []);
+  assert.deepEqual(parseEventIds(null), []);
+});

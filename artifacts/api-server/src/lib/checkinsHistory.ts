@@ -251,12 +251,59 @@ export async function loadTrendRows(eventId: string, endDate: string, weeks = 13
   }));
 }
 
+export type TrendRow = {
+  weekStart: string;
+  total: number;
+  male: number | null;
+  female: number | null;
+  unknown: number | null;
+  firstTimers: number | null;
+  firstTimersReturned: number | null;
+};
+
+const sumOrNull = (values: (number | null)[]): number | null => {
+  const present = values.filter((value): value is number => typeof value === "number");
+  return present.length ? present.reduce((a, b) => a + b, 0) : null;
+};
+
+// Trend rows of several events added together per week (each event's weekly
+// attendance is added, so someone at two joined events counts once per event
+// in the trend chart).
+export function sumTrendRows(perEvent: TrendRow[][]): TrendRow[] {
+  const byWeek = new Map<string, TrendRow[]>();
+  for (const rows of perEvent) {
+    for (const row of rows) byWeek.set(row.weekStart, [...(byWeek.get(row.weekStart) ?? []), row]);
+  }
+  return [...byWeek.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([weekStart, rows]) => ({
+      weekStart,
+      total: rows.reduce((sum, row) => sum + row.total, 0),
+      male: sumOrNull(rows.map((row) => row.male)),
+      female: sumOrNull(rows.map((row) => row.female)),
+      unknown: sumOrNull(rows.map((row) => row.unknown)),
+      firstTimers: sumOrNull(rows.map((row) => row.firstTimers)),
+      firstTimersReturned: sumOrNull(rows.map((row) => row.firstTimersReturned)),
+    }));
+}
+
+// Trend rows for a report built from one or more events: each event's weeks
+// (with its own week copies applied), added together per week.
+export async function loadTrendRowsForEvents(eventIds: string[], endDate: string, weeks = 13) {
+  const ids = [...new Set(eventIds.filter(Boolean))];
+  if (ids.length <= 1) return loadTrendRows(ids[0] ?? "", endDate, weeks);
+  const perEvent = [];
+  for (const id of ids) perEvent.push(await loadTrendRows(id, endDate, weeks));
+  return sumTrendRows(perEvent);
+}
+
 // ── Week substitutions ──────────────────────────────────────────────────────
 // "For event X, the week of W, use event Y's numbers" -- for a one-off event
 // (a concert, a combined night) that replaced an event's normal service.
-// Stored in the settings key/value table (no migration). Only the tracker-
-// based charts (attendance trend, first-timer trend) use them; Planning
-// Center itself is never changed.
+// Stored in the settings key/value table (no migration). Used by the tracker-
+// based charts (here) and by report prepare (routes/reports.ts), which swaps
+// in the source event's check-ins for the week; Planning Center itself is
+// never changed (its Check-Ins API is read-only).
 const WEEK_OVERRIDES_KEY = "checkins_week_overrides";
 
 export type WeekOverride = {
