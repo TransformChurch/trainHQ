@@ -14,6 +14,7 @@ import {
 import { and, eq, lt } from "drizzle-orm";
 import { requireAdmin } from "../middlewares/requireAuth";
 import { requireToolAccess } from "../middlewares/requireToolAccess";
+import { lookupReportPeople, stripContactAttributes } from "../lib/reportPeople";
 import { getValidPlanningCenterAccessToken } from "../lib/planningCenter";
 import { ObjectStorageService } from "../lib/objectStorage";
 import { sendEmail } from "../lib/email";
@@ -1024,25 +1025,39 @@ router.post("/prepare", requireToolAccess("reporting"), async (req, res) => {
       combined.included.filter((resource) => resource.id).map((resource) => [resource.id, resource.attributes ?? {}]),
     );
     const personIds = [...new Set(inRange.map((checkIn) => relationshipId(checkIn, "person")).filter(Boolean))];
-    const totalProfileBatches = Math.ceil(personIds.length / PEOPLE_BATCH_SIZE);
+    // Person details come from the weekly people sync's table; only people
+    // it can't answer for are looked up live (see lib/reportPeople.ts).
+    const peopleLookup = await lookupReportPeople(personIds, includedPeople, selectedCustomFields);
+    const liveIds = peopleLookup.live;
+    const totalProfileBatches = Math.ceil(liveIds.length / PEOPLE_BATCH_SIZE);
+    req.log.info(
+      { people: personIds.length, fromTable: peopleLookup.fromTable.size, live: liveIds.length, reason: peopleLookup.reason },
+      "Report people lookup",
+    );
     if (progressId) {
       setPreparationProgress(userId, progressId, {
         stage: "profiles",
         completedBatches: 0,
         totalBatches: totalProfileBatches,
-        message: `Loading profile batch 0 of ${totalProfileBatches}…`,
+        message: liveIds.length
+          ? `Loading ${liveIds.length} new or updated ${liveIds.length === 1 ? "profile" : "profiles"} from Planning Center…`
+          : "Loaded profiles from the saved people list",
       });
     }
-    const peopleDetails = await fetchPeopleDetails(personIds, accessToken, (completedBatches, totalBatches) => {
-      if (progressId) {
-        setPreparationProgress(userId, progressId, {
-          stage: "profiles",
-          completedBatches,
-          totalBatches,
-          message: `Loaded profile batch ${completedBatches} of ${totalBatches}`,
-        });
-      }
-    });
+    const liveDetails = liveIds.length
+      ? await fetchPeopleDetails(liveIds, accessToken, (completedBatches, totalBatches) => {
+        if (progressId) {
+          setPreparationProgress(userId, progressId, {
+            stage: "profiles",
+            completedBatches,
+            totalBatches,
+            message: `Loaded profile batch ${completedBatches} of ${totalBatches}`,
+          });
+        }
+      })
+      : new Map<string, Record<string, unknown>>();
+    const peopleDetails = new Map<string, Record<string, unknown>>(peopleLookup.fromTable);
+    for (const [id, attributes] of liveDetails) peopleDetails.set(id, stripContactAttributes(attributes));
     const serviceDates = sessions.map((session) => session.date);
     const startDate = cleanupMode === "all_dates" ? requestedStartDate : serviceDates[0];
     const records = new Map<string, Record<string, string | boolean>>();
@@ -1050,7 +1065,7 @@ router.post("/prepare", requireToolAccess("reporting"), async (req, res) => {
     for (const checkIn of inRange) {
       const attrs = checkIn.attributes ?? {};
       const personId = relationshipId(checkIn, "person");
-      const person = { ...(includedPeople.get(personId) ?? {}), ...(peopleDetails.get(personId) ?? {}) };
+      const person = stripContactAttributes({ ...(includedPeople.get(personId) ?? {}), ...(peopleDetails.get(personId) ?? {}) });
       const firstName = firstValue(attrs, "first_name") || firstValue(person, "first_name", "given_name");
       const lastName = firstValue(attrs, "last_name") || firstValue(person, "last_name", "family_name");
       const key = personId || `${firstName.toLowerCase()}|${lastName.toLowerCase()}`;
@@ -1366,4 +1381,4 @@ router.get("/runs/:runId/data.csv", requireToolAccess("reporting"), async (req, 
   }
 });
 
-export default router;
+export default router;
