@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { api, BASE } from "@/lib/toolApi";
 import { FIELD_OPTIONS, type AvailableField, type ReportFieldKey } from "@/lib/reportFields";
@@ -18,7 +19,12 @@ type CleanupMode = "month_quarter" | "all_dates";
 // month/quarter (default, so 4- and 5-week months both come out right), a
 // custom date range, or the template's last N weeks (the old behavior).
 type PeriodMode = "month" | "quarter" | "custom" | "sessions";
-type ReportEngine = "youth_quarterly" | "youth_monthly" | "kids_rutherford" | "kids_lyndhurst" | "kids_rutherford_quarterly" | "kids_lyndhurst_quarterly";
+type ReportEngine = "youth_quarterly" | "youth_monthly" | "kids_rutherford" | "kids_lyndhurst" | "kids_rutherford_quarterly" | "kids_lyndhurst_quarterly"
+  | "season_young_adults" | "season_groups";
+// Season reports (2026-10-15) can read attendance from Check-Ins events or
+// from Planning Center Groups.
+type AttendanceSource = "checkins" | "groups";
+type GroupOption = { id: string; name: string; groupType: string; archived: boolean; createdAt: string | null };
 type ReportTemplate = {
   id: number;
   name: string;
@@ -42,6 +48,12 @@ type PreparedRun = {
   flags: string;
   expiresAt: string;
   skippedDates?: string[];
+  seasonLabel?: string;
+  weekLabels?: Record<string, string>;
+  unmatchedWeekLabels?: string[];
+  startDate?: string;
+  endDate?: string;
+  notes?: string[];
 };
 type PreparationProgress = {
   stage: "loading" | "profiles" | "complete" | "failed";
@@ -80,6 +92,18 @@ export default function Reporting() {
   const [endDate, setEndDate] = useState(defaultDate(0));
   const [selectedTemplate, setSelectedTemplate] = useState("");
   const [periodMode, setPeriodMode] = useState<PeriodMode>("month");
+  const [source, setSource] = useState<AttendanceSource>("checkins");
+  const [groups, setGroups] = useState<GroupOption[]>([]);
+  const [groupIds, setGroupIds] = useState<string[]>([]);
+  const [groupFilter, setGroupFilter] = useState("");
+  const [groupsLoading, setGroupsLoading] = useState(false);
+  const [groupsError, setGroupsError] = useState("");
+  const [showArchivedGroups, setShowArchivedGroups] = useState(false);
+  // Groups are recreated every season, so by default a Groups report covers
+  // every meeting the chosen groups had (their own dates).
+  const [useGroupDates, setUseGroupDates] = useState(true);
+  const [seasonLabel, setSeasonLabel] = useState("");
+  const [weekLabelsText, setWeekLabelsText] = useState("");
   const [prepared, setPrepared] = useState<PreparedRun | null>(null);
   const [eventsLoading, setEventsLoading] = useState(true);
   const [eventsError, setEventsError] = useState("");
@@ -113,10 +137,18 @@ export default function Reporting() {
     [templates, selectedTemplate],
   );
 
-  const isAllDates = activeTemplate?.cleanupMode === "all_dates";
+  const isSeason = !!activeTemplate?.engine?.startsWith("season_");
+  // Only season templates can read Planning Center Groups.
+  const fromGroups = isSeason && source === "groups";
+  const isAllDates = activeTemplate?.cleanupMode === "all_dates" || isSeason;
   // Calendar-period modes send a start + end date; "sessions" keeps the
-  // template's last-N-sessions behavior.
-  const usesRange = isAllDates || periodMode !== "sessions";
+  // template's last-N-sessions behavior. A Groups report on the groups' own
+  // dates sends no dates at all.
+  const usesRange = fromGroups ? !useGroupDates : isAllDates || periodMode !== "sessions";
+  const hasSource = fromGroups ? groupIds.length > 0 : eventIds.length > 0;
+  const datesValid = fromGroups
+    ? useGroupDates || (!!startDate && !!endDate && startDate <= endDate)
+    : !!endDate && (!usesRange || (!!startDate && startDate <= endDate));
 
   const choosePeriod = (mode: PeriodMode) => {
     setPeriodMode(mode);
@@ -131,7 +163,7 @@ export default function Reporting() {
   // Each template defaults to the period it reports on: quarterly engines
   // the previous quarter, everything else the previous month.
   useEffect(() => {
-    if (!activeTemplate || activeTemplate.cleanupMode === "all_dates") return;
+    if (!activeTemplate || activeTemplate.cleanupMode === "all_dates" || activeTemplate.engine?.startsWith("season_")) return;
     choosePeriod(defaultPeriodKind(activeTemplate.engine));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTemplate?.id]);
@@ -183,6 +215,24 @@ export default function Reporting() {
     if (!reportRecipientsTouched.current && me?.email) setReportRecipients(me.email);
   }, [me?.email]);
 
+  const loadGroups = async () => {
+    setGroupsLoading(true);
+    setGroupsError("");
+    try {
+      const response = await api("/api/reports/groups");
+      setGroups(await response.json() as GroupOption[]);
+    } catch (error) {
+      setGroupsError(error instanceof Error ? error.message : "Could not load groups.");
+    } finally {
+      setGroupsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (fromGroups && !groups.length && !groupsLoading && !groupsError) loadGroups();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fromGroups]);
+
   const emailReportPdf = async (run: PreparedRun) => {
     const recipients = reportRecipients.split(/[\s,;]+/).map((value) => value.trim()).filter(Boolean);
     if (!recipients.length) {
@@ -209,7 +259,7 @@ export default function Reporting() {
   };
 
   const prepare = async () => {
-    if (!eventIds.length || !endDate || !selectedTemplate || (usesRange && (!startDate || startDate > endDate))) return;
+    if (!hasSource || !selectedTemplate || !datesValid) return;
     if (preparingRef.current) return; // already running -- see preparingRef comment above
     if (emailReportWhenReady && !reportRecipients.trim()) {
       toast({ title: "No email recipients", description: "Add an address in step 3, or turn off emailing.", variant: "destructive" });
@@ -240,11 +290,12 @@ export default function Reporting() {
         method: "POST",
         body: JSON.stringify({
           progressId,
-          eventIds,
+          ...(fromGroups ? { source: "groups", groupIds } : { eventIds }),
           startDate: usesRange ? startDate : undefined,
-          period: !isAllDates && periodMode !== "sessions" ? "range" : undefined,
-          endDate,
+          period: !fromGroups && !isAllDates && periodMode !== "sessions" ? "range" : undefined,
+          endDate: fromGroups && !usesRange ? undefined : endDate,
           templateId: Number(selectedTemplate),
+          ...(isSeason ? { seasonLabel: seasonLabel.trim() || undefined, weekLabels: weekLabelsText } : {}),
         }),
       });
       const result = await response.json() as PreparedRun;
@@ -331,6 +382,102 @@ export default function Reporting() {
           </CardTitle>
         </CardHeader>
         <CardContent className="grid gap-4 md:grid-cols-3">
+          {isSeason && (
+            <div className="space-y-2 md:col-span-full">
+              <Label>Attendance from</Label>
+              <div className="flex flex-wrap gap-2" role="radiogroup">
+                {([["checkins", "Check-Ins event"], ["groups", "Planning Center Groups"]] as const).map(([value, label]) => (
+                  <Button
+                    key={value}
+                    type="button"
+                    size="sm"
+                    variant={source === value ? "default" : "outline"}
+                    role="radio"
+                    aria-checked={source === value}
+                    onClick={() => { setSource(value); setPrepared(null); }}
+                  >
+                    {label}
+                  </Button>
+                ))}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Young Adults tracks attendance with Check-Ins; most other Transform groups take attendance in Planning Center Groups.
+              </p>
+            </div>
+          )}
+          {fromGroups && (
+            <div className="space-y-2 md:col-span-full">
+              <Label htmlFor="report-group-filter">
+                Groups{groupIds.length > 1 ? ` (${groupIds.length} combined into one report)` : ""}
+              </Label>
+              <div className="flex flex-wrap items-center gap-3">
+                <Input
+                  id="report-group-filter"
+                  className="max-w-sm"
+                  placeholder="Search groups or group types…"
+                  value={groupFilter}
+                  onChange={(event) => setGroupFilter(event.target.value)}
+                  disabled={groupsLoading || !!groupsError}
+                />
+                <label className="flex items-center gap-2 text-sm">
+                  <Checkbox checked={showArchivedGroups} onCheckedChange={(checked) => setShowArchivedGroups(checked === true)} />
+                  Show archived (past seasons)
+                </label>
+              </div>
+              <div className="max-h-56 space-y-1 overflow-y-auto rounded-md border p-2">
+                {groups
+                  .filter((group) => groupIds.includes(group.id) || (
+                    (showArchivedGroups || !group.archived)
+                    && `${group.name} ${group.groupType}`.toLowerCase().includes(groupFilter.trim().toLowerCase())
+                  ))
+                  .map((group) => (
+                    <label key={group.id} className="flex cursor-pointer items-center gap-2 rounded px-1 py-1 text-sm hover:bg-muted/50">
+                      <Checkbox
+                        checked={groupIds.includes(group.id)}
+                        onCheckedChange={(checked) => {
+                          setGroupIds((current) => (checked === true ? [...current, group.id] : current.filter((id) => id !== group.id)));
+                          setPrepared(null);
+                        }}
+                      />
+                      <span>{group.name}</span>
+                      <span className="text-xs text-muted-foreground">
+                        {[group.groupType, group.archived ? "archived" : ""].filter(Boolean).join(" · ")}
+                      </span>
+                    </label>
+                  ))}
+                {!groupsLoading && !groupsError && !groups.length && (
+                  <p className="px-1 py-1 text-sm text-muted-foreground">No groups found.</p>
+                )}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Pick one group, or several to combine them (for example every group from one season). People marked present in
+                any of them count; meetings on the same date share a column.
+              </p>
+              {groupsLoading && <p className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> Loading Planning Center groups…</p>}
+              {groupsError && (
+                <div className="rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950">
+                  <p className="font-medium">Groups access is required</p>
+                  <p className="mt-1">{groupsError}</p>
+                  <div className="mt-3 flex gap-2">
+                    <Button size="sm" onClick={() => window.location.assign(reconnectUrl)}>Reconnect Church Center</Button>
+                    <Button size="sm" variant="outline" onClick={loadGroups}><RefreshCw className="mr-2 h-4 w-4" />Retry</Button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+          {fromGroups && (
+            <div className="space-y-2 md:col-span-full">
+              <label className="flex items-center gap-2 text-sm">
+                <Checkbox checked={useGroupDates} onCheckedChange={(checked) => { setUseGroupDates(checked === true); setPrepared(null); }} />
+                Use the groups' own dates (every meeting they've had)
+              </label>
+              <p className="text-xs text-muted-foreground">
+                Turn this off to report on a specific date range instead.
+              </p>
+            </div>
+          )}
+          {!fromGroups && (
           <div className="space-y-2 md:col-span-full">
             <Label htmlFor="report-event-filter">
               Active events{eventIds.length > 1 ? ` (${eventIds.length} joined into one report)` : ""}
@@ -364,6 +511,7 @@ export default function Reporting() {
               on the same date share a column). Works best for events that meet on the same day.
             </p>
           </div>
+          )}
           {!isAllDates && (
             <div className="space-y-2">
               <Label htmlFor="report-period">Report period</Label>
@@ -387,21 +535,27 @@ export default function Reporting() {
               </p>
             </div>
           )}
-          {(isAllDates || periodMode === "custom") && (
+          {(fromGroups ? usesRange : isAllDates || periodMode === "custom") && (
             <div className="space-y-2">
-              <Label htmlFor="report-start">Start date</Label>
+              <Label htmlFor="report-start">{isSeason ? "Season starts" : "Start date"}</Label>
               <Input id="report-start" type="date" value={startDate} max={endDate} onChange={(event) => { setStartDate(event.target.value); setPrepared(null); }} />
             </div>
           )}
-          {(isAllDates || periodMode === "custom" || periodMode === "sessions") && (
+          {(fromGroups ? usesRange : isAllDates || periodMode === "custom" || periodMode === "sessions") && (
             <div className="space-y-2">
-              <Label htmlFor="report-end">End date</Label>
+              <Label htmlFor="report-end">{isSeason ? "Season ends" : "End date"}</Label>
               <Input id="report-end" type="date" value={endDate} onChange={(event) => { setEndDate(event.target.value); setPrepared(null); }} />
-              {isAllDates && <p className="text-xs text-muted-foreground">All Planning Center sessions in the selected date range are included.</p>}
+              {isAllDates && (
+                <p className="text-xs text-muted-foreground">
+                  {isSeason
+                    ? "Every night in the season's dates is included. A night nobody attended shows as 0 and isn't counted in attendance rates."
+                    : "All Planning Center sessions in the selected date range are included."}
+                </p>
+              )}
             </div>
           )}
-          {eventsLoading && <p className="flex items-center gap-2 text-sm text-muted-foreground md:col-span-3"><Loader2 className="h-4 w-4 animate-spin" /> Loading Planning Center events…</p>}
-          {eventsError && (
+          {!fromGroups && eventsLoading && <p className="flex items-center gap-2 text-sm text-muted-foreground md:col-span-3"><Loader2 className="h-4 w-4 animate-spin" /> Loading Planning Center events…</p>}
+          {!fromGroups && eventsError && (
             <div className="rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950 md:col-span-3">
               <p className="font-medium">Check-Ins access is required</p>
               <p className="mt-1">{eventsError}</p>
@@ -417,7 +571,7 @@ export default function Reporting() {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-3">
-            <StepNumber number={2} active={eventIds.length > 0 && !selectedTemplate} complete={!!selectedTemplate} />
+            <StepNumber number={2} active={hasSource && !selectedTemplate} complete={!!selectedTemplate} />
             Select template
           </CardTitle>
         </CardHeader>
@@ -434,6 +588,36 @@ export default function Reporting() {
               {templates.map((template) => <option key={template.id} value={template.id}>{template.name}</option>)}
             </select>
           </div>
+          {isSeason && (
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="report-season-name">Season name</Label>
+                <Input
+                  id="report-season-name"
+                  placeholder="Winter 2026 (from the first night if blank)"
+                  value={seasonLabel}
+                  maxLength={60}
+                  onChange={(event) => { setSeasonLabel(event.target.value); setPrepared(null); }}
+                />
+                <p className="text-xs text-muted-foreground">Shown on the cover and every page.</p>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="report-week-labels">Night names (optional)</Label>
+                <Textarea
+                  id="report-week-labels"
+                  rows={4}
+                  placeholder={"1/15 Relationship Panel\n1/22 Worship Night"}
+                  value={weekLabelsText}
+                  onChange={(event) => { setWeekLabelsText(event.target.value); setPrepared(null); }}
+                />
+                <p className="text-xs text-muted-foreground">
+                  One per line: a date, then the night's name. {fromGroups
+                    ? "Meeting names from Planning Center Groups are used when you leave a night out."
+                    : "A session note in Check-Ins is used when you leave a night out."}
+                </p>
+              </div>
+            </div>
+          )}
           {selectedTemplate && (
             <div className="rounded-lg border bg-muted/30 p-3 text-sm">
               <span className="font-medium">CSV column order: </span>
@@ -442,9 +626,11 @@ export default function Reporting() {
                 .filter(Boolean)
                 .join(" → ")}
               <span className="mt-1 block text-muted-foreground">
-                {usesRange
-                  ? "Attendance: All sessions in the selected date range"
-                  : `Weeks: ${activeTemplate?.sessionCount ?? 5}`}
+                {fromGroups && !usesRange
+                  ? "Attendance: every meeting the selected groups have had"
+                  : usesRange
+                    ? "Attendance: All sessions in the selected date range"
+                    : `Weeks: ${activeTemplate?.sessionCount ?? 5}`}
               </span>
             </div>
           )}
@@ -501,7 +687,7 @@ export default function Reporting() {
           <div className="flex flex-wrap items-center gap-3">
             <Button
               onClick={prepare}
-              disabled={preparing || !eventIds.length || !selectedTemplate || !!eventsError || (usesRange && (!startDate || startDate > endDate))}
+              disabled={preparing || !hasSource || !selectedTemplate || (fromGroups ? !!groupsError : !!eventsError) || !datesValid}
             >
               {preparing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
               {preparing ? "Pulling and formatting data…" : "Pull and prepare data"}
@@ -515,12 +701,31 @@ export default function Reporting() {
           {prepared && (
             <div className="space-y-3 rounded-lg border bg-muted/30 p-4">
               <div className="grid gap-3 text-sm sm:grid-cols-4">
-                <div><span className="block text-muted-foreground">Event</span><strong>{prepared.eventName}</strong></div>
+                <div><span className="block text-muted-foreground">{fromGroups ? "Groups" : "Event"}</span><strong>{prepared.eventName}</strong></div>
                 <div><span className="block text-muted-foreground">People</span><strong>{prepared.peopleCount}</strong></div>
-                <div><span className="block text-muted-foreground">Check-ins</span><strong>{prepared.rawRows}</strong></div>
+                <div><span className="block text-muted-foreground">{fromGroups ? "Marked present" : "Check-ins"}</span><strong>{prepared.rawRows}</strong></div>
                 <div><span className="block text-muted-foreground">Review flags</span><strong>{prepared.reviewCount}</strong></div>
               </div>
               <p className="text-xs text-muted-foreground">Fields: {prepared.pullFieldLabels.join(" → ")}</p>
+              {prepared.seasonLabel && (
+                <p className="text-xs text-muted-foreground">
+                  Season: {prepared.seasonLabel}
+                  {prepared.startDate && prepared.endDate ? ` (${formatRange(prepared.startDate, prepared.endDate)})` : ""}
+                  {prepared.weekLabels && Object.keys(prepared.weekLabels).length > 0 && (
+                    <span className="block">
+                      Night names: {Object.entries(prepared.weekLabels).sort(([a], [b]) => a.localeCompare(b)).map(([date, name]) => `${date} ${name}`).join(" · ")}
+                    </span>
+                  )}
+                  {!!prepared.unmatchedWeekLabels?.length && (
+                    <span className="block text-amber-700">
+                      These night names didn't match a night in the report: {prepared.unmatchedWeekLabels.join(" · ")}
+                    </span>
+                  )}
+                </p>
+              )}
+              {!!prepared.notes?.length && (
+                <p className="text-xs text-amber-700">{prepared.notes.join(" ")}</p>
+              )}
               <p className="text-xs text-muted-foreground">
                 Weeks ({prepared.sessionCount}): {prepared.serviceDates.join(", ")}
                 {!!prepared.skippedDates?.length && (

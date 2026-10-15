@@ -16,7 +16,8 @@ import { FIELD_OPTIONS, type AvailableField, type ReportFieldKey } from "@/lib/r
 // report templates + scripts, Weekly Pulse, and the Attendance history pull.
 
 type CleanupMode = "month_quarter" | "all_dates";
-type ReportEngine = "youth_quarterly" | "youth_monthly" | "kids_rutherford" | "kids_lyndhurst" | "kids_rutherford_quarterly" | "kids_lyndhurst_quarterly";
+type ReportEngine = "youth_quarterly" | "youth_monthly" | "kids_rutherford" | "kids_lyndhurst" | "kids_rutherford_quarterly" | "kids_lyndhurst_quarterly"
+  | "season_young_adults" | "season_groups";
 type ReportTemplate = {
   id: number;
   name: string;
@@ -35,6 +36,9 @@ const REPORT_ENGINE_OPTIONS: Array<{ value: ReportEngine; label: string }> = [
   { value: "kids_lyndhurst", label: "Kids Lyndhurst Report" },
   { value: "kids_rutherford_quarterly", label: "Kids Rutherford Quarterly Report" },
   { value: "kids_lyndhurst_quarterly", label: "Kids Lyndhurst Quarterly Report" },
+  // Season reports (date range; Check-Ins or Planning Center Groups).
+  { value: "season_young_adults", label: "Young Adults Season Report (ages 18-22 / 23-29)" },
+  { value: "season_groups", label: "Transform Groups Season Report (ages 18-25 / 26-35 / 36-45 / 46-59 / 60+)" },
 ];
 const reportEngineLabel = (engine: ReportEngine | null) =>
   REPORT_ENGINE_OPTIONS.find((option) => option.value === engine)?.label ?? null;

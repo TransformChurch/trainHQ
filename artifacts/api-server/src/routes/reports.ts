@@ -36,6 +36,17 @@ import {
   reportFirstTimers,
   type EventData,
 } from "../lib/reportEvents";
+import {
+  buildGroupSeason,
+  defaultSeasonLabel,
+  groupFirstTimers,
+  meetingsInSeason,
+  parseRunMeta,
+  parseWeekLabels,
+  type GroupMeeting,
+  type GroupMembership,
+  type SeasonRunMeta,
+} from "../lib/reportGroups";
 
 const router: IRouter = Router();
 const storage = new ObjectStorageService();
@@ -55,7 +66,8 @@ type ScriptSlot = CleanupMode;
 // The built-in, pure-Python (no Excel/LibreOffice) report renderers.
 // A template row with one of these set skips the generic
 // upload-your-own-xlsx-workbook pipeline entirely -- see REPORT_ENGINES.
-type ReportEngine = "youth_quarterly" | "youth_monthly" | "kids_rutherford" | "kids_lyndhurst" | "kids_rutherford_quarterly" | "kids_lyndhurst_quarterly";
+type ReportEngine = "youth_quarterly" | "youth_monthly" | "kids_rutherford" | "kids_lyndhurst" | "kids_rutherford_quarterly" | "kids_lyndhurst_quarterly"
+  | "season_young_adults" | "season_groups";
 type PreparationProgress = {
   stage: "loading" | "profiles" | "complete" | "failed";
   completedBatches: number;
@@ -122,7 +134,12 @@ const REPORT_FIELDS = [
   { key: "baptized", label: "Baptized?" },
   { key: "last_served", label: "Last served" },
 ] as const;
-const DEFAULT_PULL_FIELDS = REPORT_FIELDS.map((field) => field.key);
+const DEFAULT_PULL_FIELDS: StandardFieldKey[] = REPORT_FIELDS.map((field) => field.key);
+// Season reports (adults): no grade or contact columns.
+const SEASON_PULL_FIELDS: StandardFieldKey[] = [
+  "planning_center_id", "first_name", "last_name", "birthdate", "gender",
+  "first_timers", "completed_thrive", "baptized", "last_served",
+];
 type StandardFieldKey = typeof REPORT_FIELDS[number]["key"];
 type ReportFieldKey = StandardFieldKey | `custom:${string}`;
 type ReportFieldDefinition = { key: ReportFieldKey; label: string };
@@ -507,13 +524,18 @@ async function pythonScript(name: ScriptSlot): Promise<string> {
 // trendWeeks: how many weeks of the saved attendance tracker the report's
 // trend charts show -- 13 (a quarter) for monthly reports, 26 (this quarter
 // and the one before) for quarterly ones, whose own weeks already cover 13.
-const REPORT_ENGINES: Array<{ engine: ReportEngine; label: string; script: string; args: string[]; trendWeeks: number }> = [
+// Season reports (2026-10-15) chart only their own nights (trendWeeks 0),
+// take a date range, can come from Planning Center Groups as well as
+// Check-Ins, and get the run's meta (season name, night names).
+const REPORT_ENGINES: Array<{ engine: ReportEngine; label: string; script: string; args: string[]; trendWeeks: number; season?: true }> = [
   { engine: "youth_quarterly", label: "Youth Quarterly Report", script: "report_youth.py", args: ["--period", "quarterly"], trendWeeks: 26 },
   { engine: "youth_monthly", label: "Youth Monthly Report", script: "report_youth.py", args: ["--period", "monthly"], trendWeeks: 13 },
   { engine: "kids_rutherford", label: "Kids Rutherford Report", script: "report_kids.py", args: ["--campus", "rutherford"], trendWeeks: 13 },
   { engine: "kids_lyndhurst", label: "Kids Lyndhurst Report", script: "report_kids.py", args: ["--campus", "lyndhurst"], trendWeeks: 13 },
   { engine: "kids_rutherford_quarterly", label: "Kids Rutherford Quarterly Report", script: "report_kids.py", args: ["--campus", "rutherford", "--period", "quarterly"], trendWeeks: 26 },
   { engine: "kids_lyndhurst_quarterly", label: "Kids Lyndhurst Quarterly Report", script: "report_kids.py", args: ["--campus", "lyndhurst", "--period", "quarterly"], trendWeeks: 26 },
+  { engine: "season_young_adults", label: "Young Adults Season Report", script: "report_season.py", args: ["--audience", "young_adults"], trendWeeks: 0, season: true },
+  { engine: "season_groups", label: "Transform Groups Season Report", script: "report_season.py", args: ["--audience", "groups"], trendWeeks: 0, season: true },
 ];
 
 function isReportEngine(value: unknown): value is ReportEngine {
@@ -633,6 +655,14 @@ export type PreparedReport = {
   reviewCount: number;
   flags: string;
   expiresAt: string;
+  // Season reports
+  seasonLabel?: string;
+  weekLabels?: Record<string, string>;
+  unmatchedWeekLabels?: string[];
+  // Groups source: the dates actually used (the groups' own when none given)
+  startDate?: string;
+  endDate?: string;
+  notes?: string[];
 };
 
 function reportError(status: number, message: string): Error & { status: number } {
@@ -841,14 +871,17 @@ router.post("/templates", requireAdmin, async (req, res) => {
       res.status(400).json({ error: "A valid report engine is required." });
       return;
     }
+    // Season templates always report a date range (All Dates cleanup: the
+    // month/quarter one would drop nights outside one month or quarter).
+    const season = !!reportEngineDefinition(engineRaw).season;
     const rows = await db.insert(reportTemplatesTable).values({
       name,
       originalFileName: null,
       objectPath: null,
       engine: engineRaw,
-      pullFields: JSON.stringify(DEFAULT_PULL_FIELDS),
+      pullFields: JSON.stringify(season ? SEASON_PULL_FIELDS : DEFAULT_PULL_FIELDS),
       sessionCount: DEFAULT_SESSION_COUNT,
-      cleanupMode: "month_quarter",
+      cleanupMode: season ? "all_dates" : "month_quarter",
       uploadedByUserId: res.locals.dbUser.id,
     }).returning();
     res.status(201).json({
@@ -929,12 +962,278 @@ router.get("/prepare-progress/:progressId", requireToolAccess("reporting"), (req
   res.json(response);
 });
 
+// A Check-Ins / Groups person's base CSV row (before attendance dates).
+function baseRecord(
+  personId: string,
+  firstName: string,
+  lastName: string,
+  person: Record<string, unknown>,
+  selectedCustomFields: ReportFieldKey[],
+  customLabels: Map<ReportFieldKey, string>,
+): Record<string, string | boolean> {
+  const record: Record<string, string | boolean> = {
+    "Planning Center ID": personId,
+    "First Name": firstName,
+    "Last Name": lastName,
+    "Birthdate": birthdateFrom(person),
+    "Email": firstValue(person, "email", "primary_email"),
+    "Phone Number (home)": firstValue(person, "phone_number_home", "home_phone_number", "phone_home"),
+    "Phone Number (mobile)": firstValue(person, "phone_number_mobile", "mobile_phone_number", "primary_phone_number", "phone_number"),
+    "Primary Contact Name": nestedValue(person, "primary_contact_name", "primary contact name"),
+    "Primary Contact Email": nestedValue(person, "primary_contact_email", "primary contact email"),
+    "Gender": firstValue(person, "gender"),
+    "Grade": normalizeGrade(person.grade),
+    "First Timers": "",
+    "Completed Thrive": nestedValue(person, "completed_thrive", "completed thrive"),
+    "Baptized?": nestedValue(person, "baptized", "baptized?"),
+    "Last served": nestedValue(person, "last_served", "last served"),
+  };
+  for (const customField of selectedCustomFields) {
+    record[fieldLabel(customField, customLabels)] = firstReportValue(person, customField);
+  }
+  return record;
+}
+
+// Person details for a report: from the weekly people sync's table, with
+// only people it can't answer for looked up live (see lib/reportPeople.ts).
+async function loadReportPeopleDetails(
+  personIds: string[],
+  includedPeople: Map<string, Record<string, unknown>>,
+  selectedCustomFields: ReportFieldKey[],
+  accessToken: string,
+  userId: string,
+  progressId: string,
+  log: ReportLog,
+): Promise<{ peopleDetails: Map<string, Record<string, unknown>>; totalProfileBatches: number }> {
+  const peopleLookup = await lookupReportPeople(personIds, includedPeople, selectedCustomFields);
+  const liveIds = peopleLookup.live;
+  const totalProfileBatches = Math.ceil(liveIds.length / PEOPLE_BATCH_SIZE);
+  log.info(
+    { people: personIds.length, fromTable: peopleLookup.fromTable.size, live: liveIds.length, reason: peopleLookup.reason },
+    "Report people lookup",
+  );
+  if (progressId) {
+    setPreparationProgress(userId, progressId, {
+      stage: "profiles",
+      completedBatches: 0,
+      totalBatches: totalProfileBatches,
+      message: liveIds.length
+        ? `Loading ${liveIds.length} new or updated ${liveIds.length === 1 ? "profile" : "profiles"} from Planning Center…`
+        : "Loaded profiles from the saved people list",
+    });
+  }
+  const liveDetails = liveIds.length
+    ? await fetchPeopleDetails(liveIds, accessToken, (completedBatches, totalBatches) => {
+      if (progressId) {
+        setPreparationProgress(userId, progressId, {
+          stage: "profiles",
+          completedBatches,
+          totalBatches,
+          message: `Loaded profile batch ${completedBatches} of ${totalBatches}`,
+        });
+      }
+    })
+    : new Map<string, Record<string, unknown>>();
+  const peopleDetails = new Map<string, Record<string, unknown>>(peopleLookup.fromTable);
+  for (const [id, attributes] of liveDetails) peopleDetails.set(id, stripContactAttributes(attributes));
+  return { peopleDetails, totalProfileBatches };
+}
+
+// Writes the raw CSV, runs the template's cleanup script, saves the cleaned
+// CSV and the run row. Shared by the Check-Ins and Groups paths.
+async function savePreparedRun(options: {
+  records: Map<string, Record<string, string | boolean>>;
+  serviceDates: string[];
+  selectedCustomFields: ReportFieldKey[];
+  customLabels: Map<ReportFieldKey, string>;
+  pullFields: ReportFieldKey[];
+  cleanupMode: CleanupMode;
+  rowCount: number;
+  eventId: string;
+  eventName: string;
+  startDate: string;
+  endDate: string;
+  templateId: number;
+  userId: string;
+  meta: SeasonRunMeta | null;
+}): Promise<{ runId: string; expiresAt: Date; reviewCount: number; flags: string }> {
+  // A raw "Grade" column makes the cleanup script flag every adult as
+  // "blank grade", so it's left out when the template doesn't report grades.
+  const standardHeaders = REPORT_FIELDS
+    .filter((field) => field.key !== "grade" || options.pullFields.includes("grade"))
+    .map((field) => field.label);
+  const headers = [
+    ...standardHeaders,
+    ...options.selectedCustomFields.map((field) => fieldLabel(field, options.customLabels)),
+    ...options.serviceDates,
+  ];
+  const rawCsv = [
+    headers.map(csv).join(","),
+    ...[...options.records.values()].map((record) => headers.map((header) =>
+      options.serviceDates.includes(header) ? (record[header] ? "TRUE" : "FALSE") : csv(record[header]),
+    ).join(",")),
+  ].join("\n");
+
+  const workDir = await mkdtemp(join(tmpdir(), "tc-report-"));
+  try {
+    const rawPath = join(workDir, "raw.csv");
+    const cleanedPath = join(workDir, "cleaned.csv");
+    const flagsPath = join(workDir, "flags.txt");
+    await writeFile(rawPath, rawCsv, "utf8");
+    const output = await runPython(
+      [await pythonScript(options.cleanupMode), rawPath, cleanedPath, "--flags-out", flagsPath],
+      cleanupScriptTimeoutMs(options.rowCount),
+    );
+    const cleaned = selectCleanedColumns(await readFile(cleanedPath, "utf8"), options.pullFields, options.customLabels);
+    const flags = await readFile(flagsPath, "utf8").catch(() => "");
+    const cleanedObjectPath = await storage.saveObjectEntityBuffer(Buffer.from(cleaned, "utf8"), "text/csv", "reports");
+    const runId = randomUUID();
+    const expiresAt = new Date(Date.now() + REPORT_TTL_MS);
+    await db.insert(reportRunsTable).values({
+      id: runId,
+      eventId: options.eventId,
+      eventName: options.eventName,
+      startDate: options.startDate,
+      endDate: options.endDate,
+      templateId: options.templateId,
+      cleanedObjectPath,
+      meta: options.meta ? JSON.stringify(options.meta) : null,
+      requestedByUserId: options.userId,
+      expiresAt,
+    });
+    const reviewCount = Number(output.match(/ENTRIES NEEDING YOUR REVIEW:\s*(\d+)/)?.[1] ?? 0);
+    return { runId, expiresAt, reviewCount, flags };
+  } finally {
+    await rm(workDir, { recursive: true, force: true }).catch(() => undefined);
+  }
+}
+
+// ── Planning Center Groups (season reports) ─────────────────────────────────
+const GROUPS_BASE = "https://api.planningcenteronline.com/groups/v2";
+export const MAX_REPORT_GROUPS = 30;
+const GROUP_MEMBERSHIP_BATCH_SIZE = 10;
+const GROUP_MEMBERSHIP_BATCH_DELAY_MS = 2_000;
+
+// Groups ids a prepare request asks for (`groupIds`: array or comma list).
+export function parseGroupIds(body: unknown): string[] {
+  const raw = (body as { groupIds?: unknown } | null | undefined)?.groupIds;
+  const list = Array.isArray(raw) ? raw : typeof raw === "string" ? raw.split(",") : [];
+  return [...new Set(list.map((value) => text(value)).filter((value) => /^\d{1,20}$/.test(value)))];
+}
+
+function groupsAccessError(error: unknown): unknown {
+  const typed = error as Error & { status?: number };
+  if (typed.status === 403) {
+    return reportError(403, "Planning Center refused Groups access. Click \"Reconnect Church Center\" and approve Groups access, or check that your account can see these groups.");
+  }
+  return error;
+}
+
+// One group's meetings, newest first, stopping once they're older than
+// `since` (blank = all of them).
+async function loadGroupMeetings(groupId: string, since: string, accessToken: string): Promise<GroupMeeting[]> {
+  const meetings: GroupMeeting[] = [];
+  let url: string | null = `${GROUPS_BASE}/groups/${encodeURIComponent(groupId)}/events?order=-starts_at&per_page=100`;
+  const visited = new Set<string>();
+  while (url && !visited.has(url)) {
+    visited.add(url);
+    const page = await planningCenterRequest(url, accessToken);
+    const rows: JsonApiResource[] = Array.isArray(page.data) ? page.data : [];
+    let reachedOlder = false;
+    for (const row of rows) {
+      const startsAt = text(row.attributes?.starts_at);
+      if (!startsAt) continue;
+      // A day of slack: `since` is a church-local date, starts_at is UTC.
+      if (since && startsAt.slice(0, 10) < addDays(since, -1)) { reachedOlder = true; continue; }
+      meetings.push({
+        id: row.id,
+        groupId,
+        startsAt,
+        name: firstValue(row.attributes ?? {}, "name"),
+        canceled: row.attributes?.canceled === true,
+      });
+    }
+    if (reachedOlder || meetings.length > 5_000) break;
+    url = typeof page.links?.next === "string" && page.links.next ? page.links.next : null;
+  }
+  return meetings;
+}
+
+// Every Groups membership for each person (any group, any time), for the
+// first-timer rule in lib/reportGroups.ts. People whose memberships can't be
+// read are left out (never counted as first-timers).
+async function loadPeopleMemberships(
+  personIds: string[],
+  accessToken: string,
+  log: ReportLog,
+): Promise<Map<string, GroupMembership[]>> {
+  const result = new Map<string, GroupMembership[]>();
+  let failed = 0;
+  for (let index = 0; index < personIds.length; index += GROUP_MEMBERSHIP_BATCH_SIZE) {
+    const batch = personIds.slice(index, index + GROUP_MEMBERSHIP_BATCH_SIZE);
+    await Promise.all(batch.map(async (personId) => {
+      try {
+        const collection = await fetchCollection(
+          `${GROUPS_BASE}/people/${encodeURIComponent(personId)}/memberships?per_page=100`,
+          accessToken,
+        );
+        result.set(personId, collection.data.map((membership) => ({
+          groupId: relationshipId(membership, "group"),
+          joinedAt: text(membership.attributes?.joined_at),
+        })));
+      } catch {
+        failed += 1;
+      }
+    }));
+    if (index + GROUP_MEMBERSHIP_BATCH_SIZE < personIds.length) {
+      await new Promise((resolve) => setTimeout(resolve, GROUP_MEMBERSHIP_BATCH_DELAY_MS));
+    }
+  }
+  if (failed) log.warn({ failed, people: personIds.length }, "Some Groups memberships could not be read; those people aren't counted as first-timers");
+  return result;
+}
+
+router.get("/groups", requireToolAccess("reporting"), async (req, res) => {
+  try {
+    const accessToken = await getValidPlanningCenterAccessToken(res.locals.dbUser.id);
+    const [current, archived] = await Promise.all([
+      fetchCollection(`${GROUPS_BASE}/groups?include=group_type&per_page=100`, accessToken),
+      fetchCollection(`${GROUPS_BASE}/groups?filter=archived&include=group_type&per_page=100`, accessToken)
+        .catch(() => ({ data: [] as JsonApiResource[], included: [] as JsonApiResource[] })),
+    ]);
+    const typeNames = new Map(
+      [...current.included, ...archived.included]
+        .filter((resource) => resource.type === "GroupType")
+        .map((resource) => [resource.id, firstValue(resource.attributes ?? {}, "name")]),
+    );
+    const seen = new Set<string>();
+    const groups = [];
+    for (const group of [...current.data, ...archived.data]) {
+      if (!group.id || seen.has(group.id)) continue;
+      seen.add(group.id);
+      const attributes = group.attributes ?? {};
+      groups.push({
+        id: group.id,
+        name: firstValue(attributes, "name") || `Group ${group.id}`,
+        groupType: typeNames.get(relationshipId(group, "group_type")) ?? "",
+        archived: !!text(attributes.archived_at),
+        createdAt: text(attributes.created_at) || null,
+        archivedAt: text(attributes.archived_at) || null,
+      });
+    }
+    // Newest first: groups are recreated every season.
+    groups.sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? "") || a.name.localeCompare(b.name));
+    res.json(groups);
+  } catch (error) {
+    sendError(req, res, groupsAccessError(error), "Failed to load Planning Center groups");
+  }
+});
+
 export async function prepareReportRun(
   body: Record<string, unknown>,
   userId: string,
   log: ReportLog,
 ): Promise<PreparedReport> {
-  let workDir = "";
   const progressId = text(body?.progressId);
   if (activePrepareRuns.has(userId)) throw reportError(409, PREPARE_IN_PROGRESS_MESSAGE);
   activePrepareRuns.add(userId);
@@ -949,279 +1248,24 @@ export async function prepareReportRun(
         message: "Loading attendance data…",
       });
     }
-    const eventIdList = parseEventIds(body);
-    const eventId = eventIdList.join(",");
+    const source = text(body?.source) === "groups" ? "groups" : "checkins";
     const requestedStartDate = dateOnly(body?.startDate);
     const endDate = dateOnly(body?.endDate);
     const templateId = Number(body?.templateId);
-    if (!eventId || !endDate || !Number.isInteger(templateId)) {
-      throw reportError(400, "Select an event, template, and valid end date.");
-    }
-    if (eventIdList.length > MAX_JOINED_EVENTS) {
-      throw reportError(400, `Join at most ${MAX_JOINED_EVENTS} events in one report.`);
-    }
-
-    const templates = await db.select().from(reportTemplatesTable)
-      .where(eq(reportTemplatesTable.id, templateId))
-      .limit(1);
-    const template = templates[0];
-    if (!template) {
-      throw reportError(404, "Report template not found.");
-    }
-    const pullFields = normalizePullFields(template.pullFields);
-    const sessionCount = normalizeSessionCount(template.sessionCount);
-    const cleanupMode = normalizeCleanupMode(template.cleanupMode);
-    // "range": every session from startDate through endDate (a calendar
-    // month/quarter/week, so 4- and 5-week months both come out whole)
-    // instead of the template's last N sessions. All Dates templates are
-    // always a range. Added 2026-10-14 for previous-month/quarter defaults
-    // and scheduled reports.
-    const useRange = cleanupMode === "all_dates" || text(body?.period) === "range";
-    if (useRange && cleanupMode !== "all_dates" && (!requestedStartDate || requestedStartDate > endDate)) {
-      throw reportError(400, "Select a valid start and end date for this report period.");
-    }
-    if (cleanupMode === "all_dates" && (!requestedStartDate || requestedStartDate > endDate)) {
-      throw reportError(400, "Select a valid start and end date for an All Dates template.");
-    }
-    const accessToken = await getValidPlanningCenterAccessToken(userId);
-    // Audit finding 1.12 (Medium): this always fetched the full, paginated
-    // list of Planning Center custom field definitions, even when the
-    // report template doesn't pull any custom fields -- selectedCustomFields
-    // is computed from the same pullFields list and was already knowable
-    // before paying for that fetch. customLabels stays an empty Map in that
-    // case, which is exactly what it would have evaluated to anyway (no
-    // custom field key in pullFields to look up a label for).
-    const selectedCustomFields = pullFields.filter(isCustomFieldKey);
-    const customFieldDefinitions = selectedCustomFields.length
-      ? await fetchReportFieldDefinitions(accessToken)
-      : [];
-    const customLabels = new Map(customFieldDefinitions.map((field) => [field.key, field.label]));
-    const loadedEvents: EventData[] = [];
-    for (const id of eventIdList) loadedEvents.push(await loadEventData(id, accessToken));
-    const sessionOptions = { endDate, cleanupMode: useRange ? "all_dates" as const : cleanupMode, startDate: requestedStartDate, sessionCount };
-
-    // Week copies ("use event Y's check-ins for the week of W"): swap in the
-    // source event's check-ins for any copied week that could be in this
-    // report. Planning Center is only read, never written.
-    const rawSessions = pickSessions(loadedEvents.flatMap((event) => event.periods), sessionOptions);
-    const copyWindowStart = useRange
-      ? weekStartFor(`${requestedStartDate}T12:00:00Z`)
-      : rawSessions.length >= sessionCount
-        ? addDays(weekStartFor(`${rawSessions[0].date}T12:00:00Z`), -7)
-        : "0000-00-00";
-    const copyWindowEnd = weekStartFor(`${endDate}T12:00:00Z`);
-    const weekCopies = (await readWeekOverrides())
-      .filter((copy) => copy.weekStart >= copyWindowStart && copy.weekStart <= copyWindowEnd);
-    const sourceWeekCache = new Map<string, EventData>();
-    const preparedEvents: EventData[] = [];
-    for (const event of loadedEvents) {
-      let data = event;
-      for (const copy of weekCopies.filter((item) => item.eventId === event.eventId)) {
-        const cacheKey = `${copy.sourceEventId}:${copy.weekStart}`;
-        let source = sourceWeekCache.get(cacheKey);
-        if (!source) {
-          source = await loadSourceWeek(copy.sourceEventId, copy.sourceEventName, copy.weekStart, accessToken);
-          sourceWeekCache.set(cacheKey, source);
-        }
-        data = applyWeekCopy(data, copy.weekStart, source);
+    if (source === "groups") {
+      const groupIdList = parseGroupIds(body);
+      if (!groupIdList.length || !Number.isInteger(templateId)) {
+        throw reportError(400, "Select at least one group and a template.");
       }
-      preparedEvents.push(data);
-    }
-    const combined = mergeEventData(preparedEvents);
-    const eventName = combined.eventName;
-
-    // Weeks with a Planning Center session but no attendee check-ins (a
-    // break week) stay in the report as a 0 week -- shown as "0 (week off)"
-    // in the weekly bar chart -- but the cleanup scripts and engines leave
-    // them out of attendance rates (Andrew, 2026-10-14). See pickHeldSessions.
-    const { sessions, skippedDates } = pickHeldSessions(combined.periods, combined.checkIns, sessionOptions);
-    if (skippedDates.length) log.info({ skippedDates }, "Report weeks with no check-ins (not counted in rates)");
-    if (!sessions.length) {
-      throw reportError(404, skippedDates.length
-        ? `The Planning Center sessions in this period had no check-ins (${skippedDates.join(", ")}).`
-        : useRange
-          ? "No Planning Center sessions were found in that date range."
-          : "No Planning Center sessions were found on or before that end date.");
-    }
-    const selectedSessionIds = new Set(sessions.flatMap((session) => session.periodIds));
-    const sessionDateById = new Map(sessions.flatMap((session) => session.periodIds.map((id) => [id, session.date] as const)));
-    const firstTimeIds = new Set(combined.firstTime.map((checkIn) => checkIn.id));
-    const inRange = combined.checkIns.filter((checkIn) =>
-      selectedSessionIds.has(relationshipId(checkIn, "event_period")),
-    );
-    if (!inRange.length) {
-      throw reportError(404, "No attendee check-ins were found in the selected sessions.");
-    }
-    const reportFirstTimerIds = reportFirstTimers(combined, inRange);
-
-    const includedPeople = new Map(
-      combined.included.filter((resource) => resource.id).map((resource) => [resource.id, resource.attributes ?? {}]),
-    );
-    const personIds = [...new Set(inRange.map((checkIn) => relationshipId(checkIn, "person")).filter(Boolean))];
-    // Person details come from the weekly people sync's table; only people
-    // it can't answer for are looked up live (see lib/reportPeople.ts).
-    const peopleLookup = await lookupReportPeople(personIds, includedPeople, selectedCustomFields);
-    const liveIds = peopleLookup.live;
-    const totalProfileBatches = Math.ceil(liveIds.length / PEOPLE_BATCH_SIZE);
-    log.info(
-      { people: personIds.length, fromTable: peopleLookup.fromTable.size, live: liveIds.length, reason: peopleLookup.reason },
-      "Report people lookup",
-    );
-    if (progressId) {
-      setPreparationProgress(userId, progressId, {
-        stage: "profiles",
-        completedBatches: 0,
-        totalBatches: totalProfileBatches,
-        message: liveIds.length
-          ? `Loading ${liveIds.length} new or updated ${liveIds.length === 1 ? "profile" : "profiles"} from Planning Center…`
-          : "Loaded profiles from the saved people list",
-      });
-    }
-    const liveDetails = liveIds.length
-      ? await fetchPeopleDetails(liveIds, accessToken, (completedBatches, totalBatches) => {
-        if (progressId) {
-          setPreparationProgress(userId, progressId, {
-            stage: "profiles",
-            completedBatches,
-            totalBatches,
-            message: `Loaded profile batch ${completedBatches} of ${totalBatches}`,
-          });
-        }
-      })
-      : new Map<string, Record<string, unknown>>();
-    const peopleDetails = new Map<string, Record<string, unknown>>(peopleLookup.fromTable);
-    for (const [id, attributes] of liveDetails) peopleDetails.set(id, stripContactAttributes(attributes));
-    const serviceDates = sessions.map((session) => session.date);
-    const startDate = useRange ? requestedStartDate : serviceDates[0];
-    const records = new Map<string, Record<string, string | boolean>>();
-
-    for (const checkIn of inRange) {
-      const attrs = checkIn.attributes ?? {};
-      const personId = relationshipId(checkIn, "person");
-      const person = stripContactAttributes({ ...(includedPeople.get(personId) ?? {}), ...(peopleDetails.get(personId) ?? {}) });
-      const firstName = firstValue(attrs, "first_name") || firstValue(person, "first_name", "given_name");
-      const lastName = firstValue(attrs, "last_name") || firstValue(person, "last_name", "family_name");
-      const key = personId || `${firstName.toLowerCase()}|${lastName.toLowerCase()}`;
-      const current = records.get(key) ?? {
-        "Planning Center ID": personId,
-        "First Name": firstName,
-        "Last Name": lastName,
-        "Birthdate": birthdateFrom(person),
-        "Email": firstValue(person, "email", "primary_email"),
-        "Phone Number (home)": firstValue(person, "phone_number_home", "home_phone_number", "phone_home"),
-        "Phone Number (mobile)": firstValue(person, "phone_number_mobile", "mobile_phone_number", "primary_phone_number", "phone_number"),
-        "Primary Contact Name": nestedValue(person, "primary_contact_name", "primary contact name"),
-        "Primary Contact Email": nestedValue(person, "primary_contact_email", "primary contact email"),
-        "Gender": firstValue(person, "gender"),
-        "Grade": normalizeGrade(person.grade),
-        "First Timers": "",
-        "Completed Thrive": nestedValue(person, "completed_thrive", "completed thrive"),
-        "Baptized?": nestedValue(person, "baptized", "baptized?"),
-        "Last served": nestedValue(person, "last_served", "last served"),
-      };
-      for (const customField of selectedCustomFields) {
-        current[fieldLabel(customField, customLabels)] = firstReportValue(person, customField);
+      if (groupIdList.length > MAX_REPORT_GROUPS) {
+        throw reportError(400, `Combine at most ${MAX_REPORT_GROUPS} groups in one report.`);
       }
-      // Per person, judged across all of the report's events (see
-      // reportFirstTimers); the raw per-check-in flag only for the rare
-      // check-in with no person attached.
-      const firstTimer = personId
-        ? reportFirstTimerIds.has(personId)
-        : firstTimeIds.has(checkIn.id) || attrs.first_time === true || attrs.first_time_in_event === true;
-      if (firstTimer) current["First Timers"] = "First-timer";
-      const sessionDate = sessionDateById.get(relationshipId(checkIn, "event_period"));
-      if (sessionDate) current[sessionDate] = true;
-      records.set(key, current);
-    }
-
-    // Keep the attendance tracker (checkins_weekly_history) current for this
-    // event: the check-ins fetched above already cover its full history, so
-    // the last year of weeks is recomputed and saved here at no extra
-    // Planning Center cost. The report's trend chart reads these rows back
-    // at generate time. Best-effort -- a tracker problem never blocks the
-    // report itself.
-    try {
-      const sinceWeek = addDays(weekStartFor(`${endDate}T12:00:00Z`), -7 * 52);
-      for (const event of loadedEvents) {
-        const periodStartById = new Map<string, string>();
-        for (const period of event.periods) {
-          const startsAt = text(period.attributes?.starts_at);
-          if (period.id && startsAt) periodStartById.set(period.id, startsAt);
-        }
-        const historyRows = buildWeeklyHistory(
-          event.checkIns,
-          periodStartById,
-          genderByPersonFromIncluded(event.included),
-          sinceWeek,
-          new Date(),
-          event.firstTime,
-        );
-        await saveHistoryRows({ eventId: event.eventId, eventName: event.eventName, archived: false }, historyRows);
+      if ((requestedStartDate && !endDate) || (!requestedStartDate && endDate) || (requestedStartDate && requestedStartDate > endDate)) {
+        throw reportError(400, "Give both a start and end date (start on or before end), or leave both blank to use the groups' own meeting dates.");
       }
-    } catch (error) {
-      log.warn({ err: error, eventId }, "Could not refresh the attendance tracker for this event");
+      return await prepareGroupsRun(body, groupIdList, requestedStartDate, endDate, templateId, userId, progressId, log);
     }
-
-    const headers = [
-      ...REPORT_FIELDS.map((field) => field.label),
-      ...selectedCustomFields.map((field) => fieldLabel(field, customLabels)),
-      ...serviceDates,
-    ];
-    const rawCsv = [
-      headers.map(csv).join(","),
-      ...[...records.values()].map((record) => headers.map((header) =>
-        serviceDates.includes(header) ? (record[header] ? "TRUE" : "FALSE") : csv(record[header]),
-      ).join(",")),
-    ].join("\n");
-
-    workDir = await mkdtemp(join(tmpdir(), "tc-report-"));
-    const rawPath = join(workDir, "raw.csv");
-    const cleanedPath = join(workDir, "cleaned.csv");
-    const flagsPath = join(workDir, "flags.txt");
-    await writeFile(rawPath, rawCsv, "utf8");
-    const output = await runPython(
-      [await pythonScript(cleanupMode), rawPath, cleanedPath, "--flags-out", flagsPath],
-      cleanupScriptTimeoutMs(inRange.length),
-    );
-    const cleaned = selectCleanedColumns(await readFile(cleanedPath, "utf8"), pullFields, customLabels);
-    const flags = await readFile(flagsPath, "utf8").catch(() => "");
-    const cleanedObjectPath = await storage.saveObjectEntityBuffer(Buffer.from(cleaned, "utf8"), "text/csv", "reports");
-    const runId = randomUUID();
-    const expiresAt = new Date(Date.now() + REPORT_TTL_MS);
-    await db.insert(reportRunsTable).values({
-      id: runId,
-      eventId,
-      eventName,
-      startDate,
-      endDate,
-      templateId,
-      cleanedObjectPath,
-      requestedByUserId: userId,
-      expiresAt,
-    });
-    const reviewCount = Number(output.match(/ENTRIES NEEDING YOUR REVIEW:\s*(\d+)/)?.[1] ?? 0);
-    if (progressId) {
-      setPreparationProgress(userId, progressId, {
-        stage: "complete",
-        completedBatches: totalProfileBatches,
-        totalBatches: totalProfileBatches,
-        message: "All profile batches loaded",
-      });
-    }
-    return {
-      runId,
-      eventName,
-      rawRows: inRange.length,
-      peopleCount: records.size,
-      serviceDates,
-      sessionCount: sessions.length,
-      skippedDates,
-      pullFields,
-      pullFieldLabels: pullFields.map((field) => fieldLabel(field, customLabels)),
-      reviewCount,
-      flags,
-      expiresAt: expiresAt.toISOString(),
-    };
+    return await prepareCheckInsRun(body, requestedStartDate, endDate, templateId, userId, progressId, log);
   } catch (error) {
     if (progressId) {
       const current = preparationProgress.get(progressKey(userId, progressId));
@@ -1235,8 +1279,399 @@ export async function prepareReportRun(
     throw error;
   } finally {
     activePrepareRuns.delete(userId);
-    if (workDir) await rm(workDir, { recursive: true, force: true }).catch(() => undefined);
   }
+}
+
+async function loadTemplateForPrepare(templateId: number) {
+  const templates = await db.select().from(reportTemplatesTable)
+    .where(eq(reportTemplatesTable.id, templateId))
+    .limit(1);
+  const template = templates[0];
+  if (!template) throw reportError(404, "Report template not found.");
+  const definition = isReportEngine(template.engine) ? reportEngineDefinition(template.engine) : null;
+  return { template, isSeason: !!definition?.season };
+}
+
+function seasonNameFrom(body: Record<string, unknown>, firstDate: string): string {
+  return text(body?.seasonLabel).slice(0, 60) || defaultSeasonLabel(firstDate);
+}
+
+function markProgressComplete(userId: string, progressId: string, totalProfileBatches: number) {
+  if (!progressId) return;
+  setPreparationProgress(userId, progressId, {
+    stage: "complete",
+    completedBatches: totalProfileBatches,
+    totalBatches: totalProfileBatches,
+    message: "All profile batches loaded",
+  });
+}
+
+async function prepareCheckInsRun(
+  body: Record<string, unknown>,
+  requestedStartDate: string,
+  endDate: string,
+  templateId: number,
+  userId: string,
+  progressId: string,
+  log: ReportLog,
+): Promise<PreparedReport> {
+  const eventIdList = parseEventIds(body);
+  const eventId = eventIdList.join(",");
+  if (!eventId || !endDate || !Number.isInteger(templateId)) {
+    throw reportError(400, "Select an event, template, and valid end date.");
+  }
+  if (eventIdList.length > MAX_JOINED_EVENTS) {
+    throw reportError(400, `Join at most ${MAX_JOINED_EVENTS} events in one report.`);
+  }
+
+  const { template, isSeason } = await loadTemplateForPrepare(templateId);
+  const pullFields = normalizePullFields(template.pullFields);
+  const sessionCount = normalizeSessionCount(template.sessionCount);
+  const cleanupMode = normalizeCleanupMode(template.cleanupMode);
+  // "range": every session from startDate through endDate (a calendar
+  // month/quarter/week, so 4- and 5-week months both come out whole)
+  // instead of the template's last N sessions. All Dates templates are
+  // always a range. Added 2026-10-14 for previous-month/quarter defaults
+  // and scheduled reports.
+  const useRange = cleanupMode === "all_dates" || text(body?.period) === "range";
+  if (useRange && cleanupMode !== "all_dates" && (!requestedStartDate || requestedStartDate > endDate)) {
+    throw reportError(400, "Select a valid start and end date for this report period.");
+  }
+  if (cleanupMode === "all_dates" && (!requestedStartDate || requestedStartDate > endDate)) {
+    throw reportError(400, "Select a valid start and end date for an All Dates template.");
+  }
+  const accessToken = await getValidPlanningCenterAccessToken(userId);
+  // Audit finding 1.12 (Medium): this always fetched the full, paginated
+  // list of Planning Center custom field definitions, even when the
+  // report template doesn't pull any custom fields -- selectedCustomFields
+  // is computed from the same pullFields list and was already knowable
+  // before paying for that fetch. customLabels stays an empty Map in that
+  // case, which is exactly what it would have evaluated to anyway (no
+  // custom field key in pullFields to look up a label for).
+  const selectedCustomFields = pullFields.filter(isCustomFieldKey);
+  const customFieldDefinitions = selectedCustomFields.length
+    ? await fetchReportFieldDefinitions(accessToken)
+    : [];
+  const customLabels = new Map(customFieldDefinitions.map((field) => [field.key, field.label]));
+  const loadedEvents: EventData[] = [];
+  for (const id of eventIdList) loadedEvents.push(await loadEventData(id, accessToken));
+  const sessionOptions = { endDate, cleanupMode: useRange ? "all_dates" as const : cleanupMode, startDate: requestedStartDate, sessionCount };
+
+  // Week copies ("use event Y's check-ins for the week of W"): swap in the
+  // source event's check-ins for any copied week that could be in this
+  // report. Planning Center is only read, never written.
+  const rawSessions = pickSessions(loadedEvents.flatMap((event) => event.periods), sessionOptions);
+  const copyWindowStart = useRange
+    ? weekStartFor(`${requestedStartDate}T12:00:00Z`)
+    : rawSessions.length >= sessionCount
+      ? addDays(weekStartFor(`${rawSessions[0].date}T12:00:00Z`), -7)
+      : "0000-00-00";
+  const copyWindowEnd = weekStartFor(`${endDate}T12:00:00Z`);
+  const weekCopies = (await readWeekOverrides())
+    .filter((copy) => copy.weekStart >= copyWindowStart && copy.weekStart <= copyWindowEnd);
+  const sourceWeekCache = new Map<string, EventData>();
+  const preparedEvents: EventData[] = [];
+  for (const event of loadedEvents) {
+    let data = event;
+    for (const copy of weekCopies.filter((item) => item.eventId === event.eventId)) {
+      const cacheKey = `${copy.sourceEventId}:${copy.weekStart}`;
+      let source = sourceWeekCache.get(cacheKey);
+      if (!source) {
+        source = await loadSourceWeek(copy.sourceEventId, copy.sourceEventName, copy.weekStart, accessToken);
+        sourceWeekCache.set(cacheKey, source);
+      }
+      data = applyWeekCopy(data, copy.weekStart, source);
+    }
+    preparedEvents.push(data);
+  }
+  const combined = mergeEventData(preparedEvents);
+  const eventName = combined.eventName;
+
+  // Weeks with a Planning Center session but no attendee check-ins (a
+  // break week) stay in the report as a 0 week -- shown as "0 (week off)"
+  // in the weekly bar chart -- but the cleanup scripts and engines leave
+  // them out of attendance rates (Andrew, 2026-10-14). See pickHeldSessions.
+  const { sessions, skippedDates } = pickHeldSessions(combined.periods, combined.checkIns, sessionOptions);
+  if (skippedDates.length) log.info({ skippedDates }, "Report weeks with no check-ins (not counted in rates)");
+  if (!sessions.length) {
+    throw reportError(404, skippedDates.length
+      ? `The Planning Center sessions in this period had no check-ins (${skippedDates.join(", ")}).`
+      : useRange
+        ? "No Planning Center sessions were found in that date range."
+        : "No Planning Center sessions were found on or before that end date.");
+  }
+  const selectedSessionIds = new Set(sessions.flatMap((session) => session.periodIds));
+  const sessionDateById = new Map(sessions.flatMap((session) => session.periodIds.map((id) => [id, session.date] as const)));
+  const firstTimeIds = new Set(combined.firstTime.map((checkIn) => checkIn.id));
+  const inRange = combined.checkIns.filter((checkIn) =>
+    selectedSessionIds.has(relationshipId(checkIn, "event_period")),
+  );
+  if (!inRange.length) {
+    throw reportError(404, "No attendee check-ins were found in the selected sessions.");
+  }
+  const reportFirstTimerIds = reportFirstTimers(combined, inRange);
+
+  const includedPeople = new Map(
+    combined.included.filter((resource) => resource.id).map((resource) => [resource.id, resource.attributes ?? {}]),
+  );
+  const personIds = [...new Set(inRange.map((checkIn) => relationshipId(checkIn, "person")).filter(Boolean))];
+  const { peopleDetails, totalProfileBatches } = await loadReportPeopleDetails(
+    personIds, includedPeople, selectedCustomFields, accessToken, userId, progressId, log,
+  );
+  const serviceDates = sessions.map((session) => session.date);
+  const startDate = useRange ? requestedStartDate : serviceDates[0];
+  const records = new Map<string, Record<string, string | boolean>>();
+
+  for (const checkIn of inRange) {
+    const attrs = checkIn.attributes ?? {};
+    const personId = relationshipId(checkIn, "person");
+    const person = stripContactAttributes({ ...(includedPeople.get(personId) ?? {}), ...(peopleDetails.get(personId) ?? {}) });
+    const firstName = firstValue(attrs, "first_name") || firstValue(person, "first_name", "given_name");
+    const lastName = firstValue(attrs, "last_name") || firstValue(person, "last_name", "family_name");
+    const key = personId || `${firstName.toLowerCase()}|${lastName.toLowerCase()}`;
+    const current = records.get(key) ?? baseRecord(personId, firstName, lastName, person, selectedCustomFields, customLabels);
+    // Per person, judged across all of the report's events (see
+    // reportFirstTimers); the raw per-check-in flag only for the rare
+    // check-in with no person attached.
+    const firstTimer = personId
+      ? reportFirstTimerIds.has(personId)
+      : firstTimeIds.has(checkIn.id) || attrs.first_time === true || attrs.first_time_in_event === true;
+    if (firstTimer) current["First Timers"] = "First-timer";
+    const sessionDate = sessionDateById.get(relationshipId(checkIn, "event_period"));
+    if (sessionDate) current[sessionDate] = true;
+    records.set(key, current);
+  }
+
+  // Keep the attendance tracker (checkins_weekly_history) current for this
+  // event: the check-ins fetched above already cover its full history, so
+  // the last year of weeks is recomputed and saved here at no extra
+  // Planning Center cost. The report's trend chart reads these rows back
+  // at generate time. Best-effort -- a tracker problem never blocks the
+  // report itself.
+  try {
+    const sinceWeek = addDays(weekStartFor(`${endDate}T12:00:00Z`), -7 * 52);
+    for (const event of loadedEvents) {
+      const periodStartById = new Map<string, string>();
+      for (const period of event.periods) {
+        const startsAt = text(period.attributes?.starts_at);
+        if (period.id && startsAt) periodStartById.set(period.id, startsAt);
+      }
+      const historyRows = buildWeeklyHistory(
+        event.checkIns,
+        periodStartById,
+        genderByPersonFromIncluded(event.included),
+        sinceWeek,
+        new Date(),
+        event.firstTime,
+      );
+      await saveHistoryRows({ eventId: event.eventId, eventName: event.eventName, archived: false }, historyRows);
+    }
+  } catch (error) {
+    log.warn({ err: error, eventId }, "Could not refresh the attendance tracker for this event");
+  }
+
+  // Season reports: night names from each session's Planning Center note,
+  // overridden by any typed on the Reporting page.
+  let meta: SeasonRunMeta | null = null;
+  let unmatchedWeekLabels: string[] = [];
+  if (isSeason) {
+    const noteByPeriod = new Map(combined.periods.map((period) => [period.id, text(period.attributes?.note)]));
+    const weekLabels: Record<string, string> = {};
+    for (const session of sessions) {
+      const note = session.periodIds.map((id) => noteByPeriod.get(id) ?? "").find(Boolean);
+      if (note) weekLabels[session.date] = note.slice(0, 60);
+    }
+    const typed = parseWeekLabels(text(body?.weekLabels), serviceDates);
+    unmatchedWeekLabels = typed.unmatched;
+    meta = {
+      source: "checkins",
+      sourceName: eventName,
+      seasonLabel: seasonNameFrom(body, serviceDates[0]),
+      startDate,
+      endDate,
+      weekLabels: { ...weekLabels, ...typed.labels },
+    };
+  }
+
+  const saved = await savePreparedRun({
+    records, serviceDates, selectedCustomFields, customLabels, pullFields, cleanupMode,
+    rowCount: inRange.length, eventId, eventName, startDate, endDate, templateId, userId, meta,
+  });
+  markProgressComplete(userId, progressId, totalProfileBatches);
+  return {
+    runId: saved.runId,
+    eventName,
+    rawRows: inRange.length,
+    peopleCount: records.size,
+    serviceDates,
+    sessionCount: sessions.length,
+    skippedDates,
+    pullFields,
+    pullFieldLabels: pullFields.map((field) => fieldLabel(field, customLabels)),
+    reviewCount: saved.reviewCount,
+    flags: saved.flags,
+    expiresAt: saved.expiresAt.toISOString(),
+    ...(meta ? { seasonLabel: meta.seasonLabel, weekLabels: meta.weekLabels, unmatchedWeekLabels } : {}),
+  };
+}
+
+async function prepareGroupsRun(
+  body: Record<string, unknown>,
+  groupIds: string[],
+  requestedStartDate: string,
+  requestedEndDate: string,
+  templateId: number,
+  userId: string,
+  progressId: string,
+  log: ReportLog,
+): Promise<PreparedReport> {
+  const { template, isSeason } = await loadTemplateForPrepare(templateId);
+  const pullFields = normalizePullFields(template.pullFields);
+  // Every Groups report is a plain date range: never the month/quarter
+  // cleanup, which drops dates outside a single month or quarter.
+  const cleanupMode: CleanupMode = "all_dates";
+  const accessToken = await getValidPlanningCenterAccessToken(userId);
+  const selectedCustomFields = pullFields.filter(isCustomFieldKey);
+  const customFieldDefinitions = selectedCustomFields.length
+    ? await fetchReportFieldDefinitions(accessToken)
+    : [];
+  const customLabels = new Map(customFieldDefinitions.map((field) => [field.key, field.label]));
+
+  const groupNames: string[] = [];
+  const allMeetings: GroupMeeting[] = [];
+  try {
+    for (const groupId of groupIds) {
+      const page = await planningCenterRequest(`${GROUPS_BASE}/groups/${encodeURIComponent(groupId)}`, accessToken);
+      groupNames.push(firstValue(page.data?.attributes ?? {}, "name") || `Group ${groupId}`);
+      allMeetings.push(...await loadGroupMeetings(groupId, requestedStartDate, accessToken));
+    }
+  } catch (error) {
+    throw groupsAccessError(error);
+  }
+  const meetings = meetingsInSeason(allMeetings, requestedStartDate, requestedEndDate);
+  if (!meetings.length) {
+    throw reportError(404, requestedStartDate
+      ? "These groups had no meetings in that date range."
+      : "These groups don't have any meetings yet.");
+  }
+  if (progressId) {
+    setPreparationProgress(userId, progressId, {
+      stage: "loading", completedBatches: 0, totalBatches: 0,
+      message: `Loading attendance for ${meetings.length} group ${meetings.length === 1 ? "meeting" : "meetings"}…`,
+    });
+  }
+  const attendanceByMeeting = new Map<string, JsonApiResource[]>();
+  const included: JsonApiResource[] = [];
+  try {
+    for (const meeting of meetings) {
+      const collection = await fetchCollection(
+        `${GROUPS_BASE}/events/${encodeURIComponent(meeting.id)}/attendances?include=person&per_page=100`,
+        accessToken,
+      );
+      attendanceByMeeting.set(meeting.id, collection.data);
+      included.push(...collection.included);
+    }
+  } catch (error) {
+    throw groupsAccessError(error);
+  }
+  const season = buildGroupSeason(meetings, attendanceByMeeting);
+  if (!season.presentByPerson.size) {
+    throw reportError(404, season.notTakenDates.length === season.serviceDates.length
+      ? "Attendance hasn't been taken for these groups' meetings yet."
+      : "Nobody was marked present at these groups' meetings.");
+  }
+  const serviceDates = season.serviceDates;
+  const startDate = requestedStartDate || serviceDates[0];
+  const endDate = requestedEndDate || serviceDates[serviceDates.length - 1];
+  if (season.skippedDates.length) log.info({ skippedDates: season.skippedDates }, "Group meetings with nobody present (not counted in rates)");
+
+  const personIds = [...season.presentByPerson.keys()];
+  // Groups' own person records only carry names; everything else comes from
+  // the people sync (or a live People lookup).
+  const includedPeople = new Map(
+    included
+      .filter((resource) => resource.id && (resource.type ?? "Person") === "Person")
+      .map((resource) => [resource.id, {
+        first_name: resource.attributes?.first_name,
+        last_name: resource.attributes?.last_name,
+      } as Record<string, unknown>]),
+  );
+  for (const [, attributes] of includedPeople) {
+    for (const key of Object.keys(attributes)) if (attributes[key] === undefined) delete attributes[key];
+  }
+  if (progressId) {
+    setPreparationProgress(userId, progressId, {
+      stage: "loading", completedBatches: 0, totalBatches: 0,
+      message: `Checking which of ${personIds.length} people are new to groups…`,
+    });
+  }
+  const memberships = await loadPeopleMemberships(personIds, accessToken, log);
+  const firstTimerIds = groupFirstTimers(memberships, new Set(groupIds), serviceDates[0]);
+  const { peopleDetails, totalProfileBatches } = await loadReportPeopleDetails(
+    personIds, includedPeople, selectedCustomFields, accessToken, userId, progressId, log,
+  );
+
+  const records = new Map<string, Record<string, string | boolean>>();
+  for (const [personId, dates] of season.presentByPerson) {
+    const person = stripContactAttributes({ ...(includedPeople.get(personId) ?? {}), ...(peopleDetails.get(personId) ?? {}) });
+    const record = baseRecord(
+      personId,
+      firstValue(person, "first_name", "given_name"),
+      firstValue(person, "last_name", "family_name"),
+      person,
+      selectedCustomFields,
+      customLabels,
+    );
+    if (firstTimerIds.has(personId)) record["First Timers"] = "First-timer";
+    for (const date of dates) record[date] = true;
+    records.set(personId, record);
+  }
+
+  const eventName = groupNames.length <= 3 ? groupNames.join(" + ") : `${groupNames.length} groups`;
+  const typed = parseWeekLabels(text(body?.weekLabels), serviceDates);
+  const meta: SeasonRunMeta | null = isSeason
+    ? {
+      source: "groups",
+      sourceName: eventName,
+      seasonLabel: seasonNameFrom(body, serviceDates[0]),
+      startDate,
+      endDate,
+      weekLabels: { ...season.weekLabels, ...typed.labels },
+    }
+    : null;
+  const saved = await savePreparedRun({
+    records, serviceDates, selectedCustomFields, customLabels, pullFields, cleanupMode,
+    rowCount: season.presentRecords, eventId: `groups:${groupIds.join(",")}`, eventName,
+    startDate, endDate, templateId, userId, meta,
+  });
+  markProgressComplete(userId, progressId, totalProfileBatches);
+  const membershipGaps = personIds.length - memberships.size;
+  const notes = [
+    season.notTakenDates.length
+      ? `Attendance wasn't taken for: ${season.notTakenDates.join(", ")} (shown as 0, not counted in rates).`
+      : "",
+    membershipGaps
+      ? `${membershipGaps} ${membershipGaps === 1 ? "person's" : "people's"} group history couldn't be read, so they aren't counted as first-timers.`
+      : "",
+  ].filter(Boolean);
+  return {
+    runId: saved.runId,
+    eventName,
+    rawRows: season.presentRecords,
+    peopleCount: records.size,
+    serviceDates,
+    sessionCount: serviceDates.length,
+    skippedDates: season.skippedDates,
+    pullFields,
+    pullFieldLabels: pullFields.map((field) => fieldLabel(field, customLabels)),
+    reviewCount: saved.reviewCount,
+    flags: [saved.flags, ...notes].filter(Boolean).join("\n"),
+    expiresAt: saved.expiresAt.toISOString(),
+    startDate,
+    endDate,
+    notes,
+    ...(meta ? { seasonLabel: meta.seasonLabel, weekLabels: meta.weekLabels, unmatchedWeekLabels: typed.unmatched } : {}),
+  };
 }
 
 router.post("/prepare", requireToolAccess("reporting"), async (req, res) => {
@@ -1289,15 +1724,30 @@ async function generateReportPdf(
     // tracker (refreshed at prepare time). Without at least two weeks the
     // engine falls back to the report's own weeks.
     const trendArgs: string[] = [];
-    try {
-      const trendRows = await loadTrendRowsForEvents(run!.eventId.split(","), run!.endDate, definition.trendWeeks);
-      if (trendRows.length >= 2) {
-        const trendPath = join(workDir, "trend.json");
-        await writeFile(trendPath, JSON.stringify(trendRows));
-        trendArgs.push("--trend-json", trendPath);
+    if (definition.season) {
+      const meta = parseRunMeta(run!.meta) ?? {
+        source: run!.eventId.startsWith("groups:") ? "groups" : "checkins",
+        sourceName: run!.eventName,
+        seasonLabel: defaultSeasonLabel(run!.startDate),
+        startDate: run!.startDate,
+        endDate: run!.endDate,
+        weekLabels: {},
+      };
+      const metaPath = join(workDir, "meta.json");
+      await writeFile(metaPath, JSON.stringify(meta));
+      trendArgs.push("--meta-json", metaPath);
+    }
+    if (definition.trendWeeks > 0) {
+      try {
+        const trendRows = await loadTrendRowsForEvents(run!.eventId.split(","), run!.endDate, definition.trendWeeks);
+        if (trendRows.length >= 2) {
+          const trendPath = join(workDir, "trend.json");
+          await writeFile(trendPath, JSON.stringify(trendRows));
+          trendArgs.push("--trend-json", trendPath);
+        }
+      } catch (error) {
+        console.warn("Attendance trend unavailable; using the report's own weeks.", error);
       }
-    } catch (error) {
-      console.warn("Attendance trend unavailable; using the report's own weeks.", error);
     }
     await runPython([
       bundledReportEngineScript(definition.script),

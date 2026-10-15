@@ -145,6 +145,11 @@ globalThis.__dirname = __bannerPath.dirname(globalThis.__filename);
       path.resolve(artifactDir, "../../attached_assets/report_common.py"),
       path.resolve(distDir, "report_common.py"),
     ),
+    // Season reports (Young Adults / Transform Groups); imports report_common.
+    copyFile(
+      path.resolve(artifactDir, "../../attached_assets/report_season.py"),
+      path.resolve(distDir, "report_season.py"),
+    ),
     copyFile(
       path.resolve(artifactDir, "../../attached_assets/report_youth.py"),
       path.resolve(distDir, "report_youth.py"),

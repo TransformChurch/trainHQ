@@ -29,6 +29,9 @@ export const reportRunsTable = pgTable("report_runs", {
   endDate: text("end_date").notNull(),
   templateId: integer("template_id").references(() => reportTemplatesTable.id, { onDelete: "set null" }),
   cleanedObjectPath: text("cleaned_object_path").notNull(),
+  // Season reports: JSON with the season name, night names and source
+  // (Check-Ins or Groups). Null for every other report.
+  meta: text("meta"),
   requestedByUserId: text("requested_by_user_id").notNull().references(() => usersTable.id),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   expiresAt: timestamp("expires_at").notNull(),
