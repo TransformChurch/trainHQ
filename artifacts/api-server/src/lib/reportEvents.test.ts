@@ -91,7 +91,7 @@ test("sumTrendRows adds events week by week and keeps unknowns null", () => {
   assert.equal(rows[1].total, 7);
 });
 
-test("weeks nobody checked in to are left out of the rates but still count as one of the last N weeks", async () => {
+test("weeks nobody checked in to stay in the report as 0 weeks and are listed", async () => {
   const { pickHeldSessions } = await import("./reportEvents");
   // September 2026 Fridays; Sept 11 had a session in Planning Center but no check-ins.
   const dates = ["2026-08-28", "2026-09-04", "2026-09-11", "2026-09-18", "2026-09-25"];
@@ -103,15 +103,55 @@ test("weeks nobody checked in to are left out of the rates but still count as on
   const month = { endDate: "2026-09-30", startDate: "2026-09-01", cleanupMode: "all_dates" as const, sessionCount: 4 };
   const september = pickHeldSessions(periods as never, checkIns as never, month);
   assert.deepEqual(september.skippedDates, ["2026-09-11"]);
-  assert.deepEqual(september.sessions.map((session) => session.date), ["2026-09-04", "2026-09-18", "2026-09-25"]);
+  // The week off stays a column (shown as "0 (week off)"); the cleanup script leaves it out of rates.
+  assert.deepEqual(september.sessions.map((session) => session.date), ["2026-09-04", "2026-09-11", "2026-09-18", "2026-09-25"]);
 
   // "Last 4 weeks": the empty week is one of the 4 -- no reaching back to Aug 28.
   const lastFour = { endDate: "2026-09-30", startDate: "", cleanupMode: "month_quarter" as const, sessionCount: 4 };
   const four = pickHeldSessions(periods as never, checkIns as never, lastFour);
+  assert.deepEqual(four.sessions.map((session) => session.date), ["2026-09-04", "2026-09-11", "2026-09-18", "2026-09-25"]);
   assert.deepEqual(four.skippedDates, ["2026-09-11"]);
-  assert.deepEqual(four.sessions.map((session) => session.date), ["2026-09-04", "2026-09-18", "2026-09-25"]);
 
-  // Nothing left out when every session had check-ins.
+  // Nothing listed when every session had check-ins.
   const all = periods.map((period, index) => ({ id: `a${index}`, relationships: { event_period: { data: { id: period.id } } } }));
   assert.deepEqual(pickHeldSessions(periods as never, all as never, month).skippedDates, []);
+});
+
+test("first-timers are judged across all of the report's events", async () => {
+  const { reportFirstTimers, applyWeekCopy: copyWeek, mergeEventData: merge } = await import("./reportEvents");
+  const period = (id: string, date: string) => ({ id, attributes: { starts_at: `${date}T23:00:00Z` } });
+  const checkIn = (id: string, periodId: string, person: string) => ({
+    id, relationships: { event_period: { data: { id: periodId } }, person: { data: { id: person } } },
+  });
+
+  // Youth: "reg" has come every Friday since August; "new" first came 9/4.
+  const youth = {
+    eventId: "y", eventName: "Youth",
+    periods: [period("y1", "2026-08-07"), period("y2", "2026-08-14"), period("y3", "2026-08-21"), period("y4", "2026-09-04")],
+    checkIns: [checkIn("a", "y1", "reg"), checkIn("b", "y2", "reg"), checkIn("c", "y4", "reg"), checkIn("d", "y4", "new")],
+    included: [],
+    firstTime: [checkIn("a", "y1", "reg"), checkIn("d", "y4", "new")],
+  };
+  // Concert on 8/21 replaced Youth that week; "reg" was flagged first-time at the concert.
+  const concert = {
+    eventId: "c", eventName: "Concert",
+    periods: [period("c1", "2026-08-21")],
+    checkIns: [checkIn("x", "c1", "reg"), checkIn("z", "c1", "guest")],
+    included: [],
+    firstTime: [checkIn("x", "c1", "reg"), checkIn("z", "c1", "guest")],
+  };
+
+  // Week copy: concert check-ins copied into Youth's 8/21 week.
+  const copied = copyWeek(youth as never, "2026-08-17", concert as never);
+  const inRange = copied.checkIns.filter((entry) => ["y3", "y4"].includes(entry.relationships!.event_period!.data!.id!));
+  const fromCopy = reportFirstTimers(copied, inRange);
+  assert.equal(fromCopy.has("reg"), false); // regular, despite the concert's first-time flag
+  assert.equal(fromCopy.has("guest"), true); // genuinely new to these events
+  assert.equal(fromCopy.has("new"), true);
+
+  // Joined events: same result.
+  const joined = merge([youth as never, concert as never]);
+  const joinedInRange = joined.checkIns.filter((entry) => ["y4", "c1"].includes(entry.relationships!.event_period!.data!.id!));
+  const fromJoin = reportFirstTimers(joined, joinedInRange);
+  assert.deepEqual([...fromJoin].sort(), ["guest", "new"]);
 });

@@ -126,20 +126,22 @@ export function pickSessions(
     : sessions.slice(0, options.sessionCount).reverse();
 }
 
-// The report's sessions minus any nobody checked in to (e.g. a break week
-// whose Planning Center session still exists), plus the dates left out.
-// Sessions are picked first and filtered after, so an empty week still
-// counts as one of a template's last N weeks (Andrew, 2026-10-14) -- it
-// just doesn't count against anyone's attendance rate.
+// The report's sessions, plus the dates of any nobody checked in to (e.g. a
+// break week whose Planning Center session still exists). Those weeks stay
+// in the report -- the weekly bar chart shows them as "0 (week off)" so a
+// reviewer can see the week was off (Andrew, 2026-10-14) -- but the cleanup
+// scripts and report engines leave weeks with no attendance out of
+// attendance rates. An empty week still counts as one of the last N weeks.
 export function pickHeldSessions(
   periods: Resource[],
   checkIns: Resource[],
   options: Parameters<typeof pickSessions>[1],
 ): { sessions: PickedSession[]; skippedDates: string[] } {
   const periodsWithCheckIns = new Set(checkIns.map((checkIn) => relId(checkIn, "event_period")).filter(Boolean));
-  const picked = pickSessions(periods, options);
-  const sessions = picked.filter((session) => session.periodIds.some((id) => periodsWithCheckIns.has(id)));
-  const skippedDates = picked.filter((session) => !sessions.includes(session)).map((session) => session.date);
+  const sessions = pickSessions(periods, options);
+  const skippedDates = sessions
+    .filter((session) => !session.periodIds.some((id) => periodsWithCheckIns.has(id)))
+    .map((session) => session.date);
   return { sessions, skippedDates };
 }
 

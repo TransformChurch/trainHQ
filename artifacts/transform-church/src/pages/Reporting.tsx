@@ -525,7 +525,7 @@ export default function Reporting() {
                 Weeks ({prepared.sessionCount}): {prepared.serviceDates.join(", ")}
                 {!!prepared.skippedDates?.length && (
                   <span className="block">
-                    Left out (nobody checked in, so not counted in attendance rates): {prepared.skippedDates.join(", ")}
+                    Weeks off (nobody checked in; shown as 0, not counted in attendance rates): {prepared.skippedDates.join(", ")}
                   </span>
                 )}
               </p>

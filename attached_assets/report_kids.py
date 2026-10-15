@@ -60,7 +60,7 @@ import pandas as pd
 from report_common import (
     BandSeries, CATEGORICAL, FEMALE_COLOR, MALE_COLOR, UNKNOWN_COLOR,
     CleanedData, attendance_rate_bucket_edges, bucket_labels, bucket_series,
-    draw_cover_page, draw_first_timer_page, draw_grouped_bar, draw_ordinal_bar, draw_pie,
+    draw_cover_page, draw_first_timer_page, draw_grouped_bar, draw_ordinal_bar, draw_pie, weekly_total_label,
     draw_report_header, draw_stat_tiles, draw_table, draw_trend,
     draw_weekly_stacked_by_age, first_timer_stats, format_period_label, grade_colors,
     load_cleaned_csv, load_trend_json, new_page, nonzero_slices, save_pdf, section_title,
@@ -277,7 +277,7 @@ def render(data: CleanedData, config: CampusConfig, period_label: str | None = N
             ("Unknown age/gender", f"{unknown_band:,}"),
         ])
         ax1 = figA.add_axes((0.08, 0.63, 0.86, 0.19))
-        draw_ordinal_bar(ax1, week_labels, weekly_totals, color=CATEGORICAL[0], horizontal=False)
+        draw_ordinal_bar(ax1, week_labels, weekly_totals, color=CATEGORICAL[0], horizontal=False, value_fmt=weekly_total_label)
         ax1.set_title("Total Weekly Attendance", loc="left")
         figA.text(0.06, 0.58, "Weekly Attendance by Age/Gender Group",
                   fontsize=11, fontweight="bold", color="#0b0b0b")
@@ -349,7 +349,7 @@ def render(data: CleanedData, config: CampusConfig, period_label: str | None = N
         ("Unknown age/gender", f"{unknown_band:,}"),
     ])
     ax1 = fig.add_axes((0.08, 0.60, 0.86, 0.18))
-    draw_ordinal_bar(ax1, week_labels, weekly_totals, color=CATEGORICAL[0], horizontal=False)
+    draw_ordinal_bar(ax1, week_labels, weekly_totals, color=CATEGORICAL[0], horizontal=False, value_fmt=weekly_total_label)
     ax1.set_title("Total Weekly Attendance", loc="left")
     figs.append(fig)
 

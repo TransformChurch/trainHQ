@@ -625,6 +625,13 @@ def write_output(records, fixed_cols, week_cols, out_path):
     # hardcoding a fixed-column list here too.
     fieldnames = list(fixed_cols) + week_cols + ["Attendance Rate"]
 
+    # 2026-10-14 (Andrew): a week nobody attended (a Planning Center session
+    # with no check-ins -- a week off) stays in the output so the report's
+    # weekly chart shows it as 0, but it's left out of the rate's
+    # denominator. Same rule the All Dates script has used since 10/02; it
+    # only ever raises rates (nobody can have attended an empty week).
+    active_weeks = [w for w in week_cols if any(r["_weekly"].get(w) for r in records)]
+
     with open(out_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
@@ -632,7 +639,7 @@ def write_output(records, fixed_cols, week_cols, out_path):
             row = {k: r[k] for k in fieldnames if k in r}
             for w in week_cols:
                 row[w] = "TRUE" if r["_weekly"].get(w) else "FALSE"
-            row["Attendance Rate"] = compute_attendance_rate(r["_weekly"], week_cols)
+            row["Attendance Rate"] = compute_attendance_rate(r["_weekly"], active_weeks)
             writer.writerow(row)
 
 

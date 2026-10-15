@@ -146,9 +146,14 @@ class CleanedData:
     week_cols: list          # original header strings, in date order
     week_dates: list         # parsed dt.date, same order as week_cols
     num_weeks: int = field(init=False)
+    # Weeks anyone attended. A week off (a Planning Center session nobody
+    # checked in to) stays in week_cols so the weekly charts show it as 0,
+    # but rate buckets and "N services" use only these (2026-10-14).
+    held_week_cols: list = field(init=False)
 
     def __post_init__(self):
-        self.num_weeks = len(self.week_cols)
+        self.held_week_cols = [w for w in self.week_cols if bool(self.df[w].any())]
+        self.num_weeks = len(self.held_week_cols)
 
 
 def load_cleaned_csv(path: str | Path) -> CleanedData:
@@ -173,8 +178,9 @@ def load_cleaned_csv(path: str | Path) -> CleanedData:
     if "Attendance Rate" in df.columns:
         df["Attendance Rate"] = pd.to_numeric(df["Attendance Rate"], errors="coerce").fillna(0.0)
     else:
+        held = [w for w in week_cols if bool(df[w].any())]
         df["Attendance Rate"] = (
-            df[week_cols].sum(axis=1) / len(week_cols) if week_cols else 0.0
+            df[held].sum(axis=1) / len(held) if held else 0.0
         )
     return CleanedData(df=df, fixed_cols=fixed_cols, week_cols=week_cols, week_dates=week_dates)
 
@@ -324,6 +330,12 @@ def style_axes(ax: plt.Axes, y_grid_only: bool = True) -> None:
         ax.grid(axis="y")
         ax.grid(axis="x", visible=False)
     ax.tick_params(length=0)
+
+
+def weekly_total_label(v) -> str:
+    """Value label for a weekly-attendance bar: a week nobody attended is
+    labeled as a week off so it doesn't read as missing data (2026-10-14)."""
+    return f"{v:,.0f}" if v else "0 (week off)"
 
 
 def draw_ordinal_bar(ax: plt.Axes, categories: list, values: list, color: str = CATEGORICAL[0],

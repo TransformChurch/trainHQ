@@ -626,7 +626,7 @@ export type PreparedReport = {
   peopleCount: number;
   serviceDates: string[];
   sessionCount: number;
-  // Session dates in the period left out because nobody checked in.
+  // Week dates nobody checked in to: shown as 0, not counted in rates.
   skippedDates: string[];
   pullFields: ReportFieldKey[];
   pullFieldLabels: string[];
@@ -1030,14 +1030,12 @@ export async function prepareReportRun(
     const combined = mergeEventData(preparedEvents);
     const eventName = combined.eventName;
 
-    // Sessions with no attendee check-ins (a break week that still has a
-    // Planning Center session) aren't services: leave them out so attendance
-    // rates, "N services" and the weekly charts count only weeks that met
-    // (Andrew, 2026-10-14). An empty week still counts as one of a
-    // template's last N weeks (no reaching back). The attendance tracker
-    // (trend charts) still records those weeks as 0.
+    // Weeks with a Planning Center session but no attendee check-ins (a
+    // break week) stay in the report as a 0 week -- shown as "0 (week off)"
+    // in the weekly bar chart -- but the cleanup scripts and engines leave
+    // them out of attendance rates (Andrew, 2026-10-14). See pickHeldSessions.
     const { sessions, skippedDates } = pickHeldSessions(combined.periods, combined.checkIns, sessionOptions);
-    if (skippedDates.length) log.info({ skippedDates }, "Report sessions skipped (no check-ins)");
+    if (skippedDates.length) log.info({ skippedDates }, "Report weeks with no check-ins (not counted in rates)");
     if (!sessions.length) {
       throw reportError(404, skippedDates.length
         ? `The Planning Center sessions in this period had no check-ins (${skippedDates.join(", ")}).`
