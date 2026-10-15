@@ -685,6 +685,7 @@ export function parseEventIds(body: unknown): string[] {
 async function loadEventData(eventId: string, accessToken: string): Promise<EventData> {
   const eventPage = await planningCenterRequest(`${CHECK_INS_BASE}/events/${encodeURIComponent(eventId)}`, accessToken);
   const eventName = firstValue(eventPage.data?.attributes ?? {}, "name") || `Event ${eventId}`;
+  const archived = !!text(eventPage.data?.attributes?.archived_at);
   const [periodCollection, collection, firstTimeCollection] = await Promise.all([
     fetchCollection(
       `${CHECK_INS_BASE}/events/${encodeURIComponent(eventId)}/event_periods?order=-starts_at&per_page=100`,
@@ -702,6 +703,7 @@ async function loadEventData(eventId: string, accessToken: string): Promise<Even
   return {
     eventId,
     eventName,
+    archived,
     periods: periodCollection.data,
     checkIns: collection.data,
     included: collection.included,
@@ -736,18 +738,30 @@ async function loadSourceWeek(
   return { eventId: sourceEventId, eventName: sourceEventName, periods, checkIns, included, firstTime };
 }
 
+// Active events by default. `?archived=include` (the Reporting page, 2026-10-15)
+// adds archived events too, each flagged `archived: true`, so past seasons'
+// events can still be reported on.
 router.get("/events", requireToolAccess("reporting"), async (req, res) => {
   try {
     const accessToken = await getValidPlanningCenterAccessToken(res.locals.dbUser.id);
-    const collection = await fetchCollection(
-      `${CHECK_INS_BASE}/events?filter=not_archived&order=name&per_page=100`,
-      accessToken,
-    );
-    res.json(collection.data.map((event) => ({
+    const includeArchived = text(req.query.archived) === "include";
+    const [active, archived] = await Promise.all([
+      fetchCollection(`${CHECK_INS_BASE}/events?filter=not_archived&order=name&per_page=100`, accessToken),
+      includeArchived
+        ? fetchCollection(`${CHECK_INS_BASE}/events?filter=archived&order=name&per_page=100`, accessToken)
+        : Promise.resolve({ data: [] as JsonApiResource[], included: [] as JsonApiResource[] }),
+    ]);
+    const activeIds = new Set(active.data.map((event) => event.id));
+    const toOption = (event: JsonApiResource, isArchived: boolean) => ({
       id: event.id,
       name: firstValue(event.attributes ?? {}, "name") || `Event ${event.id}`,
       frequency: firstValue(event.attributes ?? {}, "frequency"),
-    })));
+      archived: isArchived,
+    });
+    res.json([
+      ...active.data.map((event) => toOption(event, false)),
+      ...archived.data.filter((event) => !activeIds.has(event.id)).map((event) => toOption(event, true)),
+    ].sort((a, b) => a.name.localeCompare(b.name)));
   } catch (error) {
     sendError(req, res, error, "Failed to load Planning Center events");
   }
@@ -1464,7 +1478,7 @@ async function prepareCheckInsRun(
         new Date(),
         event.firstTime,
       );
-      await saveHistoryRows({ eventId: event.eventId, eventName: event.eventName, archived: false }, historyRows);
+      await saveHistoryRows({ eventId: event.eventId, eventName: event.eventName, archived: event.archived === true }, historyRows);
     }
   } catch (error) {
     log.warn({ err: error, eventId }, "Could not refresh the attendance tracker for this event");

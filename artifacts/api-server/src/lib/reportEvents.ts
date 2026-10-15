@@ -17,6 +17,8 @@ export type Resource = {
 export type EventData = {
   eventId: string;
   eventName: string;
+  // Archived in Check-Ins (still reportable; see GET /api/reports/events).
+  archived?: boolean;
   periods: Resource[];
   checkIns: Resource[];
   included: Resource[];

@@ -13,7 +13,7 @@ import { api, BASE } from "@/lib/toolApi";
 import { FIELD_OPTIONS, type AvailableField, type ReportFieldKey } from "@/lib/reportFields";
 import { defaultPeriodKind, formatRange, localToday, previousPeriod } from "@/lib/reportPeriods";
 
-type EventOption = { id: string; name: string; frequency: string };
+type EventOption = { id: string; name: string; frequency: string; archived?: boolean };
 type CleanupMode = "month_quarter" | "all_dates";
 // How a Monthly/Quarterly template picks its sessions: a whole calendar
 // month/quarter (default, so 4- and 5-week months both come out right), a
@@ -88,6 +88,8 @@ export default function Reporting() {
   const [templates, setTemplates] = useState<ReportTemplate[]>([]);
   const [eventIds, setEventIds] = useState<string[]>([]);
   const [eventFilter, setEventFilter] = useState("");
+  // Archived Check-Ins events (past seasons) are listed only when asked for.
+  const [showArchivedEvents, setShowArchivedEvents] = useState(false);
   const [startDate, setStartDate] = useState(defaultDate(-30));
   const [endDate, setEndDate] = useState(defaultDate(0));
   const [selectedTemplate, setSelectedTemplate] = useState("");
@@ -188,10 +190,11 @@ export default function Reporting() {
     setEventsLoading(true);
     setEventsError("");
     try {
-      const response = await api("/api/reports/events");
+      const response = await api("/api/reports/events?archived=include");
       const rows = await response.json() as EventOption[];
       setEvents(rows);
-      setEventIds((current) => (current.length ? current : rows[0] ? [rows[0].id] : []));
+      const firstActive = rows.find((row) => !row.archived) ?? rows[0];
+      setEventIds((current) => (current.length ? current : firstActive ? [firstActive.id] : []));
     } catch (error) {
       setEventsError(error instanceof Error ? error.message : "Could not load events.");
     } finally {
@@ -480,18 +483,28 @@ export default function Reporting() {
           {!fromGroups && (
           <div className="space-y-2 md:col-span-full">
             <Label htmlFor="report-event-filter">
-              Active events{eventIds.length > 1 ? ` (${eventIds.length} joined into one report)` : ""}
+              {showArchivedEvents ? "Events" : "Active events"}{eventIds.length > 1 ? ` (${eventIds.length} joined into one report)` : ""}
             </Label>
-            <Input
-              id="report-event-filter"
-              placeholder="Search events…"
-              value={eventFilter}
-              onChange={(event) => setEventFilter(event.target.value)}
-              disabled={eventsLoading || !!eventsError}
-            />
+            <div className="flex flex-wrap items-center gap-3">
+              <Input
+                id="report-event-filter"
+                className="max-w-sm"
+                placeholder="Search events…"
+                value={eventFilter}
+                onChange={(event) => setEventFilter(event.target.value)}
+                disabled={eventsLoading || !!eventsError}
+              />
+              <label className="flex items-center gap-2 text-sm">
+                <Checkbox checked={showArchivedEvents} onCheckedChange={(checked) => setShowArchivedEvents(checked === true)} />
+                Show archived events
+              </label>
+            </div>
             <div className="max-h-48 space-y-1 overflow-y-auto rounded-md border p-2">
               {events
-                .filter((event) => eventIds.includes(event.id) || event.name.toLowerCase().includes(eventFilter.trim().toLowerCase()))
+                .filter((event) => eventIds.includes(event.id) || (
+                  (showArchivedEvents || !event.archived)
+                  && event.name.toLowerCase().includes(eventFilter.trim().toLowerCase())
+                ))
                 .map((event) => (
                   <label key={event.id} className="flex cursor-pointer items-center gap-2 rounded px-1 py-1 text-sm hover:bg-muted/50">
                     <Checkbox
@@ -503,6 +516,7 @@ export default function Reporting() {
                       disabled={eventsLoading || !!eventsError}
                     />
                     {event.name}
+                    {event.archived && <span className="text-xs text-muted-foreground">archived</span>}
                   </label>
                 ))}
             </div>
