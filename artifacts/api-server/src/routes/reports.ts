@@ -32,6 +32,8 @@ import {
   mergeEventData,
   periodsInWeek,
   pickSessions,
+  pickHeldSessions,
+  reportFirstTimers,
   type EventData,
 } from "../lib/reportEvents";
 
@@ -624,6 +626,8 @@ export type PreparedReport = {
   peopleCount: number;
   serviceDates: string[];
   sessionCount: number;
+  // Session dates in the period left out because nobody checked in.
+  skippedDates: string[];
   pullFields: ReportFieldKey[];
   pullFieldLabels: string[];
   reviewCount: number;
@@ -1026,11 +1030,20 @@ export async function prepareReportRun(
     const combined = mergeEventData(preparedEvents);
     const eventName = combined.eventName;
 
-    const sessions = pickSessions(combined.periods, sessionOptions);
+    // Sessions with no attendee check-ins (a break week that still has a
+    // Planning Center session) aren't services: leave them out so attendance
+    // rates, "N services" and the weekly charts count only weeks that met
+    // (Andrew, 2026-10-14). An empty week still counts as one of a
+    // template's last N weeks (no reaching back). The attendance tracker
+    // (trend charts) still records those weeks as 0.
+    const { sessions, skippedDates } = pickHeldSessions(combined.periods, combined.checkIns, sessionOptions);
+    if (skippedDates.length) log.info({ skippedDates }, "Report sessions skipped (no check-ins)");
     if (!sessions.length) {
-      throw reportError(404, useRange
-        ? "No Planning Center sessions were found in that date range."
-        : "No Planning Center sessions were found on or before that end date.");
+      throw reportError(404, skippedDates.length
+        ? `The Planning Center sessions in this period had no check-ins (${skippedDates.join(", ")}).`
+        : useRange
+          ? "No Planning Center sessions were found in that date range."
+          : "No Planning Center sessions were found on or before that end date.");
     }
     const selectedSessionIds = new Set(sessions.flatMap((session) => session.periodIds));
     const sessionDateById = new Map(sessions.flatMap((session) => session.periodIds.map((id) => [id, session.date] as const)));
@@ -1041,6 +1054,7 @@ export async function prepareReportRun(
     if (!inRange.length) {
       throw reportError(404, "No attendee check-ins were found in the selected sessions.");
     }
+    const reportFirstTimerIds = reportFirstTimers(combined, inRange);
 
     const includedPeople = new Map(
       combined.included.filter((resource) => resource.id).map((resource) => [resource.id, resource.attributes ?? {}]),
@@ -1110,7 +1124,12 @@ export async function prepareReportRun(
       for (const customField of selectedCustomFields) {
         current[fieldLabel(customField, customLabels)] = firstReportValue(person, customField);
       }
-      const firstTimer = firstTimeIds.has(checkIn.id) || attrs.first_time === true || attrs.first_time_in_event === true;
+      // Per person, judged across all of the report's events (see
+      // reportFirstTimers); the raw per-check-in flag only for the rare
+      // check-in with no person attached.
+      const firstTimer = personId
+        ? reportFirstTimerIds.has(personId)
+        : firstTimeIds.has(checkIn.id) || attrs.first_time === true || attrs.first_time_in_event === true;
       if (firstTimer) current["First Timers"] = "First-timer";
       const sessionDate = sessionDateById.get(relationshipId(checkIn, "event_period"));
       if (sessionDate) current[sessionDate] = true;
@@ -1198,6 +1217,7 @@ export async function prepareReportRun(
       peopleCount: records.size,
       serviceDates,
       sessionCount: sessions.length,
+      skippedDates,
       pullFields,
       pullFieldLabels: pullFields.map((field) => fieldLabel(field, customLabels)),
       reviewCount,

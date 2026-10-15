@@ -125,3 +125,58 @@ export function pickSessions(
     ? sessions.reverse()
     : sessions.slice(0, options.sessionCount).reverse();
 }
+
+// The report's sessions minus any nobody checked in to (e.g. a break week
+// whose Planning Center session still exists), plus the dates left out.
+// Sessions are picked first and filtered after, so an empty week still
+// counts as one of a template's last N weeks (Andrew, 2026-10-14) -- it
+// just doesn't count against anyone's attendance rate.
+export function pickHeldSessions(
+  periods: Resource[],
+  checkIns: Resource[],
+  options: Parameters<typeof pickSessions>[1],
+): { sessions: PickedSession[]; skippedDates: string[] } {
+  const periodsWithCheckIns = new Set(checkIns.map((checkIn) => relId(checkIn, "event_period")).filter(Boolean));
+  const picked = pickSessions(periods, options);
+  const sessions = picked.filter((session) => session.periodIds.some((id) => periodsWithCheckIns.has(id)));
+  const skippedDates = picked.filter((session) => !sessions.includes(session)).map((session) => session.date);
+  return { sessions, skippedDates };
+}
+
+// Who counts as a first-timer in this report. Planning Center's "first time"
+// flag is per event, so when events are joined into one report, or another
+// event's check-ins are copied into a week (week substitutions), someone new
+// to the OTHER event was showing up as a first-timer even though they'd
+// attended this one for months (Andrew, 2026-10-14). Now a person is a
+// first-timer only if one of their check-ins in the report is flagged first
+// time AND they have no earlier check-in anywhere in the report's events
+// (whose full history prepare already loads).
+export function reportFirstTimers(data: EventData, inRange: Resource[]): Set<string> {
+  const firstTimeIds = new Set(data.firstTime.map((checkIn) => checkIn.id));
+  const dateByPeriod = new Map(data.periods.map((period) => [period.id, startsAtOf(period).slice(0, 10)]));
+  const dateOf = (checkIn: Resource): string => {
+    const fromPeriod = dateByPeriod.get(relId(checkIn, "event_period"));
+    if (fromPeriod) return fromPeriod;
+    const created = checkIn.attributes?.created_at;
+    return typeof created === "string" ? created.slice(0, 10) : "";
+  };
+  const earliest = new Map<string, string>();
+  for (const checkIn of data.checkIns) {
+    const person = relId(checkIn, "person");
+    const date = dateOf(checkIn);
+    if (!person || !date) continue;
+    const current = earliest.get(person);
+    if (!current || date < current) earliest.set(person, date);
+  }
+  const result = new Set<string>();
+  for (const checkIn of inRange) {
+    const attributes = checkIn.attributes ?? {};
+    const flagged = firstTimeIds.has(checkIn.id) || attributes.first_time === true || attributes.first_time_in_event === true;
+    if (!flagged) continue;
+    const person = relId(checkIn, "person");
+    const date = dateOf(checkIn);
+    if (!person || !date) continue;
+    if ((earliest.get(person) ?? date) >= date) result.add(person);
+  }
+  return result;
+}

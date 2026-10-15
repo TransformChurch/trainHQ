@@ -90,3 +90,28 @@ test("sumTrendRows adds events week by week and keeps unknowns null", () => {
   assert.deepEqual(rows[0], { weekStart: "2026-08-10", total: 25, male: 10, female: 10, unknown: 0, firstTimers: 2, firstTimersReturned: null });
   assert.equal(rows[1].total, 7);
 });
+
+test("weeks nobody checked in to are left out of the rates but still count as one of the last N weeks", async () => {
+  const { pickHeldSessions } = await import("./reportEvents");
+  // September 2026 Fridays; Sept 11 had a session in Planning Center but no check-ins.
+  const dates = ["2026-08-28", "2026-09-04", "2026-09-11", "2026-09-18", "2026-09-25"];
+  const periods = dates.map((date, index) => ({ id: `p${index}`, attributes: { starts_at: `${date}T23:00:00Z` } }));
+  const checkIns = periods
+    .filter((period) => period.id !== "p2")
+    .map((period, index) => ({ id: `c${index}`, relationships: { event_period: { data: { id: period.id } } } }));
+
+  const month = { endDate: "2026-09-30", startDate: "2026-09-01", cleanupMode: "all_dates" as const, sessionCount: 4 };
+  const september = pickHeldSessions(periods as never, checkIns as never, month);
+  assert.deepEqual(september.skippedDates, ["2026-09-11"]);
+  assert.deepEqual(september.sessions.map((session) => session.date), ["2026-09-04", "2026-09-18", "2026-09-25"]);
+
+  // "Last 4 weeks": the empty week is one of the 4 -- no reaching back to Aug 28.
+  const lastFour = { endDate: "2026-09-30", startDate: "", cleanupMode: "month_quarter" as const, sessionCount: 4 };
+  const four = pickHeldSessions(periods as never, checkIns as never, lastFour);
+  assert.deepEqual(four.skippedDates, ["2026-09-11"]);
+  assert.deepEqual(four.sessions.map((session) => session.date), ["2026-09-04", "2026-09-18", "2026-09-25"]);
+
+  // Nothing left out when every session had check-ins.
+  const all = periods.map((period, index) => ({ id: `a${index}`, relationships: { event_period: { data: { id: period.id } } } }));
+  assert.deepEqual(pickHeldSessions(periods as never, all as never, month).skippedDates, []);
+});

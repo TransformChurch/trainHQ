@@ -355,7 +355,16 @@ def merge_duplicates(rows, fixed_cols, week_cols, flags):
             out["Gender"] = nonblank_genders[0] if nonblank_genders else ""
 
         if "First Timers" in fixed_cols:
-            first_timer = any(is_first_timer(r["First Timers"]) for r in grp)
+            # Duplicates (usually two Planning Center profiles for one
+            # person) only count as a first-timer if EVERY row says so: a
+            # regular whose duplicate profile was made at the kiosk isn't a
+            # first-time guest (Andrew, 2026-10-14). Mixed groups are flagged.
+            marks = [is_first_timer(r["First Timers"]) for r in grp]
+            first_timer = all(marks)
+            if any(marks) and not first_timer:
+                flags["first_timer_conflict"].append(
+                    f"{who}: rows {[r['_rownum'] for r in grp]} -> only some marked first-timer; kept as NOT a first-timer"
+                )
             out["First Timers"] = FIRST_TIMER_VALUE if first_timer else ""
 
         conflicted_fields = []
@@ -603,6 +612,7 @@ def main():
         ("gender_ambiguous", "Blank Gender NOT inferred (name not in lookup -- needs your call)"),
         ("gender_unexpected", "Unexpected Gender values"),
         ("first_timer_unexpected", "Unexpected First Timers values"),
+        ("first_timer_conflict", "Duplicates where only some rows were first-timers (kept as NOT first-timers)"),
         ("near_match", "Near-matches flagged (left as separate records, NOT merged)"),
     ]
     for key, title in section_titles:
@@ -614,7 +624,7 @@ def main():
 
     review_keys = [
         "grade_conflict", "gender_conflict", "field_conflict", "gender_ambiguous",
-        "grade_unexpected", "gender_unexpected", "first_timer_unexpected",
+        "grade_unexpected", "gender_unexpected", "first_timer_unexpected", "first_timer_conflict",
         "near_match",
     ]
     review_count = sum(len(flags[k]) for k in review_keys)

@@ -16,7 +16,7 @@ type EventOption = { id: string; name: string; frequency: string };
 type CleanupMode = "month_quarter" | "all_dates";
 // How a Monthly/Quarterly template picks its sessions: a whole calendar
 // month/quarter (default, so 4- and 5-week months both come out right), a
-// custom date range, or the template's last N sessions (the old behavior).
+// custom date range, or the template's last N weeks (the old behavior).
 type PeriodMode = "month" | "quarter" | "custom" | "sessions";
 type ReportEngine = "youth_quarterly" | "youth_monthly" | "kids_rutherford" | "kids_lyndhurst" | "kids_rutherford_quarterly" | "kids_lyndhurst_quarterly";
 type ReportTemplate = {
@@ -41,6 +41,7 @@ type PreparedRun = {
   reviewCount: number;
   flags: string;
   expiresAt: string;
+  skippedDates?: string[];
 };
 type PreparationProgress = {
   stage: "loading" | "profiles" | "complete" | "failed";
@@ -375,11 +376,11 @@ export default function Reporting() {
                 <option value="month">Previous month ({previousPeriod("month", localToday()).label})</option>
                 <option value="quarter">Previous quarter ({previousPeriod("quarter", localToday()).label})</option>
                 <option value="custom">Custom dates</option>
-                <option value="sessions">Last {activeTemplate?.sessionCount ?? 5} sessions up to an end date</option>
+                <option value="sessions">Last {activeTemplate?.sessionCount ?? 5} weeks up to an end date</option>
               </select>
               <p className="text-xs text-muted-foreground">
                 {periodMode === "sessions"
-                  ? "The template's session count decides how many previous Planning Center sessions are included."
+                  ? `The last ${activeTemplate?.sessionCount ?? 5} weeks with a Planning Center session up to the end date. A week nobody checked in to still counts as one of them, but isn't counted in attendance rates.`
                   : periodMode === "custom"
                     ? "Every Planning Center session in the dates you pick is included."
                     : `${formatRange(startDate, endDate)}: every session in the ${periodMode}, whether it had 4 weeks or 5.`}
@@ -443,7 +444,7 @@ export default function Reporting() {
               <span className="mt-1 block text-muted-foreground">
                 {usesRange
                   ? "Attendance: All sessions in the selected date range"
-                  : `Sessions: ${activeTemplate?.sessionCount ?? 5}`}
+                  : `Weeks: ${activeTemplate?.sessionCount ?? 5}`}
               </span>
             </div>
           )}
@@ -521,7 +522,12 @@ export default function Reporting() {
               </div>
               <p className="text-xs text-muted-foreground">Fields: {prepared.pullFieldLabels.join(" → ")}</p>
               <p className="text-xs text-muted-foreground">
-                Sessions ({prepared.sessionCount}): {prepared.serviceDates.join(", ")}
+                Weeks ({prepared.sessionCount}): {prepared.serviceDates.join(", ")}
+                {!!prepared.skippedDates?.length && (
+                  <span className="block">
+                    Left out (nobody checked in, so not counted in attendance rates): {prepared.skippedDates.join(", ")}
+                  </span>
+                )}
               </p>
               {prepared.reviewCount > 0 && (
                 <details>

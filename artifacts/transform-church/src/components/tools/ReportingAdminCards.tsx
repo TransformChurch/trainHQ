@@ -509,7 +509,7 @@ export function ReportingAdminCards() {
                         {template.engine ? `${reportEngineLabel(template.engine)} (built-in, PDF only)` : "No engine configured"}
                       </p>
                       <p className="mt-1 text-xs text-muted-foreground">
-                        {template.pullFields.length} profile fields · {template.cleanupMode === "all_dates" ? "All Dates" : `${template.sessionCount} sessions`}
+                        {template.pullFields.length} profile fields · {template.cleanupMode === "all_dates" ? "All Dates" : `${template.sessionCount} weeks`}
                       </p>
                     </div>
                     <div className="flex gap-1">
@@ -549,7 +549,7 @@ export function ReportingAdminCards() {
                       </div>
                       {draftCleanupMode === "month_quarter" && (
                         <div className="max-w-xs space-y-2">
-                          <Label htmlFor={`session-count-${template.id}`}>Previous sessions to include</Label>
+                          <Label htmlFor={`session-count-${template.id}`}>Previous weeks to include</Label>
                           <Input
                             id={`session-count-${template.id}`}
                             type="number"
@@ -559,7 +559,7 @@ export function ReportingAdminCards() {
                             onChange={(event) => setDraftSessionCount(Number(event.target.value))}
                           />
                           <p className="text-xs text-muted-foreground">
-                            Counts backward from the report end date. New templates default to 5 sessions.
+                            Counts backward from the report end date, used when a report is set to "Last N weeks". New templates default to 5 weeks.
                           </p>
                         </div>
                       )}
@@ -2569,7 +2569,7 @@ function ScheduledReportsCard() {
               <p className={`text-xs ${schedule.lastRun.status === "error" ? "text-destructive" : "text-muted-foreground"}`}>
                 Last {schedule.lastRun.trigger === "manual" ? "test run" : "run"} {formatJobTime(schedule.lastRun.at)} ({schedule.lastRun.periodLabel}):{" "}
                 {schedule.lastRun.status === "sent"
-                  ? `sent${schedule.lastRun.peopleCount !== undefined ? `, ${schedule.lastRun.peopleCount} people over ${schedule.lastRun.sessionCount} sessions` : ""}`
+                  ? `sent${schedule.lastRun.peopleCount !== undefined ? `, ${schedule.lastRun.peopleCount} people over ${schedule.lastRun.sessionCount} weeks` : ""}`
                   : schedule.lastRun.status === "running" ? "running…" : `failed: ${schedule.lastRun.error ?? "unknown error"}`}
               </p>
             )}
