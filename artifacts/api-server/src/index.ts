@@ -25,4 +25,11 @@ app.listen(port, (err) => {
   }
 
   logger.info({ port }, "Server listening");
+
+  // Keep the Worker's copy of the Weekly Pulse send times current after every
+  // deploy/restart (lib/pulseSchedule.ts). Best-effort.
+  import("./lib/pulseSchedule")
+    .then(({ publishPulseSchedule }) => publishPulseSchedule())
+    .then((result) => logger.info(result, "Weekly Pulse schedule published"))
+    .catch((error) => logger.error({ err: error }, "Could not publish the Weekly Pulse schedule"));
 });

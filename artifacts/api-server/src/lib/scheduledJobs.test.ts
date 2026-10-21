@@ -11,15 +11,23 @@ const record = (overrides: Partial<ScheduledJobRecord>): ScheduledJobRecord => (
   ...overrides,
 });
 
-test("lastExpectedFire finds the latest Monday slot", () => {
-  // Tuesday 10/13 -> Monday 10/12 11:00 UTC
-  assert.equal(lastExpectedFire("weekly_pulse", new Date("2026-10-13T15:00:00Z")).toISOString(), "2026-10-12T11:00:00.000Z");
-  // Monday 10:59 -> previous Monday
-  assert.equal(lastExpectedFire("weekly_pulse", new Date("2026-10-12T10:59:00Z")).toISOString(), "2026-10-05T11:00:00.000Z");
-  // Exactly on time counts as this week
-  assert.equal(lastExpectedFire("group_history_sync", new Date("2026-10-12T07:00:00Z")).toISOString(), "2026-10-12T07:00:00.000Z");
-  // Daily job
-  assert.equal(lastExpectedFire("wiki_drive_sync", new Date("2026-10-13T05:00:00Z")).toISOString(), "2026-10-12T06:00:00.000Z");
+test("lastExpectedFire works in Eastern time, daylight saving included", () => {
+  // Weekly Pulse default: Mondays 7:00 AM Eastern (11:00 UTC in daylight saving time).
+  assert.equal(lastExpectedFire("weekly_pulse", new Date("2026-10-13T15:00:00Z"))!.toISOString(), "2026-10-12T11:00:00.000Z");
+  // Monday 6:59 AM Eastern -> the previous Monday
+  assert.equal(lastExpectedFire("weekly_pulse", new Date("2026-10-12T10:59:00Z"))!.toISOString(), "2026-10-05T11:00:00.000Z");
+  // Group sync Mondays 3:00 AM Eastern; exactly on time counts
+  assert.equal(lastExpectedFire("group_history_sync", new Date("2026-10-12T07:00:00Z"))!.toISOString(), "2026-10-12T07:00:00.000Z");
+  // Wiki Drive sync daily 3:00 AM Eastern
+  assert.equal(lastExpectedFire("wiki_drive_sync", new Date("2026-10-13T06:00:00Z"))!.toISOString(), "2026-10-12T07:00:00.000Z");
+  // In winter (EST, UTC-5) the same Eastern times are an hour later in UTC.
+  assert.equal(lastExpectedFire("wiki_drive_sync", new Date("2026-12-15T12:00:00Z"))!.toISOString(), "2026-12-15T08:00:00.000Z");
+  assert.equal(lastExpectedFire("weekly_pulse", new Date("2026-12-15T12:00:00Z"))!.toISOString(), "2026-12-14T12:00:00.000Z");
+  // Custom Pulse send times: Sunday 1:30 PM and Wednesday 9:00 AM
+  const times = [{ weekday: 0, time: "13:30" }, { weekday: 3, time: "09:00" }];
+  assert.equal(lastExpectedFire("weekly_pulse", new Date("2026-10-15T12:00:00Z"), times)!.toISOString(), "2026-10-14T13:00:00.000Z");
+  assert.equal(lastExpectedFire("weekly_pulse", new Date("2026-10-14T12:59:00Z"), times)!.toISOString(), "2026-10-11T17:30:00.000Z");
+  assert.equal(lastExpectedFire("weekly_pulse", new Date(), []), null);
 });
 
 test("a run with no record after the grace period is missed", () => {

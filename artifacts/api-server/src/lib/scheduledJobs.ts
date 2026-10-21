@@ -16,30 +16,39 @@ import { timingSafeEqual } from "node:crypto";
 import { db, settingsTable } from "@workspace/db";
 import { inArray } from "drizzle-orm";
 import { logger } from "./logger";
+import {
+  DEFAULT_PULSE_SEND_TIMES,
+  describeSendTime,
+  easternParts,
+  FIXED_JOB_TIMES,
+  formatEasternTime,
+  lastEasternOccurrence,
+  WEEKDAY_NAMES,
+  type EasternTime,
+  type PulseSendTime,
+} from "./jobSchedule";
+import { activePulseSendTimes } from "./pulseSchedule";
 
 export type ScheduledJobId = "weekly_pulse" | "group_history_sync" | "checkins_history_sync" | "wiki_drive_sync" | "people_sync" | "scheduled_reports";
 
+// When each job runs is defined once, in US Eastern time, in
+// lib/jobSchedule.ts (shared with the Worker); the Weekly Pulse's times are
+// the admin-chosen send times (lib/pulseSchedule.ts). 2026-10-18.
 type ScheduledJobDefinition = {
   id: ScheduledJobId;
   label: string;
-  // Must match the cron strings in wrangler.toml / src/worker.ts.
-  cron: string;
-  hourUtc: number;
-  weekdayUtc: number | null; // 1 = Monday; null = every day
   secretEnv: "WEEKLY_PULSE_RUN_SECRET" | "WIKI_DRIVE_SYNC_RUN_SECRET";
   // How long after the firing time a missing record counts as "missed".
   graceMinutes: number;
 };
 
 export const SCHEDULED_JOBS: ScheduledJobDefinition[] = [
-  // Fires 12:00 and 13:00 UTC; acts at whichever is 8 AM Eastern, so the
-  // 13:00 winter run still lands inside this 90-minute grace window.
-  { id: "scheduled_reports", label: "Scheduled reports", cron: "0 12,13 * * *", hourUtc: 12, weekdayUtc: null, secretEnv: "WEEKLY_PULSE_RUN_SECRET", graceMinutes: 90 },
-  { id: "people_sync", label: "Planning Center people sync", cron: "0 5 * * 1", hourUtc: 5, weekdayUtc: 1, secretEnv: "WEEKLY_PULSE_RUN_SECRET", graceMinutes: 60 },
-  { id: "group_history_sync", label: "Group attendance auto-sync", cron: "0 7 * * 1", hourUtc: 7, weekdayUtc: 1, secretEnv: "WEEKLY_PULSE_RUN_SECRET", graceMinutes: 30 },
-  { id: "checkins_history_sync", label: "Check-ins attendance auto-sync", cron: "0 8 * * 1", hourUtc: 8, weekdayUtc: 1, secretEnv: "WEEKLY_PULSE_RUN_SECRET", graceMinutes: 30 },
-  { id: "weekly_pulse", label: "Weekly Pulse email", cron: "0 11 * * 1", hourUtc: 11, weekdayUtc: 1, secretEnv: "WEEKLY_PULSE_RUN_SECRET", graceMinutes: 30 },
-  { id: "wiki_drive_sync", label: "Wiki Drive sync", cron: "0 6 * * *", hourUtc: 6, weekdayUtc: null, secretEnv: "WIKI_DRIVE_SYNC_RUN_SECRET", graceMinutes: 30 },
+  { id: "scheduled_reports", label: "Scheduled reports", secretEnv: "WEEKLY_PULSE_RUN_SECRET", graceMinutes: 60 },
+  { id: "people_sync", label: "Planning Center people sync", secretEnv: "WEEKLY_PULSE_RUN_SECRET", graceMinutes: 60 },
+  { id: "group_history_sync", label: "Group attendance auto-sync", secretEnv: "WEEKLY_PULSE_RUN_SECRET", graceMinutes: 30 },
+  { id: "checkins_history_sync", label: "Check-ins attendance auto-sync", secretEnv: "WEEKLY_PULSE_RUN_SECRET", graceMinutes: 30 },
+  { id: "weekly_pulse", label: "Weekly Pulse email", secretEnv: "WEEKLY_PULSE_RUN_SECRET", graceMinutes: 30 },
+  { id: "wiki_drive_sync", label: "Wiki Drive sync", secretEnv: "WIKI_DRIVE_SYNC_RUN_SECRET", graceMinutes: 30 },
 ];
 
 export type ScheduledJobResult = "running" | "ok" | "partial" | "skipped" | "error" | "rejected";
@@ -155,25 +164,34 @@ export async function authorizeScheduledCall(req: Request, res: Response, id: Sc
   return false;
 }
 
-// The most recent time this job should have fired at or before `now`.
-export function lastExpectedFire(id: ScheduledJobId, now: Date = new Date()): Date {
-  const job = definition(id);
-  const candidate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), job.hourUtc, 0, 0));
-  if (candidate > now) candidate.setUTCDate(candidate.getUTCDate() - 1);
-  if (job.weekdayUtc !== null) {
-    while (candidate.getUTCDay() !== job.weekdayUtc) candidate.setUTCDate(candidate.getUTCDate() - 1);
+// A job's Eastern-time schedule. The Weekly Pulse's comes from its send
+// times (pass them in; defaults to the original Monday 7:00 AM).
+function jobTimes(id: ScheduledJobId, pulseTimes: PulseSendTime[]): EasternTime[] {
+  if (id === "weekly_pulse") {
+    return pulseTimes.map((time) => {
+      const [hour, minute] = time.time.split(":").map(Number);
+      return { weekday: time.weekday, hour, minute };
+    });
   }
-  return candidate;
+  const job = FIXED_JOB_TIMES[id];
+  return [{ weekday: job.weekday, hour: job.hour, minute: job.minute }];
 }
 
-const SCHEDULE_TEXT: Record<ScheduledJobId, string> = {
-  people_sync: "Mondays 05:00 UTC",
-  scheduled_reports: "Daily check at 8:00 AM Eastern",
-  group_history_sync: "Mondays 07:00 UTC",
-  checkins_history_sync: "Mondays 08:00 UTC",
-  weekly_pulse: "Mondays 11:00 UTC",
-  wiki_drive_sync: "Daily 06:00 UTC",
-};
+// The most recent time this job should have fired at or before `now`
+// (null when it has no times, e.g. no Weekly Pulse is turned on).
+export function lastExpectedFire(id: ScheduledJobId, now: Date = new Date(), pulseTimes: PulseSendTime[] = DEFAULT_PULSE_SEND_TIMES): Date | null {
+  return lastEasternOccurrence(jobTimes(id, pulseTimes), now);
+}
+
+export function scheduleText(id: ScheduledJobId, pulseTimes: PulseSendTime[] = DEFAULT_PULSE_SEND_TIMES): string {
+  if (id === "weekly_pulse") {
+    return pulseTimes.length ? `${pulseTimes.map(describeSendTime).join(", ")} Eastern` : "No Weekly Pulse is turned on";
+  }
+  const job = FIXED_JOB_TIMES[id];
+  const when = formatEasternTime(job.hour, job.minute);
+  if (id === "scheduled_reports") return `Daily check at ${when} Eastern`;
+  return job.weekday === null ? `Daily at ${when} Eastern` : `${WEEKDAY_NAMES[job.weekday]}s at ${when} Eastern`;
+}
 
 // Slack for clock differences between the Worker and the container.
 const EARLY_TOLERANCE_MS = 5 * 60 * 1000;
@@ -182,10 +200,16 @@ export function assessScheduledJob(
   id: ScheduledJobId,
   record: ScheduledJobRecord | null,
   now: Date = new Date(),
+  pulseTimes: PulseSendTime[] = DEFAULT_PULSE_SEND_TIMES,
 ): ScheduledJobHealth {
   const job = definition(id);
-  const expected = lastExpectedFire(id, now);
-  const base = { id, label: job.label, schedule: SCHEDULE_TEXT[id], lastExpectedAt: expected.toISOString(), record };
+  const expectedOrNull = lastExpectedFire(id, now, pulseTimes);
+  const schedule = scheduleText(id, pulseTimes);
+  if (!expectedOrNull) {
+    return { id, label: job.label, schedule, lastExpectedAt: "", record, status: "ok", message: "Nothing is scheduled." };
+  }
+  const expected = expectedOrNull;
+  const base = { id, label: job.label, schedule, lastExpectedAt: expected.toISOString(), record };
   const pastGrace = now.getTime() > expected.getTime() + job.graceMinutes * 60 * 1000;
   const coversLatest = !!record && new Date(record.lastAttemptAt).getTime() >= expected.getTime() - EARLY_TOLERANCE_MS;
 
@@ -194,7 +218,7 @@ export function assessScheduledJob(
   }
   if (!coversLatest) {
     return pastGrace
-      ? { ...base, status: "missed", message: `No run was recorded for ${expected.toISOString().slice(0, 10)}. The cron may not have fired, or the Worker failed before reaching the API -- check the Worker's logs in Cloudflare.` }
+      ? { ...base, status: "missed", message: `No run was recorded for ${easternParts(expected).ymd}. The scheduler may not have fired, or the Worker failed before reaching the API -- check the Worker's logs in Cloudflare.` }
       : { ...base, status: "ok", message: "Waiting for this run's scheduled time." };
   }
   switch (record.result) {
@@ -220,7 +244,8 @@ export function assessScheduledJob(
 export async function getScheduledJobsHealth(now: Date = new Date()): Promise<ScheduledJobHealth[]> {
   const ids = SCHEDULED_JOBS.map((job) => job.id);
   const records = await readRecords(ids);
-  return ids.map((id) => assessScheduledJob(id, records.get(id) ?? null, now));
+  const pulseTimes = await activePulseSendTimes();
+  return ids.map((id) => assessScheduledJob(id, records.get(id) ?? null, now, pulseTimes));
 }
 
 // Maps an attendance auto-sync run (group or check-ins) to a job result.

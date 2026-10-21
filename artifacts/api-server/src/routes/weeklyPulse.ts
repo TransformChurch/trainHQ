@@ -28,6 +28,8 @@ import { getValidPlanningCenterAccessToken } from "../lib/planningCenter";
 import { sendEmail } from "../lib/email";
 import { summarizeGroupAttendance } from "../lib/groupAttendance";
 import { logger } from "../lib/logger";
+import { normalizeSendTimes, sendTimeKey } from "../lib/jobSchedule";
+import { publishPulseSchedule, readAllSendTimes, saveSendTimes, sendTimesFor } from "../lib/pulseSchedule";
 import { authorizeScheduledCall, getScheduledJobsHealth, recordScheduledJob } from "../lib/scheduledJobs";
 import {
   CHECK_INS_BASE,
@@ -673,7 +675,9 @@ router.get("/forms/:formId/fields", requireAdmin, async (req, res) => {
 // ── GET /api/weekly-pulse/config ────────────────────────────────────────────
 router.get("/config", requireAdmin, async (_req, res) => {
   const rows = await db.select().from(weeklyPulseConfigTable).orderBy(weeklyPulseConfigTable.name);
+  const sendTimes = await readAllSendTimes();
   res.json(rows.map((row) => ({
+    sendTimes: sendTimesFor(row.id, sendTimes),
     ...row,
     recipientEmails: parseJsonArray(row.recipientEmails),
     checkinsEventIds: parseJsonArray(row.checkinsEventIds),
@@ -714,6 +718,13 @@ router.post("/config", requireAdmin, async (req, res) => {
       res.status(400).json({ error: "Select at least one Check-Ins event, group, or form." });
       return;
     }
+    // Send times (US Eastern). Omitted -> keep what's saved (or the Monday
+    // 7:00 AM default); an empty list isn't allowed for an enabled Pulse.
+    const sendTimes = req.body?.sendTimes === undefined ? null : normalizeSendTimes(req.body.sendTimes);
+    if (sendTimes && !sendTimes.length) {
+      res.status(400).json({ error: "Add at least one send time." });
+      return;
+    }
 
     const values = {
       name,
@@ -733,7 +744,13 @@ router.post("/config", requireAdmin, async (req, res) => {
       res.status(404).json({ error: "Weekly pulse config not found." });
       return;
     }
-    res.json({ ...rows[0], recipientEmails, checkinsEventIds, groupIds, pcoForms });
+    if (sendTimes) await saveSendTimes(rows[0].id, sendTimes);
+    const published = await publishPulseSchedule();
+    if (!published.published) req.log.warn({ slots: published.slots }, "Weekly Pulse schedule not published to the Worker");
+    res.json({
+      ...rows[0], recipientEmails, checkinsEventIds, groupIds, pcoForms,
+      sendTimes: sendTimesFor(rows[0].id, await readAllSendTimes()),
+    });
   } catch (error) {
     sendError(req, res, error, "Failed to save weekly pulse config");
   }
@@ -747,6 +764,8 @@ router.delete("/config/:id", requireAdmin, async (req, res) => {
     return;
   }
   await db.delete(weeklyPulseConfigTable).where(eq(weeklyPulseConfigTable.id, id));
+  await saveSendTimes(id, null);
+  await publishPulseSchedule();
   res.status(204).end();
 });
 
@@ -885,7 +904,13 @@ router.post("/run-scheduled", async (req, res) => {
   if (!(await authorizeScheduledCall(req, res, "weekly_pulse"))) return;
   await recordScheduledJob("weekly_pulse", "running");
 
-  const configs = await db.select().from(weeklyPulseConfigTable).where(eq(weeklyPulseConfigTable.enabled, true));
+  // The Worker says which Eastern send time fired (x-pulse-slot, e.g.
+  // "1@07:00"); only Pulses with that send time go out. No header = an older
+  // Worker: send every enabled Pulse, as before.
+  const slot = req.header("x-pulse-slot") ?? "";
+  const allSendTimes = await readAllSendTimes();
+  const configs = (await db.select().from(weeklyPulseConfigTable).where(eq(weeklyPulseConfigTable.enabled, true)))
+    .filter((config) => !slot || sendTimesFor(config.id, allSendTimes).some((time) => sendTimeKey(time) === slot));
   const results: { id: number; sent: boolean; error?: string }[] = [];
   for (const config of configs) {
     try {
@@ -909,7 +934,7 @@ router.post("/run-scheduled", async (req, res) => {
     "weekly_pulse",
     !results.length ? "skipped" : !problems.length ? "ok" : sent ? "partial" : "error",
     !results.length
-      ? "No Weekly Pulse is turned on."
+      ? slot ? `No Weekly Pulse is set to send at ${slot}.` : "No Weekly Pulse is turned on."
       : problems.length
         ? `${sent} of ${results.length} sent. ${problems.map((result) => result.error ?? "Not sent").join(" | ")}`
         : `${sent} of ${results.length} sent.`,

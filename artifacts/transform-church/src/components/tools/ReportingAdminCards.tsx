@@ -61,6 +61,26 @@ type WeeklyPulseSources = {
 };
 type WeeklyPulseFormField = { id: string; label: string };
 type WeeklyPulseFormEntry = { formId: string; fieldId: string | null };
+// When a Weekly Pulse goes out: weekday (0 = Sunday) + "HH:MM" in US Eastern
+// time, 15-minute steps (API: lib/jobSchedule.ts). Default Monday 7:00 AM.
+type PulseSendTime = { weekday: number; time: string };
+const DEFAULT_PULSE_SEND_TIMES: PulseSendTime[] = [{ weekday: 1, time: "07:00" }];
+const PULSE_WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+const PULSE_TIME_OPTIONS = Array.from({ length: 96 }, (_, index) => {
+  const hour = Math.floor(index / 4);
+  const minute = (index % 4) * 15;
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+});
+
+function formatPulseTime(time: string): string {
+  const [hour, minute] = time.split(":").map(Number);
+  return `${hour % 12 === 0 ? 12 : hour % 12}:${String(minute).padStart(2, "0")} ${hour < 12 ? "AM" : "PM"}`;
+}
+
+function describeSendTimes(times: PulseSendTime[]): string {
+  return times.map((time) => `${PULSE_WEEKDAYS[time.weekday].slice(0, 3)} ${formatPulseTime(time.time)}`).join(", ") + " Eastern";
+}
+
 type WeeklyPulseConfig = {
   id: number;
   name: string;
@@ -69,6 +89,7 @@ type WeeklyPulseConfig = {
   checkinsEventIds: string[];
   groupIds: string[];
   pcoForms: WeeklyPulseFormEntry[];
+  sendTimes: PulseSendTime[];
   lastRunAt: string | null;
   lastRunStatus: "success" | "error" | null;
   lastRunError: string | null;
@@ -109,6 +130,7 @@ export function ReportingAdminCards() {
   const [editingPulseId, setEditingPulseId] = useState<number | "new" | null>(null);
   const [pulseDraftName, setPulseDraftName] = useState("Weekly Attendance Pulse");
   const [pulseDraftEnabled, setPulseDraftEnabled] = useState(true);
+  const [pulseDraftSendTimes, setPulseDraftSendTimes] = useState<PulseSendTime[]>(DEFAULT_PULSE_SEND_TIMES);
   const [pulseDraftRecipients, setPulseDraftRecipients] = useState("");
   const [pulseDraftCheckinsEventIds, setPulseDraftCheckinsEventIds] = useState<string[]>([]);
   const [pulseDraftGroupIds, setPulseDraftGroupIds] = useState<string[]>([]);
@@ -280,6 +302,7 @@ export function ReportingAdminCards() {
   const resetPulseDraft = () => {
     setPulseDraftName("Weekly Attendance Pulse");
     setPulseDraftEnabled(true);
+    setPulseDraftSendTimes(DEFAULT_PULSE_SEND_TIMES);
     setPulseDraftRecipients("");
     setPulseDraftCheckinsEventIds([]);
     setPulseDraftGroupIds([]);
@@ -298,6 +321,7 @@ export function ReportingAdminCards() {
     }
     setPulseDraftName(config.name);
     setPulseDraftEnabled(config.enabled);
+    setPulseDraftSendTimes(config.sendTimes?.length ? config.sendTimes : DEFAULT_PULSE_SEND_TIMES);
     setPulseDraftRecipients(config.recipientEmails.join(", "));
     setPulseDraftCheckinsEventIds(config.checkinsEventIds);
     setPulseDraftGroupIds(config.groupIds);
@@ -351,6 +375,7 @@ export function ReportingAdminCards() {
           id: typeof editingPulseId === "number" ? editingPulseId : undefined,
           name: pulseDraftName.trim() || "Weekly Attendance Pulse",
           enabled: pulseDraftEnabled,
+          sendTimes: pulseDraftSendTimes,
           recipientEmails,
           checkinsEventIds: pulseDraftCheckinsEventIds,
           groupIds: pulseDraftGroupIds,
@@ -723,7 +748,7 @@ export function ReportingAdminCards() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2"><Mail className="h-5 w-5" /> Weekly Pulse</CardTitle>
             <p className="text-sm text-muted-foreground">
-              An automated email, sent every Monday morning, with a simple numbers summary of attendance from the
+              An automated email, sent at the days and times you choose (US Eastern), with a simple numbers summary of attendance from the
               Check-Ins events and Groups you pick below, plus an optional count from a Planning Center form.
             </p>
           </CardHeader>
@@ -754,6 +779,9 @@ export function ReportingAdminCards() {
                         {" · "}
                         {config.groupIds.length} group{config.groupIds.length === 1 ? "" : "s"}
                         {config.pcoForms.length ? ` · ${config.pcoForms.length} form${config.pcoForms.length === 1 ? "" : "s"}` : ""}
+                      </p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Sends {describeSendTimes(config.sendTimes?.length ? config.sendTimes : DEFAULT_PULSE_SEND_TIMES)}
                       </p>
                       <p className="mt-1 text-xs text-muted-foreground">
                         {config.lastRunAt
@@ -797,6 +825,8 @@ export function ReportingAdminCards() {
                       setName={setPulseDraftName}
                       enabled={pulseDraftEnabled}
                       setEnabled={setPulseDraftEnabled}
+                      sendTimes={pulseDraftSendTimes}
+                      setSendTimes={setPulseDraftSendTimes}
                       recipients={pulseDraftRecipients}
                       setRecipients={setPulseDraftRecipients}
                       sources={weeklyPulseSources}
@@ -830,6 +860,8 @@ export function ReportingAdminCards() {
                   setName={setPulseDraftName}
                   enabled={pulseDraftEnabled}
                   setEnabled={setPulseDraftEnabled}
+                  sendTimes={pulseDraftSendTimes}
+                  setSendTimes={setPulseDraftSendTimes}
                   recipients={pulseDraftRecipients}
                   setRecipients={setPulseDraftRecipients}
                   sources={weeklyPulseSources}
@@ -1687,6 +1719,8 @@ function PulseConfigForm({
   setName,
   enabled,
   setEnabled,
+  sendTimes,
+  setSendTimes,
   recipients,
   setRecipients,
   sources,
@@ -1712,6 +1746,8 @@ function PulseConfigForm({
   setName: (value: string) => void;
   enabled: boolean;
   setEnabled: (value: boolean) => void;
+  sendTimes: PulseSendTime[];
+  setSendTimes: (value: PulseSendTime[]) => void;
   recipients: string;
   setRecipients: (value: string) => void;
   sources: WeeklyPulseSources | null;
@@ -1744,6 +1780,50 @@ function PulseConfigForm({
       <div className="flex items-center gap-3">
         <Switch id={`${idPrefix}-enabled`} checked={enabled} onCheckedChange={setEnabled} />
         <Label htmlFor={`${idPrefix}-enabled`}>Send automatically every Monday morning</Label>
+      </div>
+
+      <div className="max-w-lg space-y-2">
+        <Label>Send times (US Eastern)</Label>
+        <div className="space-y-2">
+          {sendTimes.map((sendTime, index) => (
+            <div key={index} className="flex flex-wrap items-center gap-2">
+              <select
+                aria-label="Day"
+                className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+                value={sendTime.weekday}
+                onChange={(event) => setSendTimes(sendTimes.map((entry, i) => (i === index ? { ...entry, weekday: Number(event.target.value) } : entry)))}
+              >
+                {PULSE_WEEKDAYS.map((day, dayIndex) => <option key={day} value={dayIndex}>{day}</option>)}
+              </select>
+              <span className="text-sm text-muted-foreground">at</span>
+              <select
+                aria-label="Time"
+                className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+                value={sendTime.time}
+                onChange={(event) => setSendTimes(sendTimes.map((entry, i) => (i === index ? { ...entry, time: event.target.value } : entry)))}
+              >
+                {PULSE_TIME_OPTIONS.map((time) => <option key={time} value={time}>{formatPulseTime(time)}</option>)}
+              </select>
+              {sendTimes.length > 1 && (
+                <Button type="button" variant="ghost" size="sm" onClick={() => setSendTimes(sendTimes.filter((_, i) => i !== index))} aria-label="Remove send time">
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              )}
+            </div>
+          ))}
+        </div>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => setSendTimes([...sendTimes, { weekday: 1, time: "07:00" }])}
+          disabled={sendTimes.length >= 21}
+        >
+          <Plus className="mr-2 h-4 w-4" /> Add send time
+        </Button>
+        <p className="text-xs text-muted-foreground">
+          Each send covers the 7 days before the send day (a Monday send covers the previous Monday-Sunday).
+        </p>
       </div>
 
       <div className="max-w-lg space-y-2">

@@ -72,41 +72,19 @@ storage = "sqlite"
 binding = "STORAGE_BUCKET"
 bucket_name = "transform-church-storage"
 
-# Fires the Worker's scheduled() handler (src/worker.ts), which makes an
-# internal, secret-authenticated call into the container for each entry
-# below ("0 11 * * 1" -> Weekly Pulse's POST /api/weekly-pulse/run-scheduled;
-# "0 6 * * *" -> the Wiki Drive sync's
-# POST /api/admin/wiki-drive-sync/run-scheduled, which also has
-# WIKI_DRIVE_SYNC_CRON in worker.ts hardcoded to match it -- keep both in
-# sync if this time ever changes). Cloudflare Cron Triggers run in UTC with
-# no timezone support, so both are pinned to fixed UTC times rather than
-# "local morning"; 11:00 UTC is 6-7am US Eastern depending on daylight
-# saving, and 6:00 UTC is 1-2am US Eastern (picked to match this feature's
-# previous default "sync around 6am UTC" behavior from its in-process
-# fallback scheduler -- see WIKI_DRIVE_SYNC_HOUR_UTC in
-# lib/wikiDriveSync.ts's startWikiDriveScheduler()). Adjust here (and
-# redeploy) if a different time is wanted for either.
-# "0 7 * * 1" -> the weekly group attendance auto-sync,
-# POST /api/group-history/run-scheduled (GROUP_HISTORY_SYNC_CRON in
-# worker.ts must match). 07:00 UTC Monday is 3am US Eastern during daylight
-# saving time and 2am in winter. It does nothing unless an admin has turned
-# "Update automatically every week" on in Group attendance history.
-# "0 8 * * 1" -> the weekly Check-Ins attendance auto-sync,
-# POST /api/attendance-history/run-scheduled (CHECKINS_HISTORY_SYNC_CRON in
-# worker.ts must match), an hour after the group sync: 4am US Eastern in
-# daylight saving time, 3am in winter. Off unless an admin turns on
-# "Update automatically every week" in Attendance history.
-# "0 5 * * 1" -> the weekly Planning Center people sync,
-# POST /api/people-sync/run-scheduled (PEOPLE_SYNC_CRON in worker.ts must
-# match), before the attendance syncs: 1am US Eastern in daylight saving
-# time, midnight in winter. Off unless an admin turns on the weekly sync in
-# "Planning Center people sync" on the Reporting page.
-# "0 12,13 * * *" -> scheduled reports, POST /api/scheduled-reports/run-scheduled
-# (SCHEDULED_REPORTS_CRON in worker.ts must match). Only the call that is
-# 8 AM US Eastern acts (12:00 UTC in daylight saving time, 13:00 in winter);
-# weekly schedules run Mondays, monthly on the 1st, quarterly on Jan/Apr/Jul/Oct 1.
+# One Cron Trigger drives every automatic job (2026-10-18). Cloudflare
+# crons only run in UTC, so instead of one UTC cron per job, the Worker's
+# scheduled() handler (src/worker.ts) runs every 15 minutes, converts the
+# time to US Eastern (daylight saving included) and runs whatever is due --
+# see artifacts/api-server/src/lib/jobSchedule.ts for the times:
+#   people sync Mon 1:00 AM, Wiki Drive sync daily 3:00 AM, group attendance
+#   sync Mon 3:00 AM, Check-Ins attendance sync Mon 4:00 AM, scheduled
+#   reports daily check 8:00 AM, Weekly Pulse at each Pulse's own send times
+#   (set in the Reporting page; default Mon 7:00 AM), all Eastern.
+# The API container is only woken when a job is due. SCHEDULER_CRON in
+# worker.ts must match this string exactly.
 [triggers]
-crons = ["0 11 * * 1", "0 6 * * *", "0 7 * * 1", "0 8 * * 1", "0 5 * * 1", "0 12,13 * * *"]
+crons = ["*/15 * * * *"]
 
 [vars]
 NODE_ENV = "production"

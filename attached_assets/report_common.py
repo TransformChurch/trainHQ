@@ -338,6 +338,15 @@ def weekly_total_label(v) -> str:
     return f"{v:,.0f}" if v else "0 (week off)"
 
 
+def weekly_total_labeler(num_bars: int):
+    """weekly_total_label for a chart's bar count: monthly charts (a few
+    wide bars) say "0 (week off)"; quarterly charts (12-14 narrow bars)
+    stack a shorter "0 / off" so neighboring weeks off don't overlap."""
+    if num_bars <= 6:
+        return weekly_total_label
+    return lambda v: f"{v:,.0f}" if v else "0\noff"
+
+
 def draw_ordinal_bar(ax: plt.Axes, categories: list, values: list, color: str = CATEGORICAL[0],
                       horizontal: bool = True, value_fmt=lambda v: f"{v:,.0f}") -> None:
     """A single-series bar for an ORDERED categorical axis (grades, age

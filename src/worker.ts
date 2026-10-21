@@ -11,6 +11,14 @@
 //
 // See: https://developers.cloudflare.com/containers/configuration/workers-connections/
 import { Container, ContainerProxy, getContainer } from "@cloudflare/containers";
+import {
+  DEFAULT_PULSE_SEND_TIMES,
+  dueJobs,
+  FIXED_JOB_TIMES,
+  PULSE_SCHEDULE_KEY,
+  sendTimeKey,
+  WEEKLY_PULSE_PATH,
+} from "../artifacts/api-server/src/lib/jobSchedule";
 
 // Required by Cloudflare: outbound interception (this Worker's
 // `outboundByHost` handler below, which bridges the container's
@@ -72,20 +80,12 @@ export interface Env {
 // object with every var/secret below present.
 const env = ambientEnv as unknown as Env;
 
-// Must match the Wiki Drive sync's entry in wrangler.toml's [triggers]
-// crons array exactly (string equality against ScheduledController.cron).
-const WIKI_DRIVE_SYNC_CRON = "0 6 * * *";
-// Same rule for the weekly group attendance auto-sync (routes/groupHistory.ts).
-const GROUP_HISTORY_SYNC_CRON = "0 7 * * 1";
-// And for the weekly Check-Ins attendance auto-sync (routes/attendanceHistory.ts),
-// an hour after the group sync so the two never compete for Planning Center.
-const CHECKINS_HISTORY_SYNC_CRON = "0 8 * * 1";
-// And for the weekly Planning Center people sync (routes/peopleSync.ts),
-// before both attendance syncs so reports that morning see fresh profiles.
-const PEOPLE_SYNC_CRON = "0 5 * * 1";
-// Scheduled reports (routes/scheduledReports.ts): 12:00 and 13:00 UTC daily;
-// the API acts only at the one that is 8 AM Eastern (DST-proof).
-const SCHEDULED_REPORTS_CRON = "0 12,13 * * *";
+// One Cron Trigger ("*/15 * * * *" in wrangler.toml) drives every automatic
+// job. Each tick works out the current US Eastern time and runs whatever is
+// due then -- fixed job times and the Weekly Pulse's admin-chosen send times
+// both live in artifacts/api-server/src/lib/jobSchedule.ts (2026-10-18).
+// The API container is only woken when something is actually due.
+const SCHEDULER_CRON = "*/15 * * * *";
 
 export class TransformChurchContainer extends Container<Env> {
   defaultPort = 3000;
@@ -210,6 +210,47 @@ export class TransformChurchContainer extends Container<Env> {
   }
 }
 
+// The Weekly Pulse send times the API published to R2 (see
+// routes/weeklyPulse.ts publishPulseSchedule). Missing or unreadable file ->
+// the original Monday 7:00 AM behavior.
+async function readPulseSlots(workerEnv: Env): Promise<string[]> {
+  try {
+    const object = await workerEnv.STORAGE_BUCKET.get(PULSE_SCHEDULE_KEY);
+    if (!object) return DEFAULT_PULSE_SEND_TIMES.map(sendTimeKey);
+    const parsed = JSON.parse(await object.text()) as { slots?: unknown };
+    return Array.isArray(parsed.slots) ? parsed.slots.filter((slot): slot is string => typeof slot === "string") : [];
+  } catch (error) {
+    console.error(`Could not read the Weekly Pulse schedule: ${error instanceof Error ? error.message : String(error)}`);
+    return DEFAULT_PULSE_SEND_TIMES.map(sendTimeKey);
+  }
+}
+
+async function callContainer(workerEnv: Env, path: string, secret: string, label: string, extraHeaders: Record<string, string> = {}) {
+  const request = new Request(`https://internal${path}`, {
+    method: "POST",
+    headers: { "x-internal-secret": secret, ...extraHeaders },
+  });
+  const response = await getContainer(workerEnv.API_CONTAINER, "primary").fetch(request);
+  if (!response.ok) {
+    const body = await response.text().catch(() => "");
+    console.error(`${label} failed: ${response.status} ${body.slice(0, 500)}`);
+  }
+}
+
+async function runDueJobs(instant: Date, workerEnv: Env): Promise<void> {
+  const { fixed, pulseSlot } = dueJobs(instant, await readPulseSlots(workerEnv));
+  const calls: Promise<void>[] = fixed.map((id) => {
+    const job = FIXED_JOB_TIMES[id];
+    const secret = job.secret === "wiki" ? workerEnv.WIKI_DRIVE_SYNC_RUN_SECRET ?? "" : workerEnv.WEEKLY_PULSE_RUN_SECRET ?? "";
+    return callContainer(workerEnv, job.path, secret, id);
+  });
+  if (pulseSlot) {
+    // The slot tells the API which Pulses to send (those with this send time).
+    calls.push(callContainer(workerEnv, WEEKLY_PULSE_PATH, workerEnv.WEEKLY_PULSE_RUN_SECRET ?? "", "weekly_pulse", { "x-pulse-slot": pulseSlot }));
+  }
+  await Promise.all(calls);
+}
+
 export default {
   async fetch(request: Request, workerEnv: Env): Promise<Response> {
     // Single named instance for now -- this app is stateless (JWT auth, no
@@ -220,93 +261,12 @@ export default {
     return getContainer(workerEnv.API_CONTAINER, "primary").fetch(request);
   },
 
-  // Fires per [triggers] crons in wrangler.toml -- currently Monday morning
-  // (Weekly Pulse) and once daily (Wiki Drive sync). The Container has no
-  // ingress of its own -- this is the only thing that can reach it on a
-  // schedule, so each branch below just makes the same internal call a
-  // manual "run now"/"send test now" click in the admin UI would make,
-  // authenticated with a shared secret instead of an admin's JWT (see
-  // routes/weeklyPulse.ts's and routes/adminWikiDriveSync.ts's
-  // POST /run-scheduled routes for why that's necessary and how it's
-  // checked). `controller.cron` is which of wrangler.toml's `crons` entries
-  // fired this invocation, so the two schedules are told apart by matching
-  // against the Wiki Drive sync's entry; anything else (i.e. the Weekly
-  // Pulse entry) falls through to the original behavior.
+  // Fires every 15 minutes (SCHEDULER_CRON). See lib/jobSchedule.ts for
+  // the Eastern-time schedule. Each due job is the same internal call a
+  // manual "run now" in the admin UI would make, authenticated with a shared
+  // secret instead of an admin's JWT (see the /run-scheduled routes).
   async scheduled(controller: ScheduledController, workerEnv: Env, ctx: ExecutionContext): Promise<void> {
-    ctx.waitUntil(
-      (async () => {
-        if (controller.cron === WIKI_DRIVE_SYNC_CRON) {
-          const request = new Request("https://internal/api/admin/wiki-drive-sync/run-scheduled", {
-            method: "POST",
-            headers: { "x-internal-secret": workerEnv.WIKI_DRIVE_SYNC_RUN_SECRET ?? "" },
-          });
-          const response = await getContainer(workerEnv.API_CONTAINER, "primary").fetch(request);
-          if (!response.ok) {
-            const body = await response.text().catch(() => "");
-            console.error(`Wiki Drive scheduled sync failed: ${response.status} ${body.slice(0, 500)}`);
-          }
-          return;
-        }
-        if (controller.cron === GROUP_HISTORY_SYNC_CRON) {
-          // Reuses the Weekly Pulse's internal secret rather than adding a
-          // new one; the container route checks the same env var.
-          const request = new Request("https://internal/api/group-history/run-scheduled", {
-            method: "POST",
-            headers: { "x-internal-secret": workerEnv.WEEKLY_PULSE_RUN_SECRET ?? "" },
-          });
-          const response = await getContainer(workerEnv.API_CONTAINER, "primary").fetch(request);
-          if (!response.ok) {
-            const body = await response.text().catch(() => "");
-            console.error(`Group history auto-sync failed: ${response.status} ${body.slice(0, 500)}`);
-          }
-          return;
-        }
-        if (controller.cron === SCHEDULED_REPORTS_CRON) {
-          const request = new Request("https://internal/api/scheduled-reports/run-scheduled", {
-            method: "POST",
-            headers: { "x-internal-secret": workerEnv.WEEKLY_PULSE_RUN_SECRET ?? "" },
-          });
-          const response = await getContainer(workerEnv.API_CONTAINER, "primary").fetch(request);
-          if (!response.ok) {
-            const body = await response.text().catch(() => "");
-            console.error(`Scheduled reports failed: ${response.status} ${body.slice(0, 500)}`);
-          }
-          return;
-        }
-        if (controller.cron === PEOPLE_SYNC_CRON) {
-          const request = new Request("https://internal/api/people-sync/run-scheduled", {
-            method: "POST",
-            headers: { "x-internal-secret": workerEnv.WEEKLY_PULSE_RUN_SECRET ?? "" },
-          });
-          const response = await getContainer(workerEnv.API_CONTAINER, "primary").fetch(request);
-          if (!response.ok) {
-            const body = await response.text().catch(() => "");
-            console.error(`People sync failed: ${response.status} ${body.slice(0, 500)}`);
-          }
-          return;
-        }
-        if (controller.cron === CHECKINS_HISTORY_SYNC_CRON) {
-          const request = new Request("https://internal/api/attendance-history/run-scheduled", {
-            method: "POST",
-            headers: { "x-internal-secret": workerEnv.WEEKLY_PULSE_RUN_SECRET ?? "" },
-          });
-          const response = await getContainer(workerEnv.API_CONTAINER, "primary").fetch(request);
-          if (!response.ok) {
-            const body = await response.text().catch(() => "");
-            console.error(`Attendance history auto-sync failed: ${response.status} ${body.slice(0, 500)}`);
-          }
-          return;
-        }
-        const request = new Request("https://internal/api/weekly-pulse/run-scheduled", {
-          method: "POST",
-          headers: { "x-internal-secret": workerEnv.WEEKLY_PULSE_RUN_SECRET ?? "" },
-        });
-        const response = await getContainer(workerEnv.API_CONTAINER, "primary").fetch(request);
-        if (!response.ok) {
-          const body = await response.text().catch(() => "");
-          console.error(`Weekly pulse scheduled run failed: ${response.status} ${body.slice(0, 500)}`);
-        }
-      })(),
-    );
+    if (controller.cron !== SCHEDULER_CRON) return;
+    ctx.waitUntil(runDueJobs(new Date(controller.scheduledTime), workerEnv));
   },
 };

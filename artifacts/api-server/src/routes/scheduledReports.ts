@@ -7,9 +7,9 @@
 // "scheduled_reports"), so no migration was needed. Each run prepares the
 // report exactly like the Reporting page (prepareReportRun in
 // routes/reports.ts, using the schedule owner's Planning Center connection)
-// and emails it like "Email PDF" (emailReportPdf). The Worker's Cron
-// Trigger calls POST /run-scheduled at 12:00 and 13:00 UTC daily; only the
-// call that lands at 8 AM Eastern acts, which covers daylight saving time.
+// and emails it like "Email PDF" (emailReportPdf). The Worker's scheduler
+// calls POST /run-scheduled daily at 8:00 AM Eastern (lib/jobSchedule.ts,
+// daylight saving included).
 import { Router, type IRouter, type Request, type Response } from "express";
 import { randomUUID } from "crypto";
 import { db, reportTemplatesTable, settingsTable } from "@workspace/db";
@@ -249,14 +249,13 @@ router.post("/:id/run", requireAdmin, async (req, res) => {
 });
 
 // ── POST /api/scheduled-reports/run-scheduled ───────────────────────────────
-// Worker Cron Trigger, 12:00 and 13:00 UTC daily (WEEKLY_PULSE_RUN_SECRET).
+// Worker scheduler, daily at 8:00 AM Eastern (WEEKLY_PULSE_RUN_SECRET).
 router.post("/run-scheduled", async (req, res) => {
   if (!(await authorizeScheduledCall(req, res, "scheduled_reports"))) return;
   const now = new Date();
-  // Only one of the two daily triggers is 8 AM Eastern (12:00 UTC in
-  // daylight saving time, 13:00 UTC in winter). The other is ignored without
-  // recording anything, so it never overwrites the real run's result on the
-  // Scheduled jobs card.
+  // Safety net: the Worker only calls at 8 AM Eastern, but an older Worker
+  // (or a stray call) at another hour is ignored without recording anything,
+  // so it never overwrites the real run's result on the Scheduled jobs card.
   if (easternHour(now) !== SCHEDULE_HOUR_EASTERN) {
     res.json({ skipped: true, reason: "not 8 AM Eastern" });
     return;
