@@ -59,6 +59,7 @@ from report_common import (
     grade_colors, load_cleaned_csv, new_page, nonzero_slices, save_pdf, section_title,
     setup_style, shade_ramp, style_axes, weekly_total_label,
 )
+from report_map import draw_location_map_page, load_locations
 
 ORG_NAME = "Transform Church"
 OTHER_BAND = "Other/Unknown age"
@@ -390,7 +391,7 @@ def draw_engagement(ax, row_labels: list, metrics: dict, colors: dict):
 # ============================================================================
 
 def render(data: CleanedData, config: SeasonConfig, meta: dict | None = None,
-           logo_path: str | Path | None = None) -> list:
+           logo_path: str | Path | None = None, locations: dict | None = None) -> list:
     setup_style()
     meta = meta or {}
     week_dates = data.week_dates
@@ -558,6 +559,12 @@ def render(data: CleanedData, config: SeasonConfig, meta: dict | None = None,
     ax = f4.add_axes((0.24, eng_top - 0.05 - eng_h, 0.70, eng_h))
     draw_engagement(ax, eng_rows, metrics, eng_colors)
     figs.append(f4)
+
+    # Optional last page: where attendees live (see report_map.py).
+    if locations is not None:
+        figs.append(draw_location_map_page(figsize, title, period_label, locations,
+                                           logo_path=logo, people_word="attendees",
+                                           subtitle=header_sub))
     return figs
 
 
@@ -572,10 +579,12 @@ def main():
     # Accepted (and ignored) so the server can pass the same trend flag it
     # passes every engine; season reports chart their own nights.
     ap.add_argument("--trend-json")
+    ap.add_argument("--locations-json", help="attendees per ZIP code; adds the 'Where our attendees live' map page")
     args = ap.parse_args()
 
     data = load_cleaned_csv(args.data)
-    figs = render(data, CONFIGS[args.audience], meta=load_meta(args.meta_json), logo_path=args.logo)
+    figs = render(data, CONFIGS[args.audience], meta=load_meta(args.meta_json), logo_path=args.logo,
+                  locations=load_locations(args.locations_json))
     save_pdf(figs, args.out_pdf)
     print(f"Wrote {args.out_pdf}")
 

@@ -47,6 +47,7 @@ import {
   type GroupMembership,
   type SeasonRunMeta,
 } from "../lib/reportGroups";
+import { loadRunLocations, parseRunLocations, runMetaWithLocations, type RunLocations } from "../lib/reportLocations";
 
 const router: IRouter = Router();
 const storage = new ObjectStorageService();
@@ -133,8 +134,18 @@ const REPORT_FIELDS = [
   { key: "completed_thrive", label: "Completed Thrive" },
   { key: "baptized", label: "Baptized?" },
   { key: "last_served", label: "Last served" },
+  // Town-level address (2026-10-21): from the person's primary address (else
+  // their first), via the people sync. The street is never read.
+  { key: "city", label: "City" },
+  { key: "state", label: "State" },
+  { key: "zip", label: "Zip" },
 ] as const;
-const DEFAULT_PULL_FIELDS: StandardFieldKey[] = REPORT_FIELDS.map((field) => field.key);
+// New templates start with every standard field except the address ones,
+// which are opt-in.
+const ADDRESS_FIELD_KEYS = new Set<string>(["city", "state", "zip"]);
+const DEFAULT_PULL_FIELDS: StandardFieldKey[] = REPORT_FIELDS
+  .map((field) => field.key)
+  .filter((key) => !ADDRESS_FIELD_KEYS.has(key));
 // Season reports (adults): no grade or contact columns.
 const SEASON_PULL_FIELDS: StandardFieldKey[] = [
   "planning_center_id", "first_name", "last_name", "birthdate", "gender",
@@ -423,7 +434,7 @@ async function fetchPeopleDetails(
     await Promise.all(batch.map(async (id) => {
       try {
         const page = await planningCenterRequest(
-          `${PEOPLE_BASE}/people/${encodeURIComponent(id)}?include=emails,phone_numbers`,
+          `${PEOPLE_BASE}/people/${encodeURIComponent(id)}?include=emails,phone_numbers,addresses`,
           accessToken,
         );
         const attributes = { ...(page.data?.attributes ?? {}) } as Record<string, unknown>;
@@ -442,6 +453,15 @@ async function fetchPeopleDetails(
         if (homePhone) attributes.phone_number_home = homePhone;
         if (mobilePhone) attributes.phone_number_mobile = mobilePhone;
         if (phones[0]) attributes.phone_number = phones[0].number;
+        // Primary address if marked, else the first; city/state/zip only
+        // (same rule as the people sync).
+        const addresses = included.filter((item) => item.type === "Address");
+        const address = addresses.find((item) => item.attributes?.primary === true) ?? addresses[0];
+        if (address) {
+          attributes.city = text(address.attributes?.city);
+          attributes.state = text(address.attributes?.state);
+          attributes.zip = text(address.attributes?.zip);
+        }
         try {
           const fieldPage = await fetchCollection(
             `${PEOPLE_BASE}/people/${encodeURIComponent(id)}/field_data?include=field_definition&per_page=100`,
@@ -1001,6 +1021,9 @@ function baseRecord(
     "Completed Thrive": nestedValue(person, "completed_thrive", "completed thrive"),
     "Baptized?": nestedValue(person, "baptized", "baptized?"),
     "Last served": nestedValue(person, "last_served", "last served"),
+    "City": firstValue(person, "city"),
+    "State": firstValue(person, "state"),
+    "Zip": firstValue(person, "zip"),
   };
   for (const customField of selectedCustomFields) {
     record[fieldLabel(customField, customLabels)] = firstReportValue(person, customField);
@@ -1101,6 +1124,21 @@ async function savePreparedRun(options: {
     const cleaned = selectCleanedColumns(await readFile(cleanedPath, "utf8"), options.pullFields, options.customLabels);
     const flags = await readFile(flagsPath, "utf8").catch(() => "");
     const cleanedObjectPath = await storage.saveObjectEntityBuffer(Buffer.from(cleaned, "utf8"), "text/csv", "reports");
+    // Attendees per ZIP code for the optional map page (lib/reportLocations).
+    // Best-effort: a problem here just means no map for this run.
+    let locations: RunLocations | null = null;
+    try {
+      // The record's own Zip (people table or live lookup) comes first;
+      // anyone without one is looked up in the people table.
+      const knownZips = new Map<string, unknown>();
+      for (const record of options.records.values()) {
+        const id = String(record["Planning Center ID"] ?? "");
+        if (id) knownZips.set(id, record["Zip"]);
+      }
+      locations = await loadRunLocations([...knownZips.keys()], options.records.size, knownZips);
+    } catch (error) {
+      console.warn("Could not count report attendees by ZIP code.", error);
+    }
     const runId = randomUUID();
     const expiresAt = new Date(Date.now() + REPORT_TTL_MS);
     await db.insert(reportRunsTable).values({
@@ -1111,7 +1149,7 @@ async function savePreparedRun(options: {
       endDate: options.endDate,
       templateId: options.templateId,
       cleanedObjectPath,
-      meta: options.meta ? JSON.stringify(options.meta) : null,
+      meta: runMetaWithLocations(options.meta, locations),
       requestedByUserId: options.userId,
       expiresAt,
     });
@@ -1698,10 +1736,16 @@ router.post("/prepare", requireToolAccess("reporting"), async (req, res) => {
 
 // Renders a prepared run to PDF with its template's engine. Shared by the
 // download (POST /generate) and email (POST /email-pdf) routes.
+export type ReportPdfOptions = {
+  // Adds the "Where our ... live" map page (attached_assets/report_map.py).
+  includeMap?: boolean;
+};
+
 async function generateReportPdf(
   runId: string,
   templateId: number,
   userId: string,
+  options: ReportPdfOptions = {},
 ): Promise<{ pdf: Buffer; fileName: string; run: typeof reportRunsTable.$inferSelect; templateName: string }> {
   const fail = (status: number, message: string): never => {
     const error = new Error(message) as Error & { status?: number };
@@ -1763,6 +1807,17 @@ async function generateReportPdf(
         console.warn("Attendance trend unavailable; using the report's own weeks.", error);
       }
     }
+    if (options.includeMap) {
+      const locations = parseRunLocations(run!.meta);
+      if (locations) {
+        const locationsPath = join(workDir, "locations.json");
+        await writeFile(locationsPath, JSON.stringify(locations));
+        trendArgs.push("--locations-json", locationsPath);
+      } else {
+        // Prepared before the map page existed (or the ZIP count failed).
+        console.warn("Map page requested but this report run has no ZIP counts; leaving it out.");
+      }
+    }
     await runPython([
       bundledReportEngineScript(definition.script),
       ...definition.args,
@@ -1792,7 +1847,9 @@ router.post("/generate", requireToolAccess("reporting"), async (req, res) => {
       res.status(400).json({ error: "Report run, template, and output format (pdf) are required." });
       return;
     }
-    const { pdf, fileName } = await generateReportPdf(runId, templateId, res.locals.dbUser.id);
+    const { pdf, fileName } = await generateReportPdf(runId, templateId, res.locals.dbUser.id, {
+      includeMap: req.body?.includeMap === true,
+    });
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
     res.setHeader("Cache-Control", "private, no-store");
@@ -1831,8 +1888,9 @@ export async function emailReportPdf(
   userId: string,
   recipients: string[],
   senderLine: string,
+  options: ReportPdfOptions = {},
 ): Promise<{ sent: boolean; error?: string; fileName: string }> {
-  const { pdf, fileName, run, templateName } = await generateReportPdf(runId, templateId, userId);
+  const { pdf, fileName, run, templateName } = await generateReportPdf(runId, templateId, userId, options);
   const escape = (value: string) => value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
   const result = await sendEmail({
     to: recipients,
@@ -1850,7 +1908,7 @@ export async function emailReportPdf(
 }
 
 // ── POST /api/reports/email-pdf ─────────────────────────────────────────────
-// Body: { runId, templateId, recipients }. Renders the same PDF as
+// Body: { runId, templateId, recipients, includeMap? }. Renders the same PDF as
 // /generate and emails it as an attachment. The report lists people
 // (including children) by name, so the send is logged with who sent it and
 // how many recipients, and the recipient count is capped.
@@ -1868,7 +1926,11 @@ router.post("/email-pdf", requireToolAccess("reporting"), async (req, res) => {
       return;
     }
     const sender = [res.locals.dbUser.firstName, res.locals.dbUser.lastName].filter(Boolean).join(" ") || "A Transform Church admin";
-    const result = await emailReportPdf(runId, templateId, res.locals.dbUser.id, parsed.recipients, `Sent by ${sender} from the Transform Church reporting page.`);
+    const result = await emailReportPdf(
+      runId, templateId, res.locals.dbUser.id, parsed.recipients,
+      `Sent by ${sender} from the Transform Church reporting page.`,
+      { includeMap: req.body?.includeMap === true },
+    );
     req.log.info(
       { runId, templateId, actorId: res.locals.dbUser.id, recipientCount: parsed.recipients.length, sent: result.sent },
       "Report PDF email",

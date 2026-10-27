@@ -44,6 +44,7 @@ from report_common import (
     load_cleaned_csv, load_trend_json, new_page, nonzero_slices, save_pdf, section_title,
     setup_style, style_axes, trend_from_report,
 )
+from report_map import draw_location_map_page, load_locations
 
 GRADE_ORDER = ["6th", "7th", "8th", "9th", "10th", "11th", "12th"]
 ORG_NAME = "Transform Church"
@@ -100,7 +101,7 @@ def prepare(data: CleanedData, config: YouthConfig) -> pd.DataFrame:
 
 def render(data: CleanedData, config: YouthConfig, period_label: str | None = None,
            orientation: str = "portrait", logo_path: str | Path | None = DEFAULT_LOGO,
-           trend_path: str | Path | None = None) -> list:
+           trend_path: str | Path | None = None, locations: dict | None = None) -> list:
     setup_style()
     df = prepare(data, config)
     week_dates = data.week_dates
@@ -113,6 +114,13 @@ def render(data: CleanedData, config: YouthConfig, period_label: str | None = No
 
     def page():
         return new_page(figsize=figsize)
+
+    def with_map(pages: list) -> list:
+        # Optional last page: where students live (see report_map.py).
+        if locations is not None:
+            pages.append(draw_location_map_page(figsize, config.report_name, label, locations,
+                                                logo_path=logo, people_word="students"))
+        return pages
 
     figs.append(draw_cover_page(
         figsize, ORG_NAME, config.report_name, label, logo_path=logo,
@@ -306,7 +314,7 @@ def render(data: CleanedData, config: YouthConfig, period_label: str | None = No
                               band_title="Weekly Attendance by Grade Band — First-Timers Only")
         figs.append(figE)
 
-        return figs
+        return with_map(figs)
 
     # ---- Landscape (default) layout: one section per page ----
     fig = page()
@@ -387,7 +395,7 @@ def render(data: CleanedData, config: YouthConfig, period_label: str | None = No
                           band_title="Weekly Attendance by Grade Band — First-Timers Only")
     figs.append(fig7)
 
-    return figs
+    return with_map(figs)
 
 
 def main():
@@ -401,6 +409,7 @@ def main():
     ap.add_argument("--logo", help="path to a logo image; defaults to the bundled Transform Youth logo")
     ap.add_argument("--no-logo", action="store_true", help="omit the logo entirely")
     ap.add_argument("--trend-json", help="weekly totals from the saved attendance tracker, for the trend chart")
+    ap.add_argument("--locations-json", help="attendees per ZIP code; adds the 'Where our students live' map page")
     args = ap.parse_args()
 
     from report_youth_quarterly import CONFIG as Q_CONFIG
@@ -410,7 +419,8 @@ def main():
     data = load_cleaned_csv(args.data)
     logo_path = None if args.no_logo else (args.logo or DEFAULT_LOGO)
     figs = render(data, config, period_label=args.period_label, orientation=args.orientation,
-                  logo_path=logo_path, trend_path=args.trend_json)
+                  logo_path=logo_path, trend_path=args.trend_json,
+                  locations=load_locations(args.locations_json))
     save_pdf(figs, args.out_pdf)
     print(f"Wrote {args.out_pdf}")
 

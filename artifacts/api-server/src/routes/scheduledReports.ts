@@ -92,6 +92,7 @@ export async function runSchedule(
       schedule.ownerUserId,
       schedule.recipients,
       `Sent automatically by the ${FREQUENCY_TEXT[schedule.frequency]} scheduled report "${schedule.name}" (set up by ${schedule.ownerName}).`,
+      { includeMap: schedule.includeMap === true },
     );
     record = result.sent
       ? { ...base, status: "sent", peopleCount: prepared.peopleCount, sessionCount: prepared.sessionCount }

@@ -62,6 +62,8 @@ type PreparationProgress = {
   message: string;
 };
 
+const INCLUDE_MAP_KEY = "tc-reporting-include-map";
+
 function defaultDate(offsetDays: number): string {
   const date = new Date();
   date.setDate(date.getDate() + offsetDays);
@@ -130,6 +132,23 @@ export default function Reporting() {
   const reportRecipientsTouched = useRef(false);
   const [emailingReport, setEmailingReport] = useState(false);
   const [reportEmailStatus, setReportEmailStatus] = useState("");
+  // Optional last PDF page: a Northern NJ map of where attendees live
+  // (2026-10-21). Remembered per browser.
+  const [includeMap, setIncludeMap] = useState(() => {
+    try {
+      return window.localStorage.getItem(INCLUDE_MAP_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
+  const changeIncludeMap = (value: boolean) => {
+    setIncludeMap(value);
+    try {
+      window.localStorage.setItem(INCLUDE_MAP_KEY, value ? "1" : "0");
+    } catch {
+      // Storage unavailable (private window): the choice just isn't remembered.
+    }
+  };
   const fieldByKey = useMemo(
     () => new Map([...FIELD_OPTIONS, ...planningCenterFields].map((field) => [field.key, field])),
     [planningCenterFields],
@@ -247,7 +266,7 @@ export default function Reporting() {
     try {
       const response = await api("/api/reports/email-pdf", {
         method: "POST",
-        body: JSON.stringify({ runId: run.runId, templateId: Number(selectedTemplate), recipients }),
+        body: JSON.stringify({ runId: run.runId, templateId: Number(selectedTemplate), recipients, includeMap }),
       });
       const result = await response.json() as { recipients: string[] };
       const sentTo = result.recipients.join(", ");
@@ -339,7 +358,7 @@ export default function Reporting() {
     try {
       const response = await api("/api/reports/generate", {
         method: "POST",
-        body: JSON.stringify({ runId: prepared.runId, templateId: Number(selectedTemplate), format }),
+        body: JSON.stringify({ runId: prepared.runId, templateId: Number(selectedTemplate), format, includeMap }),
       });
       const blob = await response.blob();
       const disposition = response.headers.get("Content-Disposition") ?? "";
@@ -756,6 +775,15 @@ export default function Reporting() {
               )}
             </div>
           )}
+          <label className="flex items-start gap-2 text-sm">
+            <Checkbox className="mt-0.5" checked={includeMap} onCheckedChange={(checked) => changeIncludeMap(checked === true)} />
+            <span>
+              Add a map page of where attendees live
+              <span className="block text-xs text-muted-foreground">
+                Last page of the PDF: Northern NJ ZIP codes shaded by how many attendees live in each, from their home address in Planning Center.
+              </span>
+            </span>
+          </label>
           <div className="flex flex-wrap gap-3">
             <Button variant="outline" onClick={downloadCsv} disabled={!prepared}>
               <Download className="mr-2 h-4 w-4" /> Download CSV

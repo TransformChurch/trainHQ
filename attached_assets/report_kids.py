@@ -66,6 +66,7 @@ from report_common import (
     load_cleaned_csv, load_trend_json, new_page, nonzero_slices, save_pdf, section_title,
     setup_style, style_axes, trend_from_report,
 )
+from report_map import draw_location_map_page, load_locations
 
 ORG_NAME = "Transform Church"
 # No TC Kids logo file has been supplied yet -- once it is, drop it at
@@ -136,7 +137,7 @@ def prepare(data: CleanedData, config: CampusConfig, as_of: dt.date | None = Non
 def render(data: CleanedData, config: CampusConfig, period_label: str | None = None,
            as_of: dt.date | None = None, logo_path: str | Path | None = DEFAULT_LOGO,
            orientation: str = "portrait", trend_path: str | Path | None = None,
-           period: str = "monthly") -> list:
+           period: str = "monthly", locations: dict | None = None) -> list:
     """period: "monthly" (one month of Sundays) or "quarterly" (a quarter,
     ~13 Sundays). Quarterly adds an Age Group Average Attendance chart and a
     Notable First-Time Kids page, the same additions the Youth Quarterly
@@ -156,6 +157,13 @@ def render(data: CleanedData, config: CampusConfig, period_label: str | None = N
 
     def page():
         return new_page(figsize=figsize)
+
+    def with_map(pages: list) -> list:
+        # Optional last page: where kids live (see report_map.py).
+        if locations is not None:
+            pages.append(draw_location_map_page(figsize, report_name, label, locations,
+                                                logo_path=logo, people_word="kids"))
+        return pages
 
     figs.append(draw_cover_page(
         figsize, ORG_NAME, report_name, label, logo_path=logo,
@@ -337,7 +345,7 @@ def render(data: CleanedData, config: CampusConfig, period_label: str | None = N
                               week_dates=week_dates, ft_bands=ft_bands)
         figs.append(figE)
 
-        return figs
+        return with_map(figs)
 
     # ---- Landscape (default) layout: one section per page ----
     fig = page()
@@ -398,7 +406,7 @@ def render(data: CleanedData, config: CampusConfig, period_label: str | None = N
                           week_dates=week_dates, ft_bands=ft_bands)
     figs.append(fig6)
 
-    return figs
+    return with_map(figs)
 
 
 def main():
@@ -414,6 +422,7 @@ def main():
     ap.add_argument("--orientation", choices=["landscape", "portrait"], default="portrait")
     ap.add_argument("--trend-json", help="weekly totals from the saved attendance tracker, for the trend chart")
     ap.add_argument("--period", choices=["monthly", "quarterly"], default="monthly")
+    ap.add_argument("--locations-json", help="attendees per ZIP code; adds the 'Where our kids live' map page")
     args = ap.parse_args()
 
     from report_kids_rutherford import CONFIG as RUTHERFORD_CONFIG
@@ -424,7 +433,8 @@ def main():
     as_of = dt.datetime.strptime(args.as_of, "%Y-%m-%d").date() if args.as_of else None
     logo_path = None if args.no_logo else (args.logo or DEFAULT_LOGO)
     figs = render(data, config, period_label=args.period_label, as_of=as_of, logo_path=logo_path,
-                  orientation=args.orientation, trend_path=args.trend_json, period=args.period)
+                  orientation=args.orientation, trend_path=args.trend_json, period=args.period,
+                  locations=load_locations(args.locations_json))
     save_pdf(figs, args.out_pdf)
     print(f"Wrote {args.out_pdf}")
 

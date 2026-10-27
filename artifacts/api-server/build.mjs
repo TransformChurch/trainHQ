@@ -182,6 +182,16 @@ globalThis.__dirname = __bannerPath.dirname(globalThis.__filename);
       path.resolve(artifactDir, "../../attached_assets/tc_kids_logo.png"),
       path.resolve(distDir, "assets", "tc_kids_logo.png"),
     ),
+    // Optional "Where our ... live" map page, imported by every engine, and
+    // its Northern NJ geography (built by scripts/build_nnj_map_asset.py).
+    copyFile(
+      path.resolve(artifactDir, "../../attached_assets/report_map.py"),
+      path.resolve(distDir, "report_map.py"),
+    ),
+    copyFile(
+      path.resolve(artifactDir, "../../attached_assets/nnj_map.json"),
+      path.resolve(distDir, "assets", "nnj_map.json"),
+    ),
   ]);
 }
 

@@ -21,4 +21,8 @@ export const FIELD_OPTIONS: AvailableField[] = [
   { key: "completed_thrive", label: "Completed Thrive" },
   { key: "baptized", label: "Baptized?" },
   { key: "last_served", label: "Last served" },
+  // From the person's primary address (street is never pulled).
+  { key: "city", label: "City" },
+  { key: "state", label: "State" },
+  { key: "zip", label: "Zip" },
 ];

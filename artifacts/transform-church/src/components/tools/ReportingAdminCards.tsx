@@ -2386,12 +2386,13 @@ type ReportScheduleRow = {
   recipients: string[];
   frequency: ScheduleFrequency;
   enabled: boolean;
+  includeMap?: boolean;
   ownerName: string;
   lastRun: ScheduleRun | null;
   nextRunDate: string | null;
   nextPeriod: { label: string };
 };
-type ScheduleDraft = { id: string | null; name: string; templateId: string; eventIds: string[]; recipients: string; frequency: ScheduleFrequency; enabled: boolean };
+type ScheduleDraft = { id: string | null; name: string; templateId: string; eventIds: string[]; recipients: string; frequency: ScheduleFrequency; enabled: boolean; includeMap: boolean };
 type TemplateOption = { id: number; name: string; engine: string | null };
 type ScheduleEventOption = { id: string; name: string };
 
@@ -2449,7 +2450,7 @@ function ScheduledReportsCard() {
   const startNew = () => {
     loadEvents();
     setEventFilter("");
-    setDraft({ id: null, name: "", templateId: templates[0] ? String(templates[0].id) : "", eventIds: [], recipients: "", frequency: "month", enabled: true });
+    setDraft({ id: null, name: "", templateId: templates[0] ? String(templates[0].id) : "", eventIds: [], recipients: "", frequency: "month", enabled: true, includeMap: false });
   };
 
   const startEdit = (schedule: ReportScheduleRow) => {
@@ -2463,6 +2464,7 @@ function ScheduledReportsCard() {
       recipients: schedule.recipients.join(", "),
       frequency: schedule.frequency,
       enabled: schedule.enabled,
+      includeMap: schedule.includeMap === true,
     });
   };
 
@@ -2616,9 +2618,15 @@ function ScheduledReportsCard() {
               )}
             </div>
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <label className="flex items-center gap-2 text-sm">
-                <Switch checked={draft.enabled} onCheckedChange={(enabled) => setDraft({ ...draft, enabled })} /> Turned on
-              </label>
+              <div className="flex flex-wrap items-center gap-4">
+                <label className="flex items-center gap-2 text-sm">
+                  <Switch checked={draft.enabled} onCheckedChange={(enabled) => setDraft({ ...draft, enabled })} /> Turned on
+                </label>
+                <label className="flex items-center gap-2 text-sm">
+                  <Switch checked={draft.includeMap} onCheckedChange={(includeMap) => setDraft({ ...draft, includeMap })} />
+                  Add a map page of where attendees live
+                </label>
+              </div>
               <div className="flex gap-2">
                 <Button size="sm" variant="outline" onClick={() => setDraft(null)} disabled={saving}>Cancel</Button>
                 <Button size="sm" onClick={save} disabled={saving || !draft.name.trim() || !draft.templateId || !draft.eventIds.length || !draft.recipients.trim()}>
@@ -2641,6 +2649,7 @@ function ScheduledReportsCard() {
                 <p className="font-medium">{schedule.name}</p>
                 <p className="text-xs text-muted-foreground">
                   {FREQUENCY_LABEL[schedule.frequency]} · {templateName(schedule.templateId)} · {schedule.eventNames.join(" + ") || `${schedule.eventIds.length} event(s)`}
+                  {schedule.includeMap ? " · with map page" : ""}
                 </p>
                 <p className="break-words text-xs text-muted-foreground">To: {schedule.recipients.join(", ")} · owner {schedule.ownerName}</p>
               </div>

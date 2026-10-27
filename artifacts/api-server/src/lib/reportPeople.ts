@@ -56,6 +56,9 @@ export function profileToAttributes(profile: PeopleProfile, fields: SelectedPeop
     child: profile.child ?? undefined,
     membership: profile.membership ?? undefined,
     status: profile.status ?? undefined,
+    city: profile.city ?? undefined,
+    state: profile.state ?? undefined,
+    zip: profile.zip ?? undefined,
   };
   for (const field of fields) {
     const raw = profile.fields?.[field.key];
