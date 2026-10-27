@@ -155,7 +155,7 @@ export async function listCheckInsEvents(accessToken: string): Promise<CheckInsE
 }
 
 // An event's sessions (event periods) starting on/after `since`.
-async function listEventPeriods(accessToken: string, eventId: string, since: string, delayMs = 0) {
+export async function listEventPeriods(accessToken: string, eventId: string, since: string, delayMs = 0) {
   const sinceIso = `${since}T00:00:00Z`;
   const periods: { id: string; startsAt: string }[] = [];
   let url: string | null =

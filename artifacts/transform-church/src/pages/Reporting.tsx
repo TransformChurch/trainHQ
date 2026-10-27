@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "wouter";
 import { useGetMe } from "@workspace/api-client-react";
-import { BarChart3, Check, Download, Loader2, Mail, RefreshCw } from "lucide-react";
+import { BarChart3, Check, Download, Gauge, Loader2, Mail, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -385,6 +385,9 @@ export default function Reporting() {
         <h1 className="flex items-center gap-3 text-3xl font-bold tracking-tight">
           <BarChart3 className="h-8 w-8 text-primary" /> Reporting
         </h1>
+        <Link href="/reporting/engagement" className="mt-2 inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline">
+          <Gauge className="h-4 w-4" /> Engagement dashboard
+        </Link>
         <p className="mt-2 text-muted-foreground">
           Export Planning Center Check-Ins attendance into an approved report template.
         </p>

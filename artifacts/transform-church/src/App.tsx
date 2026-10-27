@@ -26,6 +26,7 @@ import AdminWiki from "@/pages/AdminWiki";
 import Facilities from "@/pages/Facilities";
 import AdminFacilities from "@/pages/AdminFacilities";
 import Reporting from "@/pages/Reporting";
+import EngagementDashboard from "@/pages/EngagementDashboard";
 import ToolManagement from "@/pages/ToolManagement";
 import Messaging from "@/pages/Messaging";
 import NotFound from "@/pages/not-found";
@@ -344,6 +345,7 @@ function AppRoutes() {
           <Route path="/tc-wiki/:slug"><ProtectedRoute component={() => <WikiArticle wikiKey="tc-wiki" wikiName="TC Wiki" />} /></Route>
           <Route path="/facilities"><ProtectedRoute component={Facilities} /></Route>
           <Route path="/reporting"><ProtectedRoute component={Reporting} tool="reporting" /></Route>
+          <Route path="/reporting/engagement"><ProtectedRoute component={EngagementDashboard} tool="reporting" /></Route>
           <Route path="/messaging"><ProtectedRoute component={Messaging} tool="messaging" /></Route>
           <Route path="/admin"><ProtectedRoute component={AdminDashboard} adminOnly /></Route>
           <Route path="/admin/users"><ProtectedRoute component={AdminUsers} managerOrAdmin /></Route>
@@ -366,4 +368,4 @@ function AppRoutes() {
 
 export default function App() {
   return <TooltipProvider><WouterRouter base={basePath}><AppRoutes /></WouterRouter><Toaster /></TooltipProvider>;
-}
+}

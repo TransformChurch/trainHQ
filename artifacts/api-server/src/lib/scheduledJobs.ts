@@ -29,7 +29,7 @@ import {
 } from "./jobSchedule";
 import { activePulseSendTimes } from "./pulseSchedule";
 
-export type ScheduledJobId = "weekly_pulse" | "group_history_sync" | "checkins_history_sync" | "wiki_drive_sync" | "people_sync" | "scheduled_reports";
+export type ScheduledJobId = "weekly_pulse" | "group_history_sync" | "checkins_history_sync" | "wiki_drive_sync" | "people_sync" | "engagement_dashboard" | "scheduled_reports";
 
 // When each job runs is defined once, in US Eastern time, in
 // lib/jobSchedule.ts (shared with the Worker); the Weekly Pulse's times are
@@ -47,6 +47,7 @@ export const SCHEDULED_JOBS: ScheduledJobDefinition[] = [
   { id: "people_sync", label: "Planning Center people sync", secretEnv: "WEEKLY_PULSE_RUN_SECRET", graceMinutes: 60 },
   { id: "group_history_sync", label: "Group attendance auto-sync", secretEnv: "WEEKLY_PULSE_RUN_SECRET", graceMinutes: 30 },
   { id: "checkins_history_sync", label: "Check-ins attendance auto-sync", secretEnv: "WEEKLY_PULSE_RUN_SECRET", graceMinutes: 30 },
+  { id: "engagement_dashboard", label: "Engagement dashboard sync + email", secretEnv: "WEEKLY_PULSE_RUN_SECRET", graceMinutes: 30 },
   { id: "weekly_pulse", label: "Weekly Pulse email", secretEnv: "WEEKLY_PULSE_RUN_SECRET", graceMinutes: 30 },
   { id: "wiki_drive_sync", label: "Wiki Drive sync", secretEnv: "WIKI_DRIVE_SYNC_RUN_SECRET", graceMinutes: 30 },
 ];

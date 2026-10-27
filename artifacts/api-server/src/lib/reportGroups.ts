@@ -206,6 +206,27 @@ export type SeasonRunMeta = {
   startDate: string;
   endDate: string;
   weekLabels: Record<string, string>;
+  // Groups reports with 2+ groups: per-group engagement for the
+  // Discipleship page (routes/reports.ts buildDiscipleship).
+  discipleship?: DiscipleshipMeta;
+};
+
+export type DiscipleshipGroup = {
+  id: string;
+  name: string;
+  attendees: number;
+  roster: number;
+  heldNights: number;
+  percentages: Record<"attendance" | "thrive" | "serveClass" | "serving" | "giving", number | null>;
+  score: number | null;
+};
+
+export type DiscipleshipMeta = {
+  asOf: string;
+  servingWindowDays: number;
+  weights: Record<"attendance" | "thrive" | "serveClass" | "serving" | "giving", number>;
+  groups: DiscipleshipGroup[];
+  overall: DiscipleshipGroup;
 };
 
 export function parseRunMeta(raw: string | null | undefined): SeasonRunMeta | null {
@@ -216,4 +237,32 @@ export function parseRunMeta(raw: string | null | undefined): SeasonRunMeta | nu
   } catch {
     return null;
   }
+}
+
+// Per-group attendance for the Discipleship page (2026-10-27): for each
+// group, everyone marked present at least once with their attendance rate
+// in THAT group (nights present / that group's held nights), plus how many
+// people were on its attendance lists at all (roster, absent included).
+export function perGroupAttendance(
+  groupIds: string[],
+  meetings: GroupMeeting[],
+  attendanceByMeeting: Map<string, GroupResource[]>,
+): { groupId: string; people: { personId: string; attendanceRate: number }[]; roster: number; heldNights: number }[] {
+  return groupIds.map((groupId) => {
+    const own = meetings.filter((meeting) => meeting.groupId === groupId);
+    const season = buildGroupSeason(own, attendanceByMeeting);
+    const held = season.serviceDates.length - season.skippedDates.length;
+    const roster = new Set<string>();
+    for (const meeting of own) {
+      for (const record of attendanceByMeeting.get(meeting.id) ?? []) {
+        const person = relId(record, "person");
+        if (person) roster.add(person);
+      }
+    }
+    const people = [...season.presentByPerson.entries()].map(([personId, dates]) => ({
+      personId,
+      attendanceRate: held ? Math.min(1, dates.size / held) : 0,
+    }));
+    return { groupId, people, roster: roster.size, heldNights: held };
+  });
 }

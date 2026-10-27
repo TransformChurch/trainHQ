@@ -17,7 +17,7 @@
 export const CHURCH_TIME_ZONE = "America/New_York";
 export const TICK_MINUTES = 15;
 
-export type FixedJobId = "people_sync" | "wiki_drive_sync" | "group_history_sync" | "checkins_history_sync" | "scheduled_reports";
+export type FixedJobId = "people_sync" | "wiki_drive_sync" | "group_history_sync" | "checkins_history_sync" | "engagement_dashboard" | "scheduled_reports";
 
 // weekday: 0 = Sunday ... 6 = Saturday; null = every day.
 export type EasternTime = { weekday: number | null; hour: number; minute: number };
@@ -29,6 +29,9 @@ export const FIXED_JOB_TIMES: Record<FixedJobId, EasternTime & { path: string; s
   wiki_drive_sync: { weekday: null, hour: 3, minute: 0, path: "/api/admin/wiki-drive-sync/run-scheduled", secret: "wiki" },
   group_history_sync: { weekday: 1, hour: 3, minute: 0, path: "/api/group-history/run-scheduled", secret: "pulse" },
   checkins_history_sync: { weekday: 1, hour: 4, minute: 0, path: "/api/attendance-history/run-scheduled", secret: "pulse" },
+  // After the people and attendance syncs: pulls who attended each tracked
+  // item, then emails the Engagement dashboard summary (routes/engagement.ts).
+  engagement_dashboard: { weekday: 1, hour: 6, minute: 0, path: "/api/engagement/run-scheduled", secret: "pulse" },
   scheduled_reports: { weekday: null, hour: 8, minute: 0, path: "/api/scheduled-reports/run-scheduled", secret: "pulse" },
 };
 

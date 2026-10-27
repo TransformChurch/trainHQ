@@ -94,3 +94,23 @@ test("defaultSeasonLabel names the season from its first night", () => {
   assert.equal(defaultSeasonLabel("2026-07-09"), "Summer 2026");
   assert.equal(defaultSeasonLabel("2026-09-10"), "Fall 2026");
 });
+
+test("perGroupAttendance: each group's own held nights; roster includes absent members", async () => {
+  const { perGroupAttendance } = await import("./reportGroups");
+  const meetings = [
+    { id: "m1", groupId: "A", startsAt: "2026-09-08T23:30:00Z", name: "A", canceled: false },
+    { id: "m2", groupId: "A", startsAt: "2026-09-15T23:30:00Z", name: "A", canceled: false },
+    { id: "m3", groupId: "B", startsAt: "2026-09-10T23:30:00Z", name: "B", canceled: false },
+  ];
+  const rec = (person: string, attended: boolean) => ({ id: `${person}${attended}`, attributes: { attended }, relationships: { person: { data: { id: person } } } });
+  const attendance = new Map([
+    ["m1", [rec("p1", true), rec("p2", true), rec("p3", false)]],
+    ["m2", [rec("p1", true), rec("p2", false), rec("p3", false)]],
+    ["m3", [rec("p1", true)]],
+  ]);
+  const [a, b] = perGroupAttendance(["A", "B"], meetings, attendance);
+  assert.equal(a.heldNights, 2);
+  assert.equal(a.roster, 3);
+  assert.deepEqual(Object.fromEntries(a.people.map((p) => [p.personId, p.attendanceRate])), { p1: 1, p2: 0.5 });
+  assert.deepEqual(b.people, [{ personId: "p1", attendanceRate: 1 }]);
+});

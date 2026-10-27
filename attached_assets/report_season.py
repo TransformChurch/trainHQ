@@ -60,6 +60,7 @@ from report_common import (
     setup_style, shade_ramp, style_axes, weekly_total_label,
 )
 from report_map import draw_location_map_page, load_locations
+from report_discipleship import draw_discipleship_pages
 
 ORG_NAME = "Transform Church"
 OTHER_BAND = "Other/Unknown age"
@@ -559,6 +560,11 @@ def render(data: CleanedData, config: SeasonConfig, meta: dict | None = None,
     ax = f4.add_axes((0.24, eng_top - 0.05 - eng_h, 0.70, eng_h))
     draw_engagement(ax, eng_rows, metrics, eng_colors)
     figs.append(f4)
+
+    # Groups reports with 2+ groups: per-group engagement (report_discipleship.py).
+    if isinstance(meta.get("discipleship"), dict):
+        figs.extend(draw_discipleship_pages(figsize, title, period_label, meta["discipleship"],
+                                            logo_path=logo, subtitle=header_sub))
 
     # Optional last page: where attendees live (see report_map.py).
     if locations is not None:

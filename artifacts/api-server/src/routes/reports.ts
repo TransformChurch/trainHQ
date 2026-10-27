@@ -14,7 +14,7 @@ import {
 import { and, eq, lt } from "drizzle-orm";
 import { requireAdmin } from "../middlewares/requireAuth";
 import { requireToolAccess } from "../middlewares/requireToolAccess";
-import { lookupReportPeople, stripContactAttributes } from "../lib/reportPeople";
+import { lookupReportPeople, stripContactAttributes, syncedFields } from "../lib/reportPeople";
 import { getValidPlanningCenterAccessToken } from "../lib/planningCenter";
 import { ObjectStorageService } from "../lib/objectStorage";
 import { sendEmail } from "../lib/email";
@@ -43,10 +43,14 @@ import {
   meetingsInSeason,
   parseRunMeta,
   parseWeekLabels,
+  perGroupAttendance,
+  type DiscipleshipGroup,
+  type DiscipleshipMeta,
   type GroupMeeting,
   type GroupMembership,
   type SeasonRunMeta,
 } from "../lib/reportGroups";
+import { loadPersonFlags, readEngagementSettings, resolveFieldKeys, summarizeEngagement } from "../lib/engagement";
 import { loadRunLocations, parseRunLocations, runMetaWithLocations, type RunLocations } from "../lib/reportLocations";
 
 const router: IRouter = Router();
@@ -1567,6 +1571,62 @@ async function prepareCheckInsRun(
   };
 }
 
+// Per-group engagement (lib/engagement.ts) for Groups reports with 2+
+// groups. A person in several of the groups is counted in each; for the
+// "All groups" row their attendance rate is the average of their per-group
+// rates (groups meet on different nights, so one season-wide rate would
+// count other groups' nights against them).
+async function buildDiscipleship(
+  groupIds: string[],
+  groupNames: string[],
+  meetings: GroupMeeting[],
+  attendanceByMeeting: Map<string, JsonApiResource[]>,
+  asOf: string,
+): Promise<DiscipleshipMeta> {
+  const settings = await readEngagementSettings();
+  const keys = resolveFieldKeys(settings.fields, await syncedFields());
+  const perGroup = perGroupAttendance(groupIds, meetings, attendanceByMeeting);
+  const allIds = [...new Set(perGroup.flatMap((group) => group.people.map((person) => person.personId)))];
+  const flags = await loadPersonFlags(allIds, keys, asOf, settings.servingWindowDays);
+  const groups: DiscipleshipGroup[] = perGroup.map((group, index) => {
+    const summary = summarizeEngagement(group.people, flags, settings.weights);
+    return {
+      id: group.groupId,
+      name: groupNames[index] ?? `Group ${group.groupId}`,
+      attendees: group.people.length,
+      roster: group.roster,
+      heldNights: group.heldNights,
+      percentages: summary.percentages,
+      score: summary.score,
+    };
+  });
+  const ratesByPerson = new Map<string, number[]>();
+  for (const group of perGroup) {
+    for (const person of group.people) ratesByPerson.set(person.personId, [...(ratesByPerson.get(person.personId) ?? []), person.attendanceRate]);
+  }
+  const overallPeople = [...ratesByPerson.entries()].map(([personId, rates]) => ({
+    personId,
+    attendanceRate: rates.reduce((sum, rate) => sum + rate, 0) / rates.length,
+  }));
+  const overall = summarizeEngagement(overallPeople, flags, settings.weights);
+  return {
+    asOf,
+    servingWindowDays: settings.servingWindowDays,
+    weights: settings.weights,
+    groups,
+    overall: {
+      id: "all",
+      name: "All groups",
+      attendees: overallPeople.length,
+      roster: new Set(meetings.flatMap((meeting) => (attendanceByMeeting.get(meeting.id) ?? [])
+        .map((record) => relationshipId(record, "person")).filter(Boolean))).size,
+      heldNights: perGroup.reduce((sum, group) => sum + group.heldNights, 0),
+      percentages: overall.percentages,
+      score: overall.score,
+    },
+  };
+}
+
 async function prepareGroupsRun(
   body: Record<string, unknown>,
   groupIds: string[],
@@ -1691,6 +1751,14 @@ async function prepareGroupsRun(
       weekLabels: { ...season.weekLabels, ...typed.labels },
     }
     : null;
+  // 2+ groups: per-group engagement for the Discipleship page. Best-effort.
+  if (meta && groupIds.length >= 2) {
+    try {
+      meta.discipleship = await buildDiscipleship(groupIds, groupNames, meetings, attendanceByMeeting, endDate);
+    } catch (error) {
+      log.warn({ err: error }, "Could not build the per-group Discipleship page");
+    }
+  }
   const saved = await savePreparedRun({
     records, serviceDates, selectedCustomFields, customLabels, pullFields, cleanupMode,
     rowCount: season.presentRecords, eventId: `groups:${groupIds.join(",")}`, eventName,

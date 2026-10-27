@@ -133,7 +133,7 @@ export function planPeopleLookup(
 
 // Reads the people sync's column choices the same way routes/peopleSync.ts
 // does (kept separate to avoid a reports <-> peopleSync import cycle).
-async function syncedFields(): Promise<SelectedPeopleField[]> {
+export async function syncedFields(): Promise<SelectedPeopleField[]> {
   const rows = await db.select().from(settingsTable).where(eq(settingsTable.key, "people_sync")).limit(1);
   try {
     const parsed = rows[0] ? JSON.parse(rows[0].value) : {};

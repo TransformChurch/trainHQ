@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "@/lib/toolApi";
 import { ReportingAdminCards } from "@/components/tools/ReportingAdminCards";
+import { EngagementSettingsCard } from "@/components/tools/EngagementSettingsCard";
 import { ToolAccessCard, type AccessUser, type ToolAccessConfig } from "@/components/tools/ToolAccessCard";
 import { WikiDriveSyncCard } from "@/components/tools/WikiDriveSyncCard";
 import type { ToolKey } from "@/lib/toolAccess";
@@ -71,6 +72,7 @@ export default function ToolManagement() {
         <TabsContent value="reporting" className="mt-6 space-y-6">
           {accessCard("reporting", "Reporting")}
           <ReportingAdminCards />
+          <EngagementSettingsCard />
         </TabsContent>
 
         <TabsContent value="messaging" className="mt-6 space-y-6">

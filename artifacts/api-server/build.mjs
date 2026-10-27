@@ -188,6 +188,11 @@ globalThis.__dirname = __bannerPath.dirname(globalThis.__filename);
       path.resolve(artifactDir, "../../attached_assets/report_map.py"),
       path.resolve(distDir, "report_map.py"),
     ),
+    // Per-group "Discipleship by Group" pages, imported by report_season.py.
+    copyFile(
+      path.resolve(artifactDir, "../../attached_assets/report_discipleship.py"),
+      path.resolve(distDir, "report_discipleship.py"),
+    ),
     copyFile(
       path.resolve(artifactDir, "../../attached_assets/nnj_map.json"),
       path.resolve(distDir, "assets", "nnj_map.json"),

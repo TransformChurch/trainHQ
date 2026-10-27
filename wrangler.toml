@@ -78,8 +78,9 @@ bucket_name = "transform-church-storage"
 # time to US Eastern (daylight saving included) and runs whatever is due --
 # see artifacts/api-server/src/lib/jobSchedule.ts for the times:
 #   people sync Mon 1:00 AM, Wiki Drive sync daily 3:00 AM, group attendance
-#   sync Mon 3:00 AM, Check-Ins attendance sync Mon 4:00 AM, scheduled
-#   reports daily check 8:00 AM, Weekly Pulse at each Pulse's own send times
+#   sync Mon 3:00 AM, Check-Ins attendance sync Mon 4:00 AM, Engagement
+#   dashboard sync + email Mon 6:00 AM, scheduled reports daily check
+#   8:00 AM, Weekly Pulse at each Pulse's own send times
 #   (set in the Reporting page; default Mon 7:00 AM), all Eastern.
 # The API container is only woken when a job is due. SCHEDULER_CRON in
 # worker.ts must match this string exactly.
