@@ -26,6 +26,7 @@ import { getValidPlanningCenterAccessToken } from "./planningCenter";
 import { logger } from "./logger";
 import { CHECK_INS_BASE, fetchCollection, relationshipId, text, type JsonApiResource } from "../routes/reports";
 import { listEventPeriods } from "../routes/attendanceHistory";
+import { takePeopleSnapshot } from "./engagementPeople";
 import { groupActiveInRange, listGroupWeeks } from "../routes/groupHistory";
 
 const GROUPS_BASE = "https://api.planningcenteronline.com/groups/v2";
@@ -276,6 +277,17 @@ export async function runEngagementSync(
     for (const key of Object.keys(state.items)) if (!items.some((item) => itemKey(item) === key)) delete state.items[key];
     await prune(items, thisWeek);
     run.status = run.failures.length ? (run.failures.length === items.length ? "error" : "partial") : "success";
+    // Weekly per-person scores for the People view (lib/engagementPeople.ts).
+    if (run.status !== "error") {
+      try {
+        const snapshot = await takePeopleSnapshot(now);
+        run.message = `${snapshot.scored} people scored for the week of ${snapshot.weekStart}.`;
+      } catch (error) {
+        logger.error({ err: error }, "Engagement people snapshot failed");
+        run.message = `People snapshot failed: ${error instanceof Error ? error.message : String(error)}`;
+        run.status = "partial";
+      }
+    }
   } catch (error) {
     run.status = "error";
     run.message = error instanceof Error ? error.message : String(error);

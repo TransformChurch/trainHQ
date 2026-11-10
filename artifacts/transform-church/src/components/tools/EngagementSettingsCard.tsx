@@ -21,13 +21,15 @@ type TrackedItem = { kind: Kind; id: string; name: string };
 type SyncRun = { status: string; startedAt: string; finishedAt: string | null; itemsChecked: number; weeksSaved: number; failures: { item: string; error: string }[]; message?: string };
 type Settings = {
   weights: Record<Part, number>;
-  fields: { thrive?: string | null; serveClass?: string | null; lastServed?: string | null };
+  fields: { thrive?: string | null; serveClass?: string | null; lastServed?: string | null; giving?: string | null };
   servingWindowDays: number;
+  tiers: { green: number; yellow: number };
+  missedGivingDays: number;
   dashboard: { items: TrackedItem[]; recipients: string[]; emailEnabled: boolean; defaultWeeks: number; ownerName: string };
 };
 type SettingsResponse = {
   settings: Settings;
-  resolvedFields: { thrive: string | null; serveClass: string | null; lastServed: string | null };
+  resolvedFields: { thrive: string | null; serveClass: string | null; lastServed: string | null; giving: string | null };
   syncedFields: { key: string; label: string }[];
   weekOptions: number[];
   syncState: Record<string, { pulledFrom: string; lastSyncedAt: string } | null>;
@@ -139,6 +141,8 @@ export function EngagementSettingsCard() {
           weights: draft.weights,
           fields: draft.fields,
           servingWindowDays: draft.servingWindowDays,
+          tiers: draft.tiers,
+          missedGivingDays: draft.missedGivingDays,
           dashboard: {
             items: draft.dashboard.items,
             recipients: recipientsText,
@@ -223,15 +227,16 @@ export function EngagementSettingsCard() {
               </div>
             ))}
             <div className="space-y-1">
-              <Label htmlFor="weight-giving" className="text-muted-foreground">Giving</Label>
-              <Input id="weight-giving" type="number" value={draft.weights.giving} disabled />
-              <p className="text-xs text-muted-foreground">Not connected yet; doesn't count.</p>
+              <Label htmlFor="weight-giving" className={draft.fields.giving ? "" : "text-muted-foreground"}>Giving</Label>
+              <Input id="weight-giving" type="number" min={0} max={10} step={0.5} value={draft.weights.giving}
+                disabled={!draft.fields.giving} onChange={(event) => setWeight("giving", event.target.value)} />
+              <p className="text-xs text-muted-foreground">{draft.fields.giving ? "gives (Giving field has a value)" : "Pick a Giving field below to count it."}</p>
             </div>
           </div>
           <p className="text-xs text-muted-foreground">
             Score = weighted average of the parts. Weight 2 counts twice as much as weight 1; 0 leaves a part out.
           </p>
-          <div className="grid gap-3 sm:grid-cols-4">
+          <div className="grid gap-3 sm:grid-cols-5">
             {FIELD_ROWS.map((row) => (
               <div key={row.key} className="space-y-1">
                 <Label htmlFor={`field-${row.key}`}>{row.label} field</Label>
@@ -248,11 +253,55 @@ export function EngagementSettingsCard() {
               </div>
             ))}
             <div className="space-y-1">
+              <Label htmlFor="field-giving">Giving field</Label>
+              <select
+                id="field-giving"
+                className={selectClass}
+                value={draft.fields.giving ?? ""}
+                onChange={(event) => setDraft({ ...draft, fields: { ...draft.fields, giving: event.target.value || null } })}
+              >
+                <option value="">Not set (giving doesn't count)</option>
+                {data.syncedFields.map((field) => <option key={field.key} value={field.key}>{field.label}</option>)}
+              </select>
+              <p className="text-xs text-muted-foreground">Share of people whose field has a value (yes or a date), not amounts. Add it to the people sync first.</p>
+            </div>
+            <div className="space-y-1">
               <Label htmlFor="serving-window">Serving window (days)</Label>
               <Input id="serving-window" type="number" min={7} max={365} value={draft.servingWindowDays}
                 onChange={(event) => setDraft({ ...draft, servingWindowDays: Number(event.target.value) || 90 })} />
             </div>
           </div>
+        </section>
+
+        <section className="space-y-3">
+          <h3 className="text-sm font-semibold">People: green / yellow / red</h3>
+          <div className="grid gap-3 sm:grid-cols-4">
+            <div className="space-y-1">
+              <Label htmlFor="tier-green">Green at or above</Label>
+              <Input id="tier-green" type="number" min={2} max={100} value={draft.tiers.green}
+                onChange={(event) => setDraft({ ...draft, tiers: { ...draft.tiers, green: Number(event.target.value) || 0 } })} />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="tier-yellow">Yellow at or above</Label>
+              <Input id="tier-yellow" type="number" min={1} max={99} value={draft.tiers.yellow}
+                onChange={(event) => setDraft({ ...draft, tiers: { ...draft.tiers, yellow: Number(event.target.value) || 0 } })} />
+            </div>
+            <div className="space-y-1">
+              <Label>Red</Label>
+              <p className="flex h-9 items-center text-sm text-muted-foreground">below {draft.tiers.yellow}</p>
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="missed-giving" className={draft.fields.giving ? "" : "text-muted-foreground"}>Giving "missed" after (days)</Label>
+              <Input id="missed-giving" type="number" min={7} max={365} value={draft.missedGivingDays} disabled={!draft.fields.giving}
+                onChange={(event) => setDraft({ ...draft, missedGivingDays: Number(event.target.value) || 35 })} />
+            </div>
+          </div>
+          {draft.tiers.yellow >= draft.tiers.green && <p className="text-xs text-destructive">Green has to be higher than yellow.</p>}
+          <p className="text-xs text-muted-foreground">
+            Every Monday each person who attended a tracked group or event in the last 26 weeks gets a score over the default window below, and the
+            Engagement page's People tab flags anyone who dropped a level. With a Giving field that holds a date, "missed" means that date just got
+            older than the days above; "canceled" means the field was emptied. Changing the cutoffs re-sorts the saved weeks too. Nothing here is emailed.
+          </p>
         </section>
 
         <section className="space-y-3">
@@ -329,13 +378,13 @@ export function EngagementSettingsCard() {
               <Textarea id="engagement-recipients" rows={2} value={recipientsText} placeholder="name@transformchurch.com, …" onChange={(event) => setRecipientsText(event.target.value)} />
             </div>
             <div className="space-y-1">
-              <Label htmlFor="default-weeks">Email window</Label>
+              <Label htmlFor="default-weeks">Default window</Label>
               <select id="default-weeks" className={selectClass} value={draft.dashboard.defaultWeeks} onChange={(event) => setDashboard({ defaultWeeks: Number(event.target.value) })}>
                 {data.weekOptions.map((weeks) => <option key={weeks} value={weeks}>Last {weeks} weeks</option>)}
               </select>
             </div>
           </div>
-          <p className="text-xs text-muted-foreground">The email has numbers only (no names). It's also the dashboard's default window.</p>
+          <p className="text-xs text-muted-foreground">The email has group and event numbers only: no names and no people flags. The default window is also used for the dashboard and for each person's score.</p>
         </section>
 
         <div className="flex flex-wrap items-center gap-2 border-t pt-4">

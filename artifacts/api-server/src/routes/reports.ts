@@ -1584,12 +1584,14 @@ async function buildDiscipleship(
   asOf: string,
 ): Promise<DiscipleshipMeta> {
   const settings = await readEngagementSettings();
-  const keys = resolveFieldKeys(settings.fields, await syncedFields());
+  const synced = await syncedFields();
+  const keys = resolveFieldKeys(settings.fields, synced);
+  const giving = !!keys.giving;
   const perGroup = perGroupAttendance(groupIds, meetings, attendanceByMeeting);
   const allIds = [...new Set(perGroup.flatMap((group) => group.people.map((person) => person.personId)))];
   const flags = await loadPersonFlags(allIds, keys, asOf, settings.servingWindowDays);
   const groups: DiscipleshipGroup[] = perGroup.map((group, index) => {
-    const summary = summarizeEngagement(group.people, flags, settings.weights);
+    const summary = summarizeEngagement(group.people, flags, settings.weights, giving);
     return {
       id: group.groupId,
       name: groupNames[index] ?? `Group ${group.groupId}`,
@@ -1608,11 +1610,12 @@ async function buildDiscipleship(
     personId,
     attendanceRate: rates.reduce((sum, rate) => sum + rate, 0) / rates.length,
   }));
-  const overall = summarizeEngagement(overallPeople, flags, settings.weights);
+  const overall = summarizeEngagement(overallPeople, flags, settings.weights, giving);
   return {
     asOf,
     servingWindowDays: settings.servingWindowDays,
     weights: settings.weights,
+    givingField: keys.giving ? synced.find((field) => field.key === keys.giving)?.label ?? keys.giving : null,
     groups,
     overall: {
       id: "all",

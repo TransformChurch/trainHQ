@@ -7,15 +7,18 @@
 //   thrive      -- "Thrive" has a value (it holds the completion date)
 //   serveClass  -- "Serve Class Completed" has a value (a date)
 //   serving     -- "Last Served" falls within the serving window (90 days)
-//   giving      -- reserved: no giving data yet (the Planning Center
-//                  connection has no Giving access), so it never counts
+//   giving      -- the admin-chosen "Giving field" has a value (a
+//                  people-sync field such as "Regular giver"); a share of
+//                  people who give, never amounts. Until a Giving field is
+//                  picked it has no value and doesn't count.
 // The score is the weighted average of the parts that have a value, with
 // weights set in Tool Management (default: all equal). A part with weight 0
 // is ignored.
 //
 // Person facts come from people_profiles (the weekly people sync). Which
 // synced field holds Thrive / Serve Class / Last Served is chosen in the
-// settings; by default it's matched by label.
+// settings; by default it's matched by label. The Giving field is only ever
+// the admin's explicit choice (2026-10-27).
 import { db, peopleProfilesTable, settingsTable } from "@workspace/db";
 import { eq, inArray } from "drizzle-orm";
 import type { SelectedPeopleField } from "./peopleSync";
@@ -23,7 +26,7 @@ import type { SelectedPeopleField } from "./peopleSync";
 export const ENGAGEMENT_PARTS = ["attendance", "thrive", "serveClass", "serving", "giving"] as const;
 export type EngagementPart = typeof ENGAGEMENT_PARTS[number];
 export type EngagementWeights = Record<EngagementPart, number>;
-export type EngagementFieldKeys = { thrive: string | null; serveClass: string | null; lastServed: string | null };
+export type EngagementFieldKeys = { thrive: string | null; serveClass: string | null; lastServed: string | null; giving: string | null };
 
 export const PART_LABELS: Record<EngagementPart, string> = {
   attendance: "Attendance",
@@ -92,7 +95,7 @@ function shiftDate(dateOnly: string, days: number): string {
   return date.toISOString().slice(0, 10);
 }
 
-export type PersonFlags = { thrive: boolean; serveClass: boolean; serving: boolean };
+export type PersonFlags = { thrive: boolean; serveClass: boolean; serving: boolean; giving: boolean };
 
 // One person's Thrive / Serve Class / serving facts from their synced fields.
 // Serving = Last Served on/after (asOf - window days).
@@ -108,6 +111,7 @@ export function personFlags(
     thrive: yesLike(get(keys.thrive)),
     serveClass: yesLike(get(keys.serveClass)),
     serving: !!lastServed && lastServed >= shiftDate(asOf, -servingWindowDays) && lastServed <= shiftDate(asOf, 1),
+    giving: yesLike(get(keys.giving)),
   };
 }
 
@@ -120,11 +124,13 @@ export type EngagementSummary = {
 };
 
 // Percentages + score for a set of people. People without a profile (not
-// synced yet) count as "not yet" for Thrive / Serve Class / serving.
+// synced yet) count as "not yet" for Thrive / Serve Class / serving /
+// giving. Giving only has a value when a Giving field is set (givingTracked).
 export function summarizeEngagement(
   people: ScoredPerson[],
   flags: Map<string, PersonFlags>,
   weights: EngagementWeights,
+  givingTracked = false,
 ): EngagementSummary {
   const rates = people.map((person) => person.attendanceRate).filter((rate): rate is number => rate !== null && Number.isFinite(rate));
   const share = (pick: (value: PersonFlags) => boolean) =>
@@ -134,7 +140,7 @@ export function summarizeEngagement(
     thrive: share((value) => value.thrive),
     serveClass: share((value) => value.serveClass),
     serving: share((value) => value.serving),
-    giving: null,
+    giving: givingTracked ? share((value) => value.giving) : null,
   };
   return { people: people.length, percentages, score: engagementScore(percentages, weights) };
 }
@@ -149,6 +155,7 @@ export function resolveFieldKeys(saved: Partial<EngagementFieldKeys> | undefined
     thrive: pick(saved?.thrive, /thrive/i),
     serveClass: pick(saved?.serveClass, /serve\s*class/i),
     lastServed: pick(saved?.lastServed, /last\s*serv/i),
+    giving: saved?.giving && syncedKeys.has(saved.giving) ? saved.giving : null,
   };
 }
 
@@ -157,10 +164,31 @@ export function resolveFieldKeys(saved: Partial<EngagementFieldKeys> | undefined
 export type TrackedItemKind = "checkins_event" | "group" | "group_type";
 export type TrackedItem = { kind: TrackedItemKind; id: string; name: string };
 
+// Each person's score sorts them into green / yellow / red (2026-11-10):
+// green = score >= green, yellow = score >= yellow, else red. Set in Tool
+// Management; see lib/engagementPeople.ts.
+export type EngagementTiers = { green: number; yellow: number };
+export const DEFAULT_TIERS: EngagementTiers = { green: 70, yellow: 40 };
+export const DEFAULT_MISSED_GIVING_DAYS = 35;
+
+export function normalizeTiers(raw: unknown): EngagementTiers {
+  const source = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const green = Math.round(Number(source.green));
+  const yellow = Math.round(Number(source.yellow));
+  if (!Number.isFinite(green) || !Number.isFinite(yellow) || green < 2 || green > 100 || yellow < 1 || yellow >= green) {
+    return { ...DEFAULT_TIERS };
+  }
+  return { green, yellow };
+}
+
 export type EngagementSettings = {
   weights: EngagementWeights;
   fields: Partial<EngagementFieldKeys>;
   servingWindowDays: number;
+  tiers: EngagementTiers;
+  // A Giving field holding a date (last gift) counts as "missed" once that
+  // date is more than this many days old.
+  missedGivingDays: number;
   dashboard: {
     items: TrackedItem[];
     recipients: string[];
@@ -206,8 +234,12 @@ export function normalizeSettings(raw: unknown): EngagementSettings {
   const fieldKey = (value: unknown) => (typeof value === "string" && /^(field|attr):[\w-]{1,40}$/.test(value) ? value : null);
   return {
     weights: normalizeWeights(source.weights),
-    fields: { thrive: fieldKey(fields.thrive), serveClass: fieldKey(fields.serveClass), lastServed: fieldKey(fields.lastServed) },
+    fields: { thrive: fieldKey(fields.thrive), serveClass: fieldKey(fields.serveClass), lastServed: fieldKey(fields.lastServed), giving: fieldKey(fields.giving) },
     servingWindowDays: Number.isInteger(window) && window >= 7 && window <= 365 ? window : DEFAULT_SERVING_WINDOW_DAYS,
+    tiers: normalizeTiers(source.tiers),
+    missedGivingDays: Number.isInteger(Number(source.missedGivingDays)) && Number(source.missedGivingDays) >= 7 && Number(source.missedGivingDays) <= 365
+      ? Number(source.missedGivingDays)
+      : DEFAULT_MISSED_GIVING_DAYS,
     dashboard: {
       items: normalizeTrackedItems(dashboard.items),
       recipients: Array.isArray(dashboard.recipients) ? dashboard.recipients.filter((value: unknown) => typeof value === "string").slice(0, 10) : [],

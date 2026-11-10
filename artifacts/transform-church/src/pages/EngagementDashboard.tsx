@@ -5,6 +5,7 @@ import { ArrowDownRight, ArrowLeft, ArrowRight, ArrowUpRight, Gauge, Loader2, Mi
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { api } from "@/lib/toolApi";
+import { EngagementPeopleView } from "@/components/tools/EngagementPeopleView";
 
 // Engagement dashboard (2026-10-27): a weekly "thermostat" for the Check-Ins
 // events, groups and group types picked in Tool Management > Reporting >
@@ -42,11 +43,13 @@ type Dashboard = {
   weights: Record<Part, number>;
   servingWindowDays: number;
   fieldsFound: { thrive: boolean; serveClass: boolean; lastServed: boolean };
+  givingField: string | null;
   lastSync: SyncRun | null;
 };
 
 const WEEK_OPTIONS = [4, 8, 12, 26];
 const WEEKS_KEY = "tc-engagement-weeks";
+const VIEW_KEY = "tc-engagement-view";
 const KIND_LABEL: Record<Item["kind"], string> = { checkins_event: "Check-Ins event", group: "Group", group_type: "Group type" };
 const PART_LABEL: Record<Part, string> = { attendance: "Attendance", thrive: "Thrive", serveClass: "Serve Class", serving: "Serving", giving: "Giving" };
 
@@ -101,17 +104,17 @@ function ScoreMeter({ score, size = "md" }: { score: number | null; size?: "md" 
   );
 }
 
-function PartBars({ metrics, weights }: { metrics: Metrics; weights: Record<Part, number> }) {
+function PartBars({ metrics, weights, givingField }: { metrics: Metrics; weights: Record<Part, number>; givingField: string | null }) {
   const parts: Part[] = ["attendance", "thrive", "serveClass", "serving", "giving"];
   return (
     <div className="space-y-1.5">
       {parts.map((part) => {
         const value = metrics.engagement.percentages[part];
-        const counted = part !== "giving" && weights[part] > 0;
+        const counted = (part !== "giving" || !!givingField) && weights[part] > 0;
         return (
           <div key={part} className="grid grid-cols-[88px_1fr_40px] items-center gap-2 text-xs">
             <span className={counted ? "text-foreground" : "text-muted-foreground"}>
-              {PART_LABEL[part]}{part === "giving" ? " (soon)" : ""}
+              {PART_LABEL[part]}{part === "giving" && !givingField ? " (not set)" : ""}
             </span>
             <div className="h-2 overflow-hidden rounded-full bg-muted">
               {value !== null && <div className="h-full rounded-full bg-[hsl(var(--chart-2))]" style={{ width: `${Math.round(value * 100)}%` }} />}
@@ -166,7 +169,7 @@ function TrendCharts({ item }: { item: Item }) {
   );
 }
 
-function ItemCard({ item, weights }: { item: Item; weights: Record<Part, number> }) {
+function ItemCard({ item, weights, givingField }: { item: Item; weights: Record<Part, number>; givingField: string | null }) {
   const { current, previous } = item;
   const noData = current.heldWeeks === 0;
   return (
@@ -194,7 +197,7 @@ function ItemCard({ item, weights }: { item: Item; weights: Record<Part, number>
         <div className="grid gap-4 lg:grid-cols-[1fr_1.4fr]">
           <div>
             <p className="mb-2 text-xs font-medium text-muted-foreground">Engagement score parts ({current.engagement.people} people)</p>
-            <PartBars metrics={current} weights={weights} />
+            <PartBars metrics={current} weights={weights} givingField={givingField} />
           </div>
           <TrendCharts item={item} />
         </div>
@@ -212,6 +215,21 @@ export default function EngagementDashboard() {
       return null;
     }
   });
+  const [view, setView] = useState<"groups" | "people">(() => {
+    try {
+      return window.localStorage.getItem(VIEW_KEY) === "people" ? "people" : "groups";
+    } catch {
+      return "groups";
+    }
+  });
+  const chooseView = (value: "groups" | "people") => {
+    setView(value);
+    try {
+      window.localStorage.setItem(VIEW_KEY, value);
+    } catch {
+      // Not remembered in a private window; that's fine.
+    }
+  };
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -257,12 +275,14 @@ export default function EngagementDashboard() {
             <Gauge className="h-8 w-8 text-primary" /> Engagement
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            {dashboard
+            {view === "people"
+              ? "Each person's engagement score, sorted into green, yellow and red, with this week's drops and giving changes."
+              : dashboard
               ? `Last ${activeWeeks} weeks: ${shortDate(dashboard.window.from)} – ${shortDate(weekEnd(dashboard.window.to))}, compared with the ${activeWeeks} weeks before. Updated Mondays.`
               : "How engaged each tracked group and event is, updated every Monday."}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        {view === "groups" && <div className="flex items-center gap-2">
           <div className="inline-flex rounded-md border p-0.5" role="group" aria-label="Rolling window">
             {WEEK_OPTIONS.map((option) => (
               <button
@@ -279,9 +299,27 @@ export default function EngagementDashboard() {
           <Button variant="outline" size="icon" onClick={() => load(activeWeeks)} disabled={loading} aria-label="Refresh">
             {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
           </Button>
-        </div>
+        </div>}
       </div>
 
+      <div className="inline-flex rounded-md border p-0.5" role="tablist" aria-label="Engagement view">
+        {([["groups", "Groups & events"], ["people", "People"]] as const).map(([value, label]) => (
+          <button
+            key={value}
+            type="button"
+            role="tab"
+            aria-selected={view === value}
+            onClick={() => chooseView(value)}
+            className={`rounded px-4 py-1.5 text-sm font-medium transition-colors ${view === value ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted"}`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {view === "people" && <EngagementPeopleView />}
+
+      {view === "groups" && <>
       {error && <p className="text-sm text-destructive">{error}</p>}
       {loading && !dashboard && <p className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> Loading…</p>}
 
@@ -326,7 +364,7 @@ export default function EngagementDashboard() {
         </Card>
       )}
 
-      {dashboard?.items.map((item) => <ItemCard key={`${item.kind}:${item.id}`} item={item} weights={dashboard.weights} />)}
+      {dashboard?.items.map((item) => <ItemCard key={`${item.kind}:${item.id}`} item={item} weights={dashboard.weights} givingField={dashboard.givingField} />)}
 
       {dashboard && dashboard.items.length > 1 && (
         <Card>
@@ -343,7 +381,8 @@ export default function EngagementDashboard() {
                   <th className="py-2 pr-3 text-right font-medium">People</th>
                   <th className="py-2 pr-3 text-right font-medium">Thrive</th>
                   <th className="py-2 pr-3 text-right font-medium">Serve Class</th>
-                  <th className="py-2 text-right font-medium">Serving</th>
+                  <th className="py-2 pr-3 text-right font-medium">Serving</th>
+                  {dashboard.givingField && <th className="py-2 text-right font-medium">Giving</th>}
                 </tr>
               </thead>
               <tbody>
@@ -357,7 +396,8 @@ export default function EngagementDashboard() {
                     <td className="py-2 pr-3 text-right tabular-nums">{item.current.uniqueAttendees.toLocaleString()}</td>
                     <td className="py-2 pr-3 text-right tabular-nums">{pct(item.current.engagement.percentages.thrive)}</td>
                     <td className="py-2 pr-3 text-right tabular-nums">{pct(item.current.engagement.percentages.serveClass)}</td>
-                    <td className="py-2 text-right tabular-nums">{pct(item.current.engagement.percentages.serving)}</td>
+                    <td className="py-2 pr-3 text-right tabular-nums">{pct(item.current.engagement.percentages.serving)}</td>
+                    {dashboard.givingField && <td className="py-2 text-right tabular-nums">{pct(item.current.engagement.percentages.giving)}</td>}
                   </tr>
                 ))}
               </tbody>
@@ -368,13 +408,14 @@ export default function EngagementDashboard() {
 
       {dashboard && (
         <p className="text-xs text-muted-foreground">
-          Engagement (0–100) is the weighted average of attendance rate, Thrive, Serve Class and serving
-          (Last Served within {dashboard.servingWindowDays} days); giving will join once it's connected. Weights:{" "}
-          {(["attendance", "thrive", "serveClass", "serving"] as Part[]).map((part) => `${PART_LABEL[part]} ×${dashboard.weights[part]}`).join(", ")}.
+          Engagement (0–100) is the weighted average of attendance rate, Thrive, Serve Class, serving
+          (Last Served within {dashboard.servingWindowDays} days){dashboard.givingField ? ` and giving (people whose "${dashboard.givingField}" field has a value)` : "; giving counts once a Giving field is picked in Tool Management"}. Weights:{" "}
+          {(["attendance", "thrive", "serveClass", "serving", ...(dashboard.givingField ? ["giving"] : [])] as Part[]).map((part) => `${PART_LABEL[part]} ×${dashboard.weights[part]}`).join(", ")}.
           Attendance rate = weeks each person came ÷ weeks that met, averaged over everyone who came. Weeks nobody attended don't count.
           {dashboard.lastSync?.finishedAt ? ` Last synced ${new Date(dashboard.lastSync.finishedAt).toLocaleString()}.` : ""}
         </p>
       )}
+      </>}
     </div>
   );
 }

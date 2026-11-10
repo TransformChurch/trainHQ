@@ -225,6 +225,8 @@ export type DiscipleshipMeta = {
   asOf: string;
   servingWindowDays: number;
   weights: Record<"attendance" | "thrive" | "serveClass" | "serving" | "giving", number>;
+  // Label of the people-sync field counted as giving (null = none picked).
+  givingField?: string | null;
   groups: DiscipleshipGroup[];
   overall: DiscipleshipGroup;
 };

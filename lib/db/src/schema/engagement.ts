@@ -41,3 +41,25 @@ export const engagementAttendanceTable = pgTable("engagement_attendance", {
 
 export type EngagementWeek = typeof engagementWeeksTable.$inferSelect;
 export type EngagementAttendance = typeof engagementAttendanceTable.$inferSelect;
+
+// Engagement "People" view (2026-11-10): each Monday, every person who
+// attended a tracked item in the last 26 weeks gets a score (0-100) and a
+// tier ("green" | "yellow" | "red"); anyone whose Giving field has a value,
+// or had one last week, gets a row too (score/tier null if they're not in
+// the attendance population) so a cleared or stale Giving field can be
+// flagged. items = comma-separated tracked item keys they attended.
+export const engagementPersonSnapshotsTable = pgTable("engagement_person_snapshots", {
+  weekStart: date("week_start").notNull(),
+  personId: text("person_id").notNull(),
+  score: integer("score"),
+  tier: text("tier"),
+  items: text("items"),
+  givingHas: boolean("giving_has").notNull().default(false),
+  givingDate: date("giving_date"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => [
+  primaryKey({ columns: [table.weekStart, table.personId] }),
+  index("engagement_person_snapshots_person_idx").on(table.personId),
+]);
+
+export type EngagementPersonSnapshot = typeof engagementPersonSnapshotsTable.$inferSelect;

@@ -34,6 +34,7 @@ import {
 } from "../lib/engagement";
 import { combinedMetrics, trendSeries, windowMetrics, windowWeeks, type PresenceRow, type WeekRow, type WindowMetrics } from "../lib/engagementMetrics";
 import { itemKey, readSyncState, runEngagementSync, type EngagementSyncRun } from "../lib/engagementSync";
+import { buildPeopleDashboard, retierSnapshots, type Tier } from "../lib/engagementPeople";
 import { syncedFields } from "../lib/reportPeople";
 import { authorizeScheduledCall, recordScheduledJob } from "../lib/scheduledJobs";
 import { sendEmail } from "../lib/email";
@@ -74,6 +75,8 @@ export type Dashboard = {
   weights: EngagementSettings["weights"];
   servingWindowDays: number;
   fieldsFound: { thrive: boolean; serveClass: boolean; lastServed: boolean };
+  // The people-sync field counted as giving, or null when none is picked.
+  givingField: string | null;
   lastSync: EngagementSyncRun | null;
   generatedAt: string;
 };
@@ -85,7 +88,9 @@ export async function buildDashboard(weeks: number, now: Date = new Date()): Pro
   const window = windowWeeks(lastWeek, weeks);
   const previousWindow = windowWeeks(addDays(lastWeek, -7 * weeks), weeks);
   const earliest = addDays(lastWeek, -7 * (Math.max(TREND_POINTS, 2 * weeks) + weeks));
-  const keys = resolveFieldKeys(settings.fields, await syncedFields());
+  const synced = await syncedFields();
+  const keys = resolveFieldKeys(settings.fields, synced);
+  const giving = !!keys.giving;
   const state = await readSyncState();
 
   const weekRows = items.length
@@ -112,8 +117,8 @@ export async function buildDashboard(weeks: number, now: Date = new Date()): Pro
     kind: item.kind,
     id: item.id,
     name: item.name,
-    current: windowMetrics(rows, presence, window, flags, settings.weights),
-    previous: windowMetrics(rows, presence, previousWindow, flags, settings.weights),
+    current: windowMetrics(rows, presence, window, flags, settings.weights, giving),
+    previous: windowMetrics(rows, presence, previousWindow, flags, settings.weights, giving),
     trend: trendSeries(rows, presence, lastWeek, weeks, TREND_POINTS),
     lastWeekWithData: rows.filter((row) => (row.attendees ?? 0) > 0).map((row) => row.weekStart).sort().pop() ?? null,
   }));
@@ -124,13 +129,14 @@ export async function buildDashboard(weeks: number, now: Date = new Date()): Pro
     items: itemDashboards,
     overall: perItem.length > 1
       ? {
-        current: combinedMetrics(perItem, window, flags, settings.weights),
-        previous: combinedMetrics(perItem, previousWindow, flags, settings.weights),
+        current: combinedMetrics(perItem, window, flags, settings.weights, giving),
+        previous: combinedMetrics(perItem, previousWindow, flags, settings.weights, giving),
       }
       : null,
     weights: settings.weights,
     servingWindowDays: settings.servingWindowDays,
     fieldsFound: { thrive: !!keys.thrive, serveClass: !!keys.serveClass, lastServed: !!keys.lastServed },
+    givingField: keys.giving ? synced.find((field) => field.key === keys.giving)?.label ?? keys.giving : null,
     lastSync: state.lastRun,
     generatedAt: now.toISOString(),
   };
@@ -147,6 +153,18 @@ router.get("/dashboard", requireToolAccess("reporting"), async (req, res) => {
     res.json(await buildDashboard(parseWeeks(req.query.weeks, settings.dashboard.defaultWeeks)));
   } catch (error) {
     sendError(req, res, error, "Failed to load the engagement dashboard");
+  }
+});
+
+// People view: green / yellow / red counts and this week's drops and giving
+// flags, by name (lib/engagementPeople.ts). Shown only on the dashboard,
+// never emailed. ?tier=red|yellow|green also lists everyone in that tier.
+router.get("/people", requireToolAccess("reporting"), async (req, res) => {
+  try {
+    const tier = ["green", "yellow", "red"].includes(String(req.query.tier)) ? String(req.query.tier) as Tier : undefined;
+    res.json(await buildPeopleDashboard(tier));
+  } catch (error) {
+    sendError(req, res, error, "Failed to load the people view");
   }
 });
 
@@ -195,7 +213,7 @@ export function dashboardEmailHtml(dashboard: Dashboard, siteUrl: string | null)
         <tbody>${rows}${overall}</tbody>
       </table>
       <p style="font-size:12px;color:#6b7280;margin-top:12px;">
-        Engagement (0–100) weighs ${ENGAGEMENT_PARTS.filter((part) => part !== "giving" && dashboard.weights[part] > 0).map((part) => `${PART_LABELS[part]} ×${dashboard.weights[part]}`).join(", ")}.
+        Engagement (0–100) weighs ${ENGAGEMENT_PARTS.filter((part) => (part !== "giving" || !!dashboard.givingField) && dashboard.weights[part] > 0).map((part) => `${PART_LABELS[part]} ×${dashboard.weights[part]}`).join(", ")}.
         People = different people who attended at least once in the window. Weeks nobody attended don't count.
       </p>
       ${siteUrl ? `<p><a href="${escape(siteUrl)}/reporting/engagement">Open the dashboard</a></p>` : ""}
@@ -273,6 +291,8 @@ router.put("/settings", requireAdmin, async (req, res) => {
       weights,
       fields: body.fields !== undefined ? body.fields : current.fields,
       servingWindowDays: body.servingWindowDays !== undefined ? body.servingWindowDays : current.servingWindowDays,
+      tiers: body.tiers !== undefined ? body.tiers : current.tiers,
+      missedGivingDays: body.missedGivingDays !== undefined ? body.missedGivingDays : current.missedGivingDays,
       dashboard: {
         ...current.dashboard,
         items: dashboardBody.items !== undefined ? normalizeTrackedItems(dashboardBody.items) : current.dashboard.items,
@@ -283,7 +303,17 @@ router.put("/settings", requireAdmin, async (req, res) => {
         ownerName: [user.firstName, user.lastName].filter(Boolean).join(" ") || "an admin",
       },
     });
+    if (body.tiers !== undefined) {
+      const tiers = body.tiers as Record<string, unknown>;
+      if (Number(tiers.green) !== next.tiers.green || Number(tiers.yellow) !== next.tiers.yellow) {
+        res.status(400).json({ error: "Green must be above yellow, both between 1 and 100." });
+        return;
+      }
+    }
     await writeEngagementSettings(next);
+    if (next.tiers.green !== current.tiers.green || next.tiers.yellow !== current.tiers.yellow) {
+      await retierSnapshots(next.tiers);
+    }
     req.log.info({ actorId: user.id, items: next.dashboard.items.length, recipients: next.dashboard.recipients.length }, "Engagement settings saved");
     res.json({ settings: next });
   } catch (error) {

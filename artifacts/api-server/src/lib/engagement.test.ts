@@ -15,7 +15,7 @@ import {
 import { combinedMetrics, groupFirstTimers, personRates, trendSeries, windowMetrics, windowWeeks } from "./engagementMetrics";
 import { syncFrom } from "./engagementSync";
 
-const KEYS = { thrive: "field:1", serveClass: "field:2", lastServed: "field:3" };
+const KEYS = { thrive: "field:1", serveClass: "field:2", lastServed: "field:3", giving: "field:4" };
 
 test("score is the weighted average of parts with data; giving (null) never counts", () => {
   const parts = { attendance: 0.8, thrive: 0.4, serveClass: 0.2, serving: 0.6, giving: null };
@@ -43,7 +43,9 @@ test("yes-like values and field dates", () => {
 
 test("person flags: serving means Last Served within the window of asOf", () => {
   const fields = { "field:1": "08/23/2026", "field:3": "08/01/2026" };
-  assert.deepEqual(personFlags(fields, KEYS, "2026-10-27"), { thrive: true, serveClass: false, serving: true });
+  assert.deepEqual(personFlags(fields, KEYS, "2026-10-27"), { thrive: true, serveClass: false, serving: true, giving: false });
+  assert.equal(personFlags({ "field:4": "Yes" }, KEYS, "2026-10-27").giving, true);
+  assert.equal(personFlags({ "field:4": "Yes" }, { ...KEYS, giving: null }, "2026-10-27").giving, false);
   assert.equal(personFlags(fields, KEYS, "2026-11-15").serving, false); // 106 days later
   assert.equal(personFlags(fields, KEYS, "2026-11-15", 120).serving, true);
   assert.equal(personFlags({ "field:3": "12/01/2026" }, KEYS, "2026-10-27").serving, false); // future date
@@ -51,8 +53,8 @@ test("person flags: serving means Last Served within the window of asOf", () => 
 
 test("summarizeEngagement counts people without a profile as not yet", () => {
   const flags = new Map([
-    ["a", { thrive: true, serveClass: true, serving: false }],
-    ["b", { thrive: false, serveClass: true, serving: true }],
+    ["a", { thrive: true, serveClass: true, serving: false, giving: true }],
+    ["b", { thrive: false, serveClass: true, serving: true, giving: false }],
   ]);
   const summary = summarizeEngagement(
     [{ personId: "a", attendanceRate: 1 }, { personId: "b", attendanceRate: 0.5 }, { personId: "c", attendanceRate: 0 }],
@@ -63,7 +65,14 @@ test("summarizeEngagement counts people without a profile as not yet", () => {
   assert.equal(summary.percentages.attendance, 0.5);
   assert.equal(summary.percentages.thrive, 1 / 3);
   assert.equal(summary.percentages.serveClass, 2 / 3);
+  assert.equal(summary.percentages.giving, null); // no Giving field picked
   assert.equal(summary.score, Math.round(((0.5 + 1 / 3 + 2 / 3 + 1 / 3) / 4) * 100));
+  const withGiving = summarizeEngagement(
+    [{ personId: "a", attendanceRate: 1 }, { personId: "b", attendanceRate: 0.5 }, { personId: "c", attendanceRate: 0 }],
+    flags, DEFAULT_WEIGHTS, true,
+  );
+  assert.equal(withGiving.percentages.giving, 1 / 3);
+  assert.equal(withGiving.score, Math.round(((0.5 + 1 / 3 + 2 / 3 + 1 / 3 + 1 / 3) / 5) * 100));
 });
 
 test("field keys: saved choice if still synced, else matched by label", () => {
@@ -72,7 +81,11 @@ test("field keys: saved choice if still synced, else matched by label", () => {
     { key: "field:1036232", label: "Serve Class Completed" },
     { key: "field:664891", label: "Last Served" },
   ];
-  assert.deepEqual(resolveFieldKeys({}, synced), { thrive: "field:700347", serveClass: "field:1036232", lastServed: "field:664891" });
+  assert.deepEqual(resolveFieldKeys({}, synced), { thrive: "field:700347", serveClass: "field:1036232", lastServed: "field:664891", giving: null });
+  // Giving is never guessed from a label, only the admin's pick (if still synced).
+  assert.equal(resolveFieldKeys({}, [...synced, { key: "field:5", label: "Giving" }]).giving, null);
+  assert.equal(resolveFieldKeys({ giving: "field:5" }, [...synced, { key: "field:5", label: "Regular giver" }]).giving, "field:5");
+  assert.equal(resolveFieldKeys({ giving: "field:5" }, synced).giving, null);
   assert.deepEqual(resolveFieldKeys({ thrive: "field:999" }, synced).thrive, "field:700347");
   assert.equal(resolveFieldKeys({}, []).serveClass, null);
 });

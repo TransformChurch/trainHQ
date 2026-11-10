@@ -55,6 +55,7 @@ export function windowMetrics(
   window: string[],
   flags: Map<string, PersonFlags>,
   weights: EngagementWeights,
+  givingTracked = false,
 ): WindowMetrics {
   const inWindow = new Set(window);
   const held = weekRows.filter((row) => inWindow.has(row.weekStart) && (row.attendees ?? 0) > 0);
@@ -69,7 +70,7 @@ export function windowMetrics(
     avgNewGuests: held.length ? held.reduce((sum, row) => sum + row.firstTimers, 0) / held.length : null,
     uniqueAttendees: rates.size,
     attendanceRate: rateValues.length ? rateValues.reduce((sum, rate) => sum + rate, 0) / rateValues.length : null,
-    engagement: summarizeEngagement(people, flags, weights),
+    engagement: summarizeEngagement(people, flags, weights, givingTracked),
   };
 }
 
@@ -114,6 +115,7 @@ export function combinedMetrics(
   window: string[],
   flags: Map<string, PersonFlags>,
   weights: EngagementWeights,
+  givingTracked = false,
 ): Omit<WindowMetrics, "engagement"> & { engagement: EngagementSummary } {
   const ratesByPerson = new Map<string, number[]>();
   let avgAttendance: number | null = null;
@@ -140,7 +142,7 @@ export function combinedMetrics(
     avgNewGuests,
     uniqueAttendees: people.length,
     attendanceRate: people.length ? people.reduce((sum, person) => sum + (person.attendanceRate ?? 0), 0) / people.length : null,
-    engagement: summarizeEngagement(people, flags, weights),
+    engagement: summarizeEngagement(people, flags, weights, givingTracked),
   };
 }
 

@@ -15,7 +15,9 @@ season meta JSON as "discipleship":
                  "percentages": {"attendance": 0.62, ..., "giving": null}, "score": 54}, ...],
      "overall": {... same shape, name "All groups"}}
 
-Percentages are 0..1 or null (no data -- Giving until giving data exists).
+Percentages are 0..1 or null (no data). Giving has values only when an admin
+picked a "Giving field" (its label arrives as "givingField"); it's a share of
+people who give, never amounts.
 """
 from __future__ import annotations
 
@@ -108,6 +110,7 @@ def draw_discipleship_pages(figsize: tuple, report_name: str, period_label: str,
         return []
     weights = disc.get("weights") or {}
     window = int(disc.get("servingWindowDays") or 90)
+    giving_field = str(disc.get("givingField") or "").strip()
     pages = [groups[i:i + ROWS_PER_PAGE] for i in range(0, len(groups), ROWS_PER_PAGE)]
     figs = []
     x_name = 0.06
@@ -143,8 +146,11 @@ def draw_discipleship_pages(figsize: tuple, report_name: str, period_label: str,
                 "taken). Attendees = people marked present at least once (\"of N\" = everyone on the group's attendance lists).",
                 "Thrive and Serve Class = share of attendees whose Planning Center profile has them completed. "
                 f"Serving = share whose \"Last Served\" date is within {window} days of the season's last night.",
-                "Giving isn't connected yet, so it doesn't count toward the score. "
-                f"Score = weighted average of the other parts (weights: {_weights_text({k: v for k, v in weights.items() if k != 'giving'})}).",
+                (f"Giving = share of attendees whose \"{giving_field}\" field has a value. "
+                 f"Score = weighted average of the parts (weights: {_weights_text(weights)}).")
+                if giving_field else
+                ("No Giving field is set yet, so giving doesn't count toward the score. "
+                 f"Score = weighted average of the other parts (weights: {_weights_text({k: v for k, v in weights.items() if k != 'giving'})})."),
                 "Someone in more than one group counts in each; the All groups row averages their per-group attendance rates.",
             ]
             y = bottom - 0.035
