@@ -26,10 +26,10 @@ export interface SendEmailResult {
 
 const DEFAULT_FROM_NAME = "Transform Church";
 const DEFAULT_SITE_URL = "https://transformchurch.app";
-// Brand colors, matching the site's --primary (hsl 43 96% 56%) and
-// --primary-foreground (hsl 222 47% 11%).
-const BRAND_GOLD = "#fbbf24";
-const BRAND_INK = "#0f172a";
+// Brand colors: the black-and-white look of transformchurch.com, matching the
+// site's --primary (black) and --primary-foreground (white).
+const BRAND_BLACK = "#000000";
+const BRAND_INK = "#0a0a0a";
 const DEFAULT_FROM_ADDRESS = "onboarding@resend.dev";
 // Deliberately stricter than RFC 5322: plain ASCII addresses only, which is
 // all a church sending domain needs and all Resend's validator reliably
@@ -105,8 +105,8 @@ export function brandEmailHtml(bodyHtml: string, site: string = siteUrl()): stri
 <body style="margin:0;padding:0;background:#f3f4f6;">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f3f4f6;">
   <tr><td align="center" style="padding:24px 12px;">
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:720px;background:#ffffff;border-radius:8px;overflow:hidden;font-family:Arial,Helvetica,sans-serif;color:#111827;">
-      <tr><td style="height:6px;line-height:6px;font-size:0;background:${BRAND_GOLD};">&nbsp;</td></tr>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:720px;background:#ffffff;border-radius:8px;overflow:hidden;font-family:Helvetica,Arial,sans-serif;color:#111827;">
+      <tr><td style="height:6px;line-height:6px;font-size:0;background:${BRAND_BLACK};">&nbsp;</td></tr>
       <tr><td align="center" style="padding:24px 24px 16px;border-bottom:1px solid #e5e7eb;">
         <a href="${href}" style="text-decoration:none;color:${BRAND_INK};">
           <img src="${href}/tc-wordmark.png" width="240" alt="Transform Church" style="display:block;width:240px;max-width:100%;height:auto;border:0;font-size:22px;font-weight:bold;color:${BRAND_INK};">
@@ -116,7 +116,7 @@ export function brandEmailHtml(bodyHtml: string, site: string = siteUrl()): stri
 ${bodyHtml}
       </td></tr>
       <tr><td align="center" style="padding:20px 24px 24px;background:#f9fafb;border-top:1px solid #e5e7eb;font-size:13px;line-height:1.5;color:#4b5563;">
-        <a href="${href}" style="display:inline-block;padding:10px 20px;background:${BRAND_GOLD};color:${BRAND_INK};text-decoration:none;font-weight:bold;border-radius:6px;">Visit Transform Church</a>
+        <a href="${href}" style="display:inline-block;padding:10px 20px;background:${BRAND_BLACK};color:#ffffff;text-decoration:none;font-weight:bold;border-radius:10px;">Visit Transform Church</a>
         <p style="margin:12px 0 0;">Transform Church &middot; <a href="${href}" style="color:${BRAND_INK};">${label}</a></p>
       </td></tr>
     </table>
@@ -128,7 +128,7 @@ ${bodyHtml}
 
 // A call-to-action button for use inside an email body.
 export function emailButton(label: string, href: string): string {
-  return `<p style="margin:20px 0;"><a href="${escapeHtml(href)}" style="display:inline-block;padding:12px 22px;background:${BRAND_INK};color:#ffffff;text-decoration:none;font-weight:bold;border-radius:6px;">${escapeHtml(label)}</a></p>`;
+  return `<p style="margin:20px 0;"><a href="${escapeHtml(href)}" style="display:inline-block;padding:12px 22px;background:${BRAND_BLACK};color:#ffffff;text-decoration:none;font-weight:bold;border-radius:10px;">${escapeHtml(label)}</a></p>`;
 }
 
 export async function sendEmail({ to, subject, html, attachments }: SendEmailInput): Promise<SendEmailResult> {

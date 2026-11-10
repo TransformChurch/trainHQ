@@ -143,7 +143,7 @@ export function Sidebar() {
                     <Icon className={`w-5 h-5 ${isActive ? "text-primary" : ""}`} />
                     <span className="flex-1">{item.label}</span>
                     {item.badge && (
-                      <span className="text-[10px] font-bold bg-amber-400 text-amber-900 rounded-full w-4 h-4 flex items-center justify-center leading-none">
+                      <span className="text-[10px] font-bold bg-primary text-primary-foreground rounded-full w-4 h-4 flex items-center justify-center leading-none">
                         {item.badge}
                       </span>
                     )}

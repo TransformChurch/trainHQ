@@ -1,10 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useUpload } from "@workspace/object-storage-web";
-<<<<<<< Updated upstream
-import { AlertTriangle, BarChart3, CalendarClock, Check, CheckCircle2, ChevronDown, Clock, Pencil, Play, Users, ChevronUp, Download, Loader2, Mail, Plus, RefreshCw, Send, Settings2, Trash2, Upload } from "lucide-react";
-=======
-import { AlertTriangle, BarChart3, Check, CheckCircle2, ChevronDown, Clock, Copy, Users, ChevronUp, Download, Loader2, Mail, Plus, RefreshCw, Send, Settings2, Trash2, Upload } from "lucide-react";
->>>>>>> Stashed changes
+import { AlertTriangle, BarChart3, CalendarClock, Check, CheckCircle2, ChevronDown, Clock, Pencil, Play, Users, ChevronUp, Download, Loader2, Mail, Plus, RefreshCw, Send, Settings2, Trash2, Upload, Copy } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
