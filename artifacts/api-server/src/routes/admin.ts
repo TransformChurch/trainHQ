@@ -13,7 +13,10 @@ import adminTracksRouter from "./adminTracks";
 import adminPlanningCenterRouter from "./adminPlanningCenter";
 import adminWikiDriveSyncRouter from "./adminWikiDriveSync";
 import { adminToolAccessRouter } from "./toolAccess";
-import { resolveFromHeader } from "../lib/email";
+import { sendEmail, siteUrl, emailButton } from "../lib/email";
+
+const escapeHtml = (value: string) =>
+  value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
 const router = Router();
 
@@ -30,40 +33,25 @@ async function sendAssignmentEmail(
   moduleName: string,
   dueDate: string | null,
 ) {
-  const apiKey = process.env.RESEND_API_KEY;
-  if (!apiKey) return;
-  try {
-    const from = resolveFromHeader();
-    if (!from) {
-      console.error("Skipping assignment email: EMAIL_FROM is not a valid sender address");
-      return;
-    }
-    const dueLine = dueDate
-      ? `<p><strong>Due:</strong> ${new Date(dueDate).toLocaleDateString()}</p>`
-      : "";
-    await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        from,
-        to: toEmail,
-        subject: `New Training Module Assigned: ${moduleName}`,
-        html: `
-          <h2>You've been assigned a new training module</h2>
-          <p>Hi ${toName},</p>
-          <p>A new training module has been assigned to you:</p>
-          <p><strong>${moduleName}</strong></p>
-          ${dueLine}
-          <p>Log in to your Transform Church training portal to get started.</p>
-        `,
-      }),
-    });
-  } catch (err) {
-    console.error("Failed to send assignment email:", err);
-  }
+  const dueLine = dueDate
+    ? `<p><strong>Due:</strong> ${new Date(dueDate).toLocaleDateString("en-US")}</p>`
+    : "";
+  const site = siteUrl();
+  const result = await sendEmail({
+    to: toEmail,
+    subject: `New Training Module Assigned: ${moduleName}`,
+    html: `
+      <h2 style="margin:0 0 16px;">You've been assigned a new training module</h2>
+      <p>Hi ${escapeHtml(toName)},</p>
+      <p>A new training module has been assigned to you:</p>
+      <p style="font-size:17px;"><strong>${escapeHtml(moduleName)}</strong></p>
+      ${dueLine}
+      <p>Sign in to Transform Church Training to watch the videos and complete the module.</p>
+      ${emailButton("Start training", site)}
+      <p style="font-size:13px;color:#6b7280;">Or go to <a href="${escapeHtml(site)}">${escapeHtml(site)}</a></p>
+    `,
+  });
+  if (!result.sent) console.error("Failed to send assignment email:", result.error);
 }
 
 // GET /admin/users — managers and admins can view

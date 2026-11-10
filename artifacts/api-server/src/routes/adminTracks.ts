@@ -19,7 +19,10 @@ import {
   syncPlanningCenterModuleAssignment,
   syncPlanningCenterTrackDateField,
 } from "../lib/planningCenter";
-import { resolveFromHeader } from "../lib/email";
+import { sendEmail, siteUrl, emailButton } from "../lib/email";
+
+const escapeHtml = (value: string) =>
+  value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
 const router = Router();
 
@@ -30,29 +33,25 @@ async function sendTrackAssignmentEmail(
   moduleTitles: string[],
   dueDate: string | null,
 ) {
-  const apiKey = process.env.RESEND_API_KEY;
-  if (!apiKey) return;
-  try {
-    const from = resolveFromHeader();
-    if (!from) {
-      console.error("Skipping assignment email: EMAIL_FROM is not a valid sender address");
-      return;
-    }
-    const dueLine = dueDate ? `<p><strong>Due:</strong> ${new Date(dueDate).toLocaleDateString()}</p>` : "";
-    const moduleListHtml = moduleTitles.map((title) => `<li>${title}</li>`).join("");
-    await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        from,
-        to: toEmail,
-        subject: `New Training Track Assigned: ${trackName}`,
-        html: `<h2>You've been assigned a new training track</h2><p>Hi ${toName},</p><p>A new training track has been assigned to you:</p><p><strong>${trackName}</strong></p>${dueLine}<p>It includes the following modules:</p><ul>${moduleListHtml}</ul><p>Log in to your Transform Church training portal to get started.</p>`,
-      }),
-    });
-  } catch (err) {
-    console.error("Failed to send track assignment email:", err);
-  }
+  const dueLine = dueDate ? `<p><strong>Due:</strong> ${new Date(dueDate).toLocaleDateString("en-US")}</p>` : "";
+  const moduleListHtml = moduleTitles.map((title) => `<li>${escapeHtml(title)}</li>`).join("");
+  const site = siteUrl();
+  const result = await sendEmail({
+    to: toEmail,
+    subject: `New Training Track Assigned: ${trackName}`,
+    html: `
+      <h2 style="margin:0 0 16px;">You've been assigned a new training track</h2>
+      <p>Hi ${escapeHtml(toName)},</p>
+      <p>A new training track has been assigned to you:</p>
+      <p style="font-size:17px;"><strong>${escapeHtml(trackName)}</strong></p>
+      ${dueLine}
+      ${moduleListHtml ? `<p>It includes the following modules:</p><ul>${moduleListHtml}</ul>` : ""}
+      <p>Sign in to Transform Church Training to watch the videos and complete the track.</p>
+      ${emailButton("Start training", site)}
+      <p style="font-size:13px;color:#6b7280;">Or go to <a href="${escapeHtml(site)}">${escapeHtml(site)}</a></p>
+    `,
+  });
+  if (!result.sent) console.error("Failed to send track assignment email:", result.error);
 }
 
 router.patch("/:trackId/planning-center-fields", requireManagerOrAdmin, async (req, res) => {
@@ -277,4 +276,4 @@ router.post("/:trackId/assign", requireManagerOrAdmin, async (req, res) => {
   }
 });
 
-export default router;
+export default router;

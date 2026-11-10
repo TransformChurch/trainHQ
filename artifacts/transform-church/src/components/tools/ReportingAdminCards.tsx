@@ -1,6 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useUpload } from "@workspace/object-storage-web";
+<<<<<<< Updated upstream
 import { AlertTriangle, BarChart3, CalendarClock, Check, CheckCircle2, ChevronDown, Clock, Pencil, Play, Users, ChevronUp, Download, Loader2, Mail, Plus, RefreshCw, Send, Settings2, Trash2, Upload } from "lucide-react";
+=======
+import { AlertTriangle, BarChart3, Check, CheckCircle2, ChevronDown, Clock, Copy, Users, ChevronUp, Download, Loader2, Mail, Plus, RefreshCw, Send, Settings2, Trash2, Upload } from "lucide-react";
+>>>>>>> Stashed changes
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -899,6 +903,8 @@ export function ReportingAdminCards() {
 
       <AttendanceHistoryCard />
 
+      <CheckInCopyCard />
+
       <GroupHistoryCard />
     </div>
   );
@@ -1285,7 +1291,6 @@ function AttendanceHistoryCard() {
             </p>
           )}
         </div>
-        <WeekSubstitutions />
       </CardContent>
     </Card>
   );
@@ -1304,6 +1309,15 @@ type WeekSubstitution = {
 // "Use another event's numbers for one week" -- e.g. the Summer Finale
 // Concert stood in for a normal Youth night. Only the report trend charts
 // use these; Planning Center itself is never changed.
+function CheckInCopyCard() {
+  return (
+    <Card>
+      <CardHeader><CardTitle className="flex items-center gap-2"><Copy className="h-5 w-5" /> Copy check-ins</CardTitle></CardHeader>
+      <CardContent><WeekSubstitutions /></CardContent>
+    </Card>
+  );
+}
+
 function WeekSubstitutions() {
   const { toast } = useToast();
   const [items, setItems] = useState<WeekSubstitution[]>([]);
@@ -1348,11 +1362,11 @@ function WeekSubstitutions() {
         }),
       });
       setItems(await response.json() as WeekSubstitution[]);
-      toast({ title: "Week substitution saved", description: `${target.name} will use ${source.name}'s numbers for that week.` });
+      toast({ title: "Check-in copy saved", description: `${target.name} reports will use ${source.name}'s check-ins for that week.` });
       setSourceId("");
       setDate("");
     } catch (error) {
-      toast({ title: "Could not save the substitution", description: error instanceof Error ? error.message : "Request failed.", variant: "destructive" });
+      toast({ title: "Could not save the copy", description: error instanceof Error ? error.message : "Request failed.", variant: "destructive" });
     } finally {
       setSaving(false);
     }
@@ -1363,7 +1377,7 @@ function WeekSubstitutions() {
       const response = await api(`/api/attendance-history/overrides?eventId=${encodeURIComponent(item.eventId)}&weekStart=${item.weekStart}`, { method: "DELETE" });
       setItems(await response.json() as WeekSubstitution[]);
     } catch (error) {
-      toast({ title: "Could not remove the substitution", description: error instanceof Error ? error.message : "Request failed.", variant: "destructive" });
+      toast({ title: "Could not remove the copy", description: error instanceof Error ? error.message : "Request failed.", variant: "destructive" });
     }
   };
 
@@ -1372,12 +1386,15 @@ function WeekSubstitutions() {
   const selectClass = "flex h-9 w-full rounded-md border border-input bg-background px-2 text-sm";
 
   return (
-    <div className="space-y-3 rounded-md border p-3 text-sm">
+    <div className="space-y-3 text-sm">
       <div>
-        <p className="font-medium">Week substitutions</p>
+        <p className="font-medium">Copy check-ins between events</p>
         <p className="text-xs text-muted-foreground">
           When a one-off event replaced an event's normal service (for example a concert instead of a regular Youth
-          night), use that event's attendance for the week in the reports' trend charts. Planning Center isn't changed.
+          night), copy that event's check-ins into the regular event for that week. Reports for the regular event then
+          use the copied attendance everywhere: the counts, the roster and the trend charts. Planning Center itself
+          can't be written to by the website (its Check-Ins API is read-only), so nothing changes there; the copy
+          applies only to reports made here.
         </p>
       </div>
       {items.length > 0 && (
@@ -1385,7 +1402,7 @@ function WeekSubstitutions() {
           {items.map((item) => (
             <li key={`${item.eventId}-${item.weekStart}`} className="flex flex-wrap items-center justify-between gap-2 rounded bg-muted/40 px-2 py-1">
               <span>
-                <strong>{item.eventName}</strong>, week of {item.weekStart}: using <strong>{item.sourceEventName}</strong>
+                <strong>{item.eventName}</strong>, week of {item.weekStart}: copying in <strong>{item.sourceEventName}</strong>
                 {item.sourceAttendees !== null ? ` (${item.sourceAttendees} attendees` : ""}
                 {item.sourceAttendees !== null && item.ownAttendees !== null ? ` instead of ${item.ownAttendees})` : item.sourceAttendees !== null ? ")" : ""}
               </span>
@@ -1397,12 +1414,12 @@ function WeekSubstitutions() {
       {events === null ? (
         <Button size="sm" variant="outline" onClick={loadEvents} disabled={loadingEvents}>
           {loadingEvents ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Plus className="mr-2 h-4 w-4" />}
-          Add a week substitution
+          Copy check-ins for a week
         </Button>
       ) : (
         <div className="grid gap-2 md:grid-cols-3">
           <div className="space-y-1">
-            <Label htmlFor="sub-target">Event to fix</Label>
+            <Label htmlFor="sub-target">Copy into event</Label>
             <select id="sub-target" className={selectClass} value={targetId} onChange={(event) => setTargetId(event.target.value)}>
               <option value="">Choose…</option>
               {events.filter((event) => !event.archived).map((event) => <option key={event.id} value={event.id}>{event.name}</option>)}
@@ -1413,7 +1430,7 @@ function WeekSubstitutions() {
             <Input id="sub-date" type="date" value={date} onChange={(event) => setDate(event.target.value)} />
           </div>
           <div className="space-y-1">
-            <Label htmlFor="sub-source">Use numbers from</Label>
+            <Label htmlFor="sub-source">Copy check-ins from</Label>
             <Input placeholder="Search events…" value={sourceFilter} onChange={(event) => setSourceFilter(event.target.value)} />
             <select id="sub-source" className={selectClass} value={sourceId} onChange={(event) => setSourceId(event.target.value)}>
               <option value="">Choose…</option>
@@ -1425,7 +1442,7 @@ function WeekSubstitutions() {
           <div className="md:col-span-3">
             <Button size="sm" onClick={save} disabled={saving || !targetId || !sourceId || !date}>
               {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}
-              Save substitution
+              Save copy
             </Button>
           </div>
         </div>

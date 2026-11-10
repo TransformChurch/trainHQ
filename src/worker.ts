@@ -35,6 +35,7 @@ export interface Env {
   PCO_REDIRECT_URI: string;
   LOG_LEVEL?: string;
   CORS_ALLOWED_ORIGINS?: string;
+  SITE_URL?: string;
   CORS_ALLOW_CREDENTIALS?: string;
   FRAME_ANCESTORS?: string;
   PUBLIC_API_URL?: string;
@@ -125,6 +126,7 @@ export class TransformChurchContainer extends Container<Env> {
     // CORS defaults match the app's own safe-by-default behavior: blank
     // origins means same-origin only, credentials off, framing self-only.
     CORS_ALLOWED_ORIGINS: env.CORS_ALLOWED_ORIGINS ?? "",
+    SITE_URL: env.SITE_URL ?? "",
     CORS_ALLOW_CREDENTIALS: env.CORS_ALLOW_CREDENTIALS ?? "false",
     FRAME_ANCESTORS: env.FRAME_ANCESTORS ?? "'self'",
     PUBLIC_API_URL: env.PUBLIC_API_URL ?? "",

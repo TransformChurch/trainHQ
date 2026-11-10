@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { resolveFromHeader, sendEmail } from "./email";
+import { resolveFromHeader, sendEmail, siteUrl } from "./email";
 
 test("unset or empty EMAIL_FROM falls back to the default sender", () => {
   assert.equal(resolveFromHeader(undefined), "Transform Church <onboarding@resend.dev>");
@@ -61,5 +61,46 @@ test("sendEmail base64-encodes attachments for Resend", async () => {
     globalThis.fetch = originalFetch;
     if (originalKey === undefined) delete process.env.RESEND_API_KEY; else process.env.RESEND_API_KEY = originalKey;
     if (originalFrom === undefined) delete process.env.EMAIL_FROM; else process.env.EMAIL_FROM = originalFrom;
+  }
+});
+
+test("every email is wrapped with church branding and the website link", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalKey = process.env.RESEND_API_KEY;
+  const originalSite = process.env.SITE_URL;
+  let sentBody: any = null;
+  process.env.RESEND_API_KEY = "test-key";
+  delete process.env.SITE_URL;
+  globalThis.fetch = (async (_url: string, init: RequestInit) => {
+    sentBody = JSON.parse(String(init.body));
+    return new Response("{}", { status: 200 });
+  }) as typeof fetch;
+  try {
+    await sendEmail({ to: "a@example.com", subject: "s", html: "<p>body text</p>" });
+    assert.match(sentBody.html, /<p>body text<\/p>/);
+    assert.match(sentBody.html, /alt="Transform Church"/);
+    assert.match(sentBody.html, /href="https:\/\/transformchurch\.app"/);
+    assert.match(sentBody.html, /transformchurch\.app<\/a>/);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalKey === undefined) delete process.env.RESEND_API_KEY; else process.env.RESEND_API_KEY = originalKey;
+    if (originalSite === undefined) delete process.env.SITE_URL; else process.env.SITE_URL = originalSite;
+  }
+});
+
+test("siteUrl prefers SITE_URL, then the first CORS origin, then the production domain", () => {
+  const originalSite = process.env.SITE_URL;
+  const originalCors = process.env.CORS_ALLOWED_ORIGINS;
+  try {
+    process.env.SITE_URL = "https://example.org/";
+    assert.equal(siteUrl(), "https://example.org");
+    delete process.env.SITE_URL;
+    process.env.CORS_ALLOWED_ORIGINS = "https://staging.example.org, https://other";
+    assert.equal(siteUrl(), "https://staging.example.org");
+    process.env.CORS_ALLOWED_ORIGINS = "";
+    assert.equal(siteUrl(), "https://transformchurch.app");
+  } finally {
+    if (originalSite === undefined) delete process.env.SITE_URL; else process.env.SITE_URL = originalSite;
+    if (originalCors === undefined) delete process.env.CORS_ALLOWED_ORIGINS; else process.env.CORS_ALLOWED_ORIGINS = originalCors;
   }
 });
