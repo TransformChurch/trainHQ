@@ -894,14 +894,20 @@ export function ReportingAdminCards() {
       <ScheduledJobsCard />
 
       <ScheduledReportsCard />
+    </div>
+  );
+}
 
+// Tool Management > Database (2026-11-10): the data the reports and the
+// Engagement dashboard read from -- the weekly people pull, the saved
+// Check-Ins and Groups attendance history, and copied check-in weeks.
+export function DatabaseAdminCards() {
+  return (
+    <div className="space-y-6">
       <PeopleSyncCard />
-
       <AttendanceHistoryCard />
-
-      <CheckInCopyCard />
-
       <GroupHistoryCard />
+      <CheckInCopyCard />
     </div>
   );
 }

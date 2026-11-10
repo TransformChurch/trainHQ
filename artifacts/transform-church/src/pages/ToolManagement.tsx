@@ -3,7 +3,7 @@ import { Loader2, SlidersHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "@/lib/toolApi";
-import { ReportingAdminCards } from "@/components/tools/ReportingAdminCards";
+import { DatabaseAdminCards, ReportingAdminCards } from "@/components/tools/ReportingAdminCards";
 import { EngagementSettingsCard } from "@/components/tools/EngagementSettingsCard";
 import { ToolAccessCard, type AccessUser, type ToolAccessConfig } from "@/components/tools/ToolAccessCard";
 import { WikiDriveSyncCard } from "@/components/tools/WikiDriveSyncCard";
@@ -12,14 +12,35 @@ import type { ToolKey } from "@/lib/toolAccess";
 type AccessData = { tools: Record<ToolKey, ToolAccessConfig>; users: AccessUser[] };
 
 // One home for every tool's admin-only controls: who can use it (Reporting
-// and Messaging) and its setup (report templates/scripts, Weekly Pulse,
-// attendance history, Wiki Drive sync). The tools' own pages stay focused on
-// day-to-day use.
+// and Messaging) and its setup. Tabs (2026-11-10): Reporting (templates,
+// Weekly Pulse, scheduled jobs and reports), Engagement (score and
+// dashboard), Database (people sync, attendance history, copied check-ins),
+// Messaging, Wiki. The tab is kept in the URL hash, e.g. /admin/tools#engagement,
+// so other pages can link straight to one.
+const TABS = ["reporting", "engagement", "database", "messaging", "wiki"] as const;
+type TabKey = typeof TABS[number];
+const tabFromHash = (): TabKey => {
+  const hash = window.location.hash.replace(/^#/, "") as TabKey;
+  return TABS.includes(hash) ? hash : "reporting";
+};
 export default function ToolManagement() {
   const [data, setData] = useState<AccessData | null>(null);
   const [loading, setLoading] = useState(true);
 
   const [loadError, setLoadError] = useState("");
+  const [tab, setTab] = useState<TabKey>(tabFromHash);
+
+  useEffect(() => {
+    const onHashChange = () => setTab(tabFromHash());
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
+  }, []);
+
+  const chooseTab = (value: string) => {
+    const next = TABS.includes(value as TabKey) ? value as TabKey : "reporting";
+    setTab(next);
+    window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}#${next}`);
+  };
 
   const loadAccess = useCallback(() => {
     setLoading(true);
@@ -62,9 +83,11 @@ export default function ToolManagement() {
         </p>
       </div>
 
-      <Tabs defaultValue="reporting">
-        <TabsList>
+      <Tabs value={tab} onValueChange={chooseTab}>
+        <TabsList className="h-auto flex-wrap">
           <TabsTrigger value="reporting">Reporting</TabsTrigger>
+          <TabsTrigger value="engagement">Engagement</TabsTrigger>
+          <TabsTrigger value="database">Database</TabsTrigger>
           <TabsTrigger value="messaging">Messaging</TabsTrigger>
           <TabsTrigger value="wiki">Wiki</TabsTrigger>
         </TabsList>
@@ -72,7 +95,14 @@ export default function ToolManagement() {
         <TabsContent value="reporting" className="mt-6 space-y-6">
           {accessCard("reporting", "Reporting")}
           <ReportingAdminCards />
+        </TabsContent>
+
+        <TabsContent value="engagement" className="mt-6 space-y-6">
           <EngagementSettingsCard />
+        </TabsContent>
+
+        <TabsContent value="database" className="mt-6 space-y-6">
+          <DatabaseAdminCards />
         </TabsContent>
 
         <TabsContent value="messaging" className="mt-6 space-y-6">

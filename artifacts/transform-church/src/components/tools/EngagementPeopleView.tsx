@@ -108,7 +108,7 @@ export function EngagementPeopleView() {
       <Card>
         <CardContent className="space-y-2 p-6 text-sm">
           <p className="font-medium">No people scores yet.</p>
-          <p className="text-muted-foreground">They're saved after each Monday sync (or "Sync now" in Tool Management). Drops and giving flags start the week after the first one.</p>
+          <p className="text-muted-foreground">They're saved after each Monday sync (or "Sync now" in Tool Management → Engagement). Drops and giving flags start the week after the first one.</p>
         </CardContent>
       </Card>
     );
@@ -222,7 +222,7 @@ export function EngagementPeopleView() {
           </CardHeader>
           <CardContent>
             {!data.givingField ? (
-              <p className="text-sm text-muted-foreground">No Giving field is set. Pick one in Tool Management → Engagement score &amp; dashboard.</p>
+              <p className="text-sm text-muted-foreground">No Giving field is set. Pick one in Tool Management → Engagement.</p>
             ) : !data.previousWeekStart ? (
               <p className="text-sm text-muted-foreground">Starts after next Monday's snapshot.</p>
             ) : !data.giving.length ? (
@@ -276,7 +276,7 @@ export function EngagementPeopleView() {
       <p className="text-xs text-muted-foreground">
         Each person's score (0–100) uses the same parts and weights as the group scores: their attendance in the tracked groups and events over the last {data.scoreWeeks} weeks,
         plus Thrive, Serve Class, serving{data.givingField ? " and giving" : ""} from their Planning Center profile. Green is {cutoffs.green}, yellow {cutoffs.yellow}, red {cutoffs.red};
-        cutoffs are set in Tool Management. Saved every Monday after the sync.
+        cutoffs are set in Tool Management → Engagement. Saved every Monday after the sync.
       </p>
     </div>
   );

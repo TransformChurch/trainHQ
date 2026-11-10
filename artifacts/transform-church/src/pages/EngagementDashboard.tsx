@@ -8,7 +8,7 @@ import { api } from "@/lib/toolApi";
 import { EngagementPeopleView } from "@/components/tools/EngagementPeopleView";
 
 // Engagement dashboard (2026-10-27): a weekly "thermostat" for the Check-Ins
-// events, groups and group types picked in Tool Management > Reporting >
+// events, groups and group types picked in Tool Management > Engagement >
 // Engagement dashboard. Numbers come from GET /api/engagement/dashboard,
 // refreshed every Monday at 6:00 AM Eastern.
 
@@ -328,9 +328,9 @@ export default function EngagementDashboard() {
           <CardContent className="space-y-2 p-6 text-sm">
             <p className="font-medium">Nothing is tracked yet.</p>
             <p className="text-muted-foreground">
-              An admin picks the Check-Ins events, groups and group types to track in Tool Management → Reporting → Engagement dashboard.
+              An admin picks the Check-Ins events, groups and group types to track in Tool Management → Engagement.
             </p>
-            <Link href="/admin/tools" className="inline-flex items-center gap-1 text-primary hover:underline">Open Tool Management <ArrowRight className="h-4 w-4" /></Link>
+            <Link href="/admin/tools#engagement" className="inline-flex items-center gap-1 text-primary hover:underline">Open Tool Management <ArrowRight className="h-4 w-4" /></Link>
           </CardContent>
         </Card>
       )}
@@ -338,7 +338,7 @@ export default function EngagementDashboard() {
       {dashboard && !!missingFields.length && (
         <p className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100">
           The people sync doesn't include {missingFields.map((key) => ({ thrive: "Thrive", serveClass: "Serve Class", lastServed: "Last Served" })[key]).join(", ")},
-          so {missingFields.length === 1 ? "that part reads" : "those parts read"} 0%. Pick the field in Tool Management → Engagement dashboard.
+          so {missingFields.length === 1 ? "that part reads" : "those parts read"} 0%. Pick the field in Tool Management → Engagement.
         </p>
       )}
 

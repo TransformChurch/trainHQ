@@ -10,7 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { api } from "@/lib/toolApi";
 
-// Tool Management > Reporting: the engagement score's weights (used by the
+// Tool Management > Engagement tab: the engagement score's weights (used by the
 // reports' Discipleship page and the Engagement dashboard), which people-sync
 // fields hold Thrive / Serve Class / Last Served, and the dashboard's tracked
 // events, groups and group types plus its Monday email (routes/engagement.ts).
@@ -249,7 +249,7 @@ export function EngagementSettingsCard() {
                   <option value="">Automatic{data.resolvedFields[row.key] && !draft.fields[row.key] ? ` (${fieldLabel(data.resolvedFields[row.key])})` : ""}</option>
                   {data.syncedFields.map((field) => <option key={field.key} value={field.key}>{field.label}</option>)}
                 </select>
-                {!data.resolvedFields[row.key] && <p className="text-xs text-amber-700">Not in the people sync yet: add it on the people sync card.</p>}
+                {!data.resolvedFields[row.key] && <p className="text-xs text-amber-700">Not in the people sync yet: add it under Tool Management → Database.</p>}
               </div>
             ))}
             <div className="space-y-1">
@@ -263,7 +263,7 @@ export function EngagementSettingsCard() {
                 <option value="">Not set (giving doesn't count)</option>
                 {data.syncedFields.map((field) => <option key={field.key} value={field.key}>{field.label}</option>)}
               </select>
-              <p className="text-xs text-muted-foreground">Share of people whose field has a value (yes or a date), not amounts. Add it to the people sync first.</p>
+              <p className="text-xs text-muted-foreground">Share of people whose field has a value (yes or a date), not amounts. Add it to the people sync (Database tab) first.</p>
             </div>
             <div className="space-y-1">
               <Label htmlFor="serving-window">Serving window (days)</Label>
