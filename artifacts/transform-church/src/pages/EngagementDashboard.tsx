@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "wouter";
 import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { ArrowDownRight, ArrowLeft, ArrowRight, ArrowUpRight, Gauge, Loader2, Minus, RefreshCw } from "lucide-react";
+import { ArrowDownRight, ArrowRight, ArrowUpRight, Gauge, Loader2, Minus, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { api } from "@/lib/toolApi";
@@ -268,9 +268,6 @@ export default function EngagementDashboard() {
     <div className="mx-auto max-w-6xl space-y-6 p-4 md:p-8">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <Link href="/reporting" className="mb-2 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
-            <ArrowLeft className="h-4 w-4" /> Reporting
-          </Link>
           <h1 className="flex items-center gap-3 text-3xl font-bold tracking-tight">
             <Gauge className="h-8 w-8 text-primary" /> Engagement
           </h1>

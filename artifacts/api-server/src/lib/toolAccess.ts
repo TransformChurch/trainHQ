@@ -1,4 +1,6 @@
-// Per-tool access control for the Reporting and Messaging tools.
+// Per-tool access control for the Reporting, Messaging and Engagement tools
+// (Engagement became its own tool on 2026-11-10; it names people, so it
+// starts admin-only like the others).
 //
 // Admins always have access. For everyone else, an admin chooses (on the
 // Tool Management page) which roles get in and, optionally, specific
@@ -9,7 +11,7 @@
 import { db, settingsTable, usersTable, type User } from "@workspace/db";
 import { eq } from "drizzle-orm";
 
-export const TOOL_KEYS = ["reporting", "messaging"] as const;
+export const TOOL_KEYS = ["reporting", "messaging", "engagement"] as const;
 export type ToolKey = (typeof TOOL_KEYS)[number];
 
 // Roles an admin can grant. "admin" is implicit and never listed.

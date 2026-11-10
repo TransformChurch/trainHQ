@@ -8,7 +8,7 @@ import { api } from "@/lib/toolApi";
 // Engagement page > People (2026-11-10): how many people are green / yellow /
 // red on their personal engagement score, who dropped a tier since last
 // Monday, and whose Giving field was cleared or went stale. Names stay on
-// this page (Reporting access); nothing here is emailed.
+// this page (Engagement tool access); nothing here is emailed.
 // Data: GET /api/engagement/people (lib/engagementPeople.ts).
 
 type Tier = "green" | "yellow" | "red";

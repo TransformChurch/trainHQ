@@ -345,7 +345,8 @@ function AppRoutes() {
           <Route path="/tc-wiki/:slug"><ProtectedRoute component={() => <WikiArticle wikiKey="tc-wiki" wikiName="TC Wiki" />} /></Route>
           <Route path="/facilities"><ProtectedRoute component={Facilities} /></Route>
           <Route path="/reporting"><ProtectedRoute component={Reporting} tool="reporting" /></Route>
-          <Route path="/reporting/engagement"><ProtectedRoute component={EngagementDashboard} tool="reporting" /></Route>
+          <Route path="/engagement"><ProtectedRoute component={EngagementDashboard} tool="engagement" /></Route>
+          <Route path="/reporting/engagement"><Redirect to="/engagement" /></Route>
           <Route path="/messaging"><ProtectedRoute component={Messaging} tool="messaging" /></Route>
           <Route path="/admin"><ProtectedRoute component={AdminDashboard} adminOnly /></Route>
           <Route path="/admin/users"><ProtectedRoute component={AdminUsers} managerOrAdmin /></Route>

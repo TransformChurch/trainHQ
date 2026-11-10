@@ -212,7 +212,7 @@ export function EngagementSettingsCard() {
         <CardTitle className="flex items-center gap-2"><Gauge className="h-5 w-5" /> Engagement score &amp; dashboard</CardTitle>
         <p className="text-sm text-muted-foreground">
           The score (0–100) shows next to each group on the reports' Discipleship page and on the{" "}
-          <Link href="/reporting/engagement" className="text-primary hover:underline">Engagement dashboard</Link>.
+          <Link href="/engagement" className="text-primary hover:underline">Engagement tool</Link>.
         </p>
       </CardHeader>
       <CardContent className="space-y-6">

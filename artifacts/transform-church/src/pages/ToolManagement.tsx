@@ -98,6 +98,7 @@ export default function ToolManagement() {
         </TabsContent>
 
         <TabsContent value="engagement" className="mt-6 space-y-6">
+          {accessCard("engagement", "Engagement")}
           <EngagementSettingsCard />
         </TabsContent>
 

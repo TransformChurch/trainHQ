@@ -1,7 +1,7 @@
 // Engagement dashboard API (2026-10-27, Andrew): a weekly "thermostat" for
 // the Check-Ins events, groups and group types picked in Tool Management.
 //
-//   GET  /api/engagement/dashboard?weeks=8   numbers for the Reporting page
+//   GET  /api/engagement/dashboard?weeks=8   numbers for the Engagement tool page
 //   GET  /api/engagement/settings            (admin) weights, fields, items...
 //   PUT  /api/engagement/settings            (admin) save them
 //   GET  /api/engagement/sources             (admin) events / groups / group types to pick from
@@ -147,7 +147,7 @@ function parseWeeks(raw: unknown, fallback: number): number {
   return (DASHBOARD_WEEK_OPTIONS as readonly number[]).includes(value) ? value : fallback;
 }
 
-router.get("/dashboard", requireToolAccess("reporting"), async (req, res) => {
+router.get("/dashboard", requireToolAccess("engagement"), async (req, res) => {
   try {
     const settings = await readEngagementSettings();
     res.json(await buildDashboard(parseWeeks(req.query.weeks, settings.dashboard.defaultWeeks)));
@@ -159,7 +159,7 @@ router.get("/dashboard", requireToolAccess("reporting"), async (req, res) => {
 // People view: green / yellow / red counts and this week's drops and giving
 // flags, by name (lib/engagementPeople.ts). Shown only on the dashboard,
 // never emailed. ?tier=red|yellow|green also lists everyone in that tier.
-router.get("/people", requireToolAccess("reporting"), async (req, res) => {
+router.get("/people", requireToolAccess("engagement"), async (req, res) => {
   try {
     const tier = ["green", "yellow", "red"].includes(String(req.query.tier)) ? String(req.query.tier) as Tier : undefined;
     res.json(await buildPeopleDashboard(tier));
@@ -216,7 +216,7 @@ export function dashboardEmailHtml(dashboard: Dashboard, siteUrl: string | null)
         Engagement (0–100) weighs ${ENGAGEMENT_PARTS.filter((part) => (part !== "giving" || !!dashboard.givingField) && dashboard.weights[part] > 0).map((part) => `${PART_LABELS[part]} ×${dashboard.weights[part]}`).join(", ")}.
         People = different people who attended at least once in the window. Weeks nobody attended don't count.
       </p>
-      ${siteUrl ? `<p><a href="${escape(siteUrl)}/reporting/engagement">Open the dashboard</a></p>` : ""}
+      ${siteUrl ? `<p><a href="${escape(siteUrl)}/engagement">Open the dashboard</a></p>` : ""}
     </div>`;
 }
 
