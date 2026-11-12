@@ -1,4 +1,4 @@
-import { boolean, date, index, integer, pgTable, primaryKey, text, timestamp } from "drizzle-orm/pg-core";
+import { boolean, date, index, integer, pgTable, primaryKey, real, text, timestamp } from "drizzle-orm/pg-core";
 
 // Engagement dashboard (2026-10-27): who attended each tracked item, week by
 // week, so the dashboard can count unique people over any number of weeks
@@ -51,7 +51,7 @@ export type EngagementAttendance = typeof engagementAttendanceTable.$inferSelect
 export const engagementPersonSnapshotsTable = pgTable("engagement_person_snapshots", {
   weekStart: date("week_start").notNull(),
   personId: text("person_id").notNull(),
-  score: integer("score"),
+  score: real("score"), // points out of the total (17 by default) since 2026-11-10
   tier: text("tier"),
   items: text("items"),
   givingHas: boolean("giving_has").notNull().default(false),
@@ -63,3 +63,17 @@ export const engagementPersonSnapshotsTable = pgTable("engagement_person_snapsho
 ]);
 
 export type EngagementPersonSnapshot = typeof engagementPersonSnapshotsTable.$inferSelect;
+
+// Planning Center form submissions (2026-11-10): who has submitted which
+// People form and when, for the Form / Thrive part of the engagement score.
+// Filled by the Monday engagement sync (lib/engagementForms.ts). Only the
+// form id, person id, latest date and a count -- never the answers.
+export const engagementFormSubmissionsTable = pgTable("engagement_form_submissions", {
+  formId: text("form_id").notNull(),
+  personId: text("person_id").notNull(),
+  lastSubmittedAt: timestamp("last_submitted_at").notNull(),
+  submissions: integer("submissions").notNull().default(1),
+}, (table) => [
+  primaryKey({ columns: [table.formId, table.personId] }),
+  index("engagement_form_submissions_person_idx").on(table.personId),
+]);

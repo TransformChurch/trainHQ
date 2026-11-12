@@ -50,7 +50,7 @@ import {
   type GroupMembership,
   type SeasonRunMeta,
 } from "../lib/reportGroups";
-import { loadPersonFlags, readEngagementSettings, resolveFieldKeys, summarizeEngagement } from "../lib/engagement";
+import { loadEngagementContext, readEngagementSettings, summarizeEngagement } from "../lib/engagement";
 import { loadRunLocations, parseRunLocations, runMetaWithLocations, type RunLocations } from "../lib/reportLocations";
 
 const router: IRouter = Router();
@@ -1585,13 +1585,13 @@ async function buildDiscipleship(
 ): Promise<DiscipleshipMeta> {
   const settings = await readEngagementSettings();
   const synced = await syncedFields();
-  const keys = resolveFieldKeys(settings.fields, synced);
-  const giving = !!keys.giving;
   const perGroup = perGroupAttendance(groupIds, meetings, attendanceByMeeting);
   const allIds = [...new Set(perGroup.flatMap((group) => group.people.map((person) => person.personId)))];
-  const flags = await loadPersonFlags(allIds, keys, asOf, settings.servingWindowDays);
+  // TC College check-ins come from the Engagement tool's saved weeks.
+  const context = await loadEngagementContext(settings, synced, allIds, asOf);
+  const label = (key: string | null) => (key ? synced.find((field) => field.key === key)?.label ?? key : null);
   const groups: DiscipleshipGroup[] = perGroup.map((group, index) => {
-    const summary = summarizeEngagement(group.people, flags, settings.weights, giving);
+    const summary = summarizeEngagement(group.people, context.flags, context.points, context.available);
     return {
       id: group.groupId,
       name: groupNames[index] ?? `Group ${group.groupId}`,
@@ -1610,12 +1610,15 @@ async function buildDiscipleship(
     personId,
     attendanceRate: rates.reduce((sum, rate) => sum + rate, 0) / rates.length,
   }));
-  const overall = summarizeEngagement(overallPeople, flags, settings.weights, giving);
+  const overall = summarizeEngagement(overallPeople, context.flags, context.points, context.available);
   return {
     asOf,
     servingWindowDays: settings.servingWindowDays,
-    weights: settings.weights,
-    givingField: keys.giving ? synced.find((field) => field.key === keys.giving)?.label ?? keys.giving : null,
+    points: context.points,
+    maxPoints: context.maxPoints,
+    available: context.available,
+    givingField: label(context.keys.giving),
+    leadershipField: label(context.keys.leadership),
     groups,
     overall: {
       id: "all",

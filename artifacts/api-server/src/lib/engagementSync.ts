@@ -27,6 +27,7 @@ import { logger } from "./logger";
 import { CHECK_INS_BASE, fetchCollection, relationshipId, text, type JsonApiResource } from "../routes/reports";
 import { listEventPeriods } from "../routes/attendanceHistory";
 import { takePeopleSnapshot } from "./engagementPeople";
+import { syncFormSubmissions } from "./engagementForms";
 import { groupActiveInRange, listGroupWeeks } from "../routes/groupHistory";
 
 const GROUPS_BASE = "https://api.planningcenteronline.com/groups/v2";
@@ -254,6 +255,17 @@ export async function runEngagementSync(
   try {
     await writeSyncState({ ...state, lastRun: run });
     const thisWeek = weekStartFor(now.toISOString());
+    // Planning Center form submissions, for the Form / Thrive part
+    // (lib/engagementForms.ts). A failure here doesn't stop the attendance pull.
+    try {
+      await syncFormSubmissions(await getToken(settings.dashboard.ownerUserId), delayMs, now);
+    } catch (error) {
+      const typed = error as Error & { status?: number };
+      run.failures.push({
+        item: "Planning Center forms",
+        error: typed.status === 403 ? "Planning Center refused access to People forms (403)." : typed.message || "Request failed",
+      });
+    }
     for (const item of items) {
       try {
         const accessToken = await getToken(settings.dashboard.ownerUserId);
@@ -276,7 +288,8 @@ export async function runEngagementSync(
     }
     for (const key of Object.keys(state.items)) if (!items.some((item) => itemKey(item) === key)) delete state.items[key];
     await prune(items, thisWeek);
-    run.status = run.failures.length ? (run.failures.length === items.length ? "error" : "partial") : "success";
+    const itemFailures = run.failures.filter((failure) => failure.item !== "Planning Center forms").length;
+    run.status = itemFailures === items.length ? "error" : run.failures.length ? "partial" : "success";
     // Weekly per-person scores for the People view (lib/engagementPeople.ts).
     if (run.status !== "error") {
       try {

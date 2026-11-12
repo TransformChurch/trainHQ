@@ -18,6 +18,7 @@ type People = {
   weekStart: string | null;
   previousWeekStart: string | null;
   tiers: { green: number; yellow: number };
+  maxPoints: number;
   scoreWeeks: number;
   counts: Record<Tier, number>;
   previousCounts: Record<Tier, number> | null;
@@ -117,7 +118,7 @@ export function EngagementPeopleView() {
   const total = TIERS.reduce((sum, tier) => sum + data.counts[tier], 0);
   const cutoffs: Record<Tier, string> = {
     green: `${data.tiers.green}+`,
-    yellow: `${data.tiers.yellow}–${data.tiers.green - 1}`,
+    yellow: `${data.tiers.yellow} to under ${data.tiers.green}`,
     red: `under ${data.tiers.yellow}`,
   };
   const history = data.history.map((point) => ({ ...point, label: shortDate(point.weekStart) }));
@@ -150,7 +151,7 @@ export function EngagementPeopleView() {
                 <span className="inline-flex items-center gap-2 text-sm font-medium">
                   <Circle className={`h-3 w-3 fill-current ${TIER_DOT[tier]}`} aria-hidden /> {TIER_LABEL[tier]}
                 </span>
-                <span className="text-xs text-muted-foreground">score {cutoffs[tier]}</span>
+                <span className="text-xs text-muted-foreground">{cutoffs[tier]} of {data.maxPoints}</span>
               </div>
               <p className="mt-2 text-3xl font-bold tabular-nums">{data.counts[tier].toLocaleString()}</p>
               <p className="text-xs text-muted-foreground">
@@ -169,7 +170,7 @@ export function EngagementPeopleView() {
           <CardContent className="max-h-96 overflow-y-auto">
             {listLoading ? <p className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> Loading…</p> : (
               <table className="w-full text-sm">
-                <thead><tr className="border-b text-left text-xs text-muted-foreground"><th className="py-1.5 pr-3 font-medium">Name</th><th className="py-1.5 pr-3 text-right font-medium">Score</th><th className="py-1.5 font-medium">Attends</th></tr></thead>
+                <thead><tr className="border-b text-left text-xs text-muted-foreground"><th className="py-1.5 pr-3 font-medium">Name</th><th className="py-1.5 pr-3 text-right font-medium">Score (of {data.maxPoints})</th><th className="py-1.5 font-medium">Attends</th></tr></thead>
                 <tbody>
                   {(listing ?? []).map((person) => (
                     <tr key={person.personId} className="border-b last:border-0">
@@ -274,9 +275,10 @@ export function EngagementPeopleView() {
       )}
 
       <p className="text-xs text-muted-foreground">
-        Each person's score (0–100) uses the same parts and weights as the group scores: their attendance in the tracked groups and events over the last {data.scoreWeeks} weeks,
-        plus Thrive, Serve Class, serving{data.givingField ? " and giving" : ""} from their Planning Center profile. Green is {cutoffs.green}, yellow {cutoffs.yellow}, red {cutoffs.red};
-        cutoffs are set in Tool Management → Engagement. Saved every Monday after the sync.
+        Each person's score is points out of {data.maxPoints}, using the same parts as the group scores: Form / Thrive, Transform (their attendance
+        rate over the last {data.scoreWeeks} weeks, partial points), Serving, TC College, Giving and Leadership. Parts that aren't set up yet are left out
+        and scores are scaled to {data.maxPoints}. Green is {cutoffs.green}, yellow {cutoffs.yellow}, red {cutoffs.red}; points and cutoffs are set in
+        Tool Management → Engagement. Saved every Monday after the sync.
       </p>
     </div>
   );

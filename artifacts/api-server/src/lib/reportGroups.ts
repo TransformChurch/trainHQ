@@ -217,16 +217,21 @@ export type DiscipleshipGroup = {
   attendees: number;
   roster: number;
   heldNights: number;
-  percentages: Record<"attendance" | "thrive" | "serveClass" | "serving" | "giving", number | null>;
-  score: number | null;
+  percentages: Record<"formThrive" | "transform" | "serving" | "tcCollege" | "giving" | "leadership" | "serveClass", number | null>;
+  score: number | null; // points out of maxPoints
 };
 
 export type DiscipleshipMeta = {
   asOf: string;
   servingWindowDays: number;
-  weights: Record<"attendance" | "thrive" | "serveClass" | "serving" | "giving", number>;
-  // Label of the people-sync field counted as giving (null = none picked).
+  // Points per part and their total (17 by default since 2026-11-10).
+  points: Record<"formThrive" | "transform" | "serving" | "tcCollege" | "giving" | "leadership" | "serveClass", number>;
+  maxPoints: number;
+  // Parts with no data source set up are left out (and scaled).
+  available: Record<"formThrive" | "transform" | "serving" | "tcCollege" | "giving" | "leadership" | "serveClass", boolean>;
+  // Labels of the people-sync fields counted as giving / leadership.
   givingField?: string | null;
+  leadershipField?: string | null;
   groups: DiscipleshipGroup[];
   overall: DiscipleshipGroup;
 };

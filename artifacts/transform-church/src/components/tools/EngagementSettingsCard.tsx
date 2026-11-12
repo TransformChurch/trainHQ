@@ -10,26 +10,34 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { api } from "@/lib/toolApi";
 
-// Tool Management > Engagement tab: the engagement score's weights (used by the
-// reports' Discipleship page and the Engagement dashboard), which people-sync
-// fields hold Thrive / Serve Class / Last Served, and the dashboard's tracked
-// events, groups and group types plus its Monday email (routes/engagement.ts).
+// Tool Management > Engagement tab: the engagement score's points (out of 17
+// by default; used by the reports' Discipleship page and the Engagement
+// tool), which people-sync fields hold Thrive / Serve Class / Last Served /
+// Giving / Leadership, forms that don't count, the tracked events, groups and
+// group types (Transform or TC College) plus the Monday email
+// (routes/engagement.ts).
 
-type Part = "attendance" | "thrive" | "serveClass" | "serving" | "giving";
+type Part = "formThrive" | "transform" | "serving" | "tcCollege" | "giving" | "leadership" | "serveClass";
 type Kind = "checkins_event" | "group" | "group_type";
-type TrackedItem = { kind: Kind; id: string; name: string };
+type Role = "transform" | "tc_college";
+type TrackedItem = { kind: Kind; id: string; name: string; role: Role };
+type FormInfo = { id: string; name: string; archived: boolean; submissionCount: number };
 type SyncRun = { status: string; startedAt: string; finishedAt: string | null; itemsChecked: number; weeksSaved: number; failures: { item: string; error: string }[]; message?: string };
 type Settings = {
-  weights: Record<Part, number>;
-  fields: { thrive?: string | null; serveClass?: string | null; lastServed?: string | null; giving?: string | null };
+  points: Record<Part, number>;
+  fields: { thrive?: string | null; serveClass?: string | null; lastServed?: string | null; giving?: string | null; leadership?: string | null };
   servingWindowDays: number;
   tiers: { green: number; yellow: number };
   missedGivingDays: number;
+  excludedFormIds: string[];
   dashboard: { items: TrackedItem[]; recipients: string[]; emailEnabled: boolean; defaultWeeks: number; ownerName: string };
 };
 type SettingsResponse = {
   settings: Settings;
-  resolvedFields: { thrive: string | null; serveClass: string | null; lastServed: string | null; giving: string | null };
+  resolvedFields: { thrive: string | null; serveClass: string | null; lastServed: string | null; giving: string | null; leadership: string | null };
+  maxPoints: number;
+  forms: FormInfo[];
+  formsSyncedAt: string | null;
   syncedFields: { key: string; label: string }[];
   weekOptions: number[];
   syncState: Record<string, { pulledFrom: string; lastSyncedAt: string } | null>;
@@ -38,16 +46,20 @@ type SettingsResponse = {
 type Sources = { checkinsEvents: { id: string; name: string }[]; groups: { id: string; name: string }[]; groupTypes: { id: string; name: string; description: string }[] };
 
 const PARTS: { key: Part; label: string; help: string }[] = [
-  { key: "attendance", label: "Attendance", help: "average attendance rate" },
-  { key: "thrive", label: "Thrive", help: "completed Thrive" },
-  { key: "serveClass", label: "Serve Class", help: "completed Serve Class" },
+  { key: "formThrive", label: "Form / Thrive", help: "Thrive done, or any form submitted" },
+  { key: "transform", label: "Transform", help: "× attendance rate (partial)" },
   { key: "serving", label: "Serving", help: "Last Served within the window" },
+  { key: "tcCollege", label: "TC College", help: "checked in, last 26 weeks" },
+  { key: "giving", label: "Giving", help: "Giving field has a value" },
+  { key: "leadership", label: "Leadership", help: "Leadership field has a value" },
+  { key: "serveClass", label: "Serve Class", help: "completed Serve Class" },
 ];
 const FIELD_ROWS: { key: "thrive" | "serveClass" | "lastServed"; label: string }[] = [
   { key: "thrive", label: "Thrive" },
   { key: "serveClass", label: "Serve Class" },
   { key: "lastServed", label: "Last Served" },
 ];
+const ROLE_LABEL: Record<Role, string> = { transform: "Transform", tc_college: "TC College" };
 const KIND_LABEL: Record<Kind, string> = { checkins_event: "Check-Ins event", group: "Group", group_type: "Group type (every group of this type)" };
 const selectClass = "flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm";
 
@@ -65,6 +77,7 @@ export function EngagementSettingsCard() {
   const [filter, setFilter] = useState("");
   const [syncing, setSyncing] = useState(false);
   const [testing, setTesting] = useState(false);
+  const [showForms, setShowForms] = useState(false);
   const pollTimer = useRef<number | null>(null);
 
   const load = async (resetDraft = true) => {
@@ -128,7 +141,24 @@ export function EngagementSettingsCard() {
     );
   }
 
-  const setWeight = (part: Part, value: string) => setDraft({ ...draft, weights: { ...draft.weights, [part]: Math.min(10, Math.max(0, Number(value) || 0)) } });
+  const setPoints = (part: Part, value: string) => setDraft({ ...draft, points: { ...draft.points, [part]: Math.min(20, Math.max(0, Number(value) || 0)) } });
+  const draftTotal = Math.round(Object.values(draft.points).reduce((sum, value) => sum + value, 0) * 10) / 10;
+  const pointsChanged = (Object.keys(draft.points) as Part[]).some((part) => draft.points[part] !== data.settings.points[part]);
+  const tcTracked = draft.dashboard.items.some((item) => item.role === "tc_college");
+  const notSetUp: Record<Part, string | null> = {
+    formThrive: null,
+    transform: null,
+    serving: data.resolvedFields.lastServed || draft.fields.lastServed ? null : "No Last Served field in the people sync.",
+    tcCollege: tcTracked ? null : "Add the TC College event below and mark it TC College.",
+    giving: draft.fields.giving ? null : "Pick a Giving field below.",
+    leadership: draft.fields.leadership ? null : "Pick a Leadership field below.",
+    serveClass: data.resolvedFields.serveClass || draft.fields.serveClass ? null : "No Serve Class field in the people sync.",
+  };
+  const excluded = new Set(draft.excludedFormIds);
+  const toggleForm = (id: string) => setDraft({
+    ...draft,
+    excludedFormIds: excluded.has(id) ? draft.excludedFormIds.filter((entry) => entry !== id) : [...draft.excludedFormIds, id],
+  });
   const setDashboard = (patch: Partial<Settings["dashboard"]>) => setDraft({ ...draft, dashboard: { ...draft.dashboard, ...patch } });
   const fieldLabel = (key: string | null) => data.syncedFields.find((field) => field.key === key)?.label ?? null;
 
@@ -138,8 +168,9 @@ export function EngagementSettingsCard() {
       await api("/api/engagement/settings", {
         method: "PUT",
         body: JSON.stringify({
-          weights: draft.weights,
+          points: draft.points,
           fields: draft.fields,
+          excludedFormIds: draft.excludedFormIds,
           servingWindowDays: draft.servingWindowDays,
           tiers: draft.tiers,
           missedGivingDays: draft.missedGivingDays,
@@ -211,32 +242,32 @@ export function EngagementSettingsCard() {
       <CardHeader>
         <CardTitle className="flex items-center gap-2"><Gauge className="h-5 w-5" /> Engagement score &amp; dashboard</CardTitle>
         <p className="text-sm text-muted-foreground">
-          The score (0–100) shows next to each group on the reports' Discipleship page and on the{" "}
+          The score (points out of {data.maxPoints}) shows next to each group on the reports' Discipleship page and on the{" "}
           <Link href="/engagement" className="text-primary hover:underline">Engagement tool</Link>.
         </p>
       </CardHeader>
       <CardContent className="space-y-6">
         <section className="space-y-3">
-          <h3 className="text-sm font-semibold">How the score is weighted</h3>
-          <div className="grid gap-3 sm:grid-cols-5">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <h3 className="text-sm font-semibold">Points</h3>
+            <p className="text-sm">Total: <span className="font-semibold tabular-nums">{draftTotal}</span> points</p>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-4 lg:grid-cols-7">
             {PARTS.map((part) => (
               <div key={part.key} className="space-y-1">
-                <Label htmlFor={`weight-${part.key}`}>{part.label}</Label>
-                <Input id={`weight-${part.key}`} type="number" min={0} max={10} step={0.5} value={draft.weights[part.key]} onChange={(event) => setWeight(part.key, event.target.value)} />
+                <Label htmlFor={`points-${part.key}`}>{part.label}</Label>
+                <Input id={`points-${part.key}`} type="number" min={0} max={20} step={0.5} value={draft.points[part.key]}
+                  onChange={(event) => setPoints(part.key, event.target.value)} />
                 <p className="text-xs text-muted-foreground">{part.help}</p>
+                {draft.points[part.key] > 0 && notSetUp[part.key] && <p className="text-xs text-amber-700">Not set up: {notSetUp[part.key]}</p>}
               </div>
             ))}
-            <div className="space-y-1">
-              <Label htmlFor="weight-giving" className={draft.fields.giving ? "" : "text-muted-foreground"}>Giving</Label>
-              <Input id="weight-giving" type="number" min={0} max={10} step={0.5} value={draft.weights.giving}
-                disabled={!draft.fields.giving} onChange={(event) => setWeight("giving", event.target.value)} />
-              <p className="text-xs text-muted-foreground">{draft.fields.giving ? "gives (Giving field has a value)" : "Pick a Giving field below to count it."}</p>
-            </div>
           </div>
           <p className="text-xs text-muted-foreground">
-            Score = weighted average of the parts. Weight 2 counts twice as much as weight 1; 0 leaves a part out.
+            A score is the points someone earns out of the total. Parts that aren't set up yet are left out and the score is scaled to the
+            total. {pointsChanged ? "Saving new points restarts the People tab's week-to-week history." : ""}
           </p>
-          <div className="grid gap-3 sm:grid-cols-5">
+          <div className="grid gap-3 sm:grid-cols-3">
             {FIELD_ROWS.map((row) => (
               <div key={row.key} className="space-y-1">
                 <Label htmlFor={`field-${row.key}`}>{row.label} field</Label>
@@ -252,38 +283,66 @@ export function EngagementSettingsCard() {
                 {!data.resolvedFields[row.key] && <p className="text-xs text-amber-700">Not in the people sync yet: add it under Tool Management → Database.</p>}
               </div>
             ))}
-            <div className="space-y-1">
-              <Label htmlFor="field-giving">Giving field</Label>
-              <select
-                id="field-giving"
-                className={selectClass}
-                value={draft.fields.giving ?? ""}
-                onChange={(event) => setDraft({ ...draft, fields: { ...draft.fields, giving: event.target.value || null } })}
-              >
-                <option value="">Not set (giving doesn't count)</option>
-                {data.syncedFields.map((field) => <option key={field.key} value={field.key}>{field.label}</option>)}
-              </select>
-              <p className="text-xs text-muted-foreground">Share of people whose field has a value (yes or a date), not amounts. Add it to the people sync (Database tab) first.</p>
-            </div>
+            {(["giving", "leadership"] as const).map((key) => (
+              <div key={key} className="space-y-1">
+                <Label htmlFor={`field-${key}`}>{key === "giving" ? "Giving" : "Leadership"} field</Label>
+                <select
+                  id={`field-${key}`}
+                  className={selectClass}
+                  value={draft.fields[key] ?? ""}
+                  onChange={(event) => setDraft({ ...draft, fields: { ...draft.fields, [key]: event.target.value || null } })}
+                >
+                  <option value="">Not set (left out)</option>
+                  {data.syncedFields.map((field) => <option key={field.key} value={field.key}>{field.label}</option>)}
+                </select>
+                <p className="text-xs text-muted-foreground">Counts when the field has a value (yes or a date){key === "giving" ? ", never amounts" : ""}. Add it to the people sync (Database tab) first.</p>
+              </div>
+            ))}
             <div className="space-y-1">
               <Label htmlFor="serving-window">Serving window (days)</Label>
               <Input id="serving-window" type="number" min={7} max={365} value={draft.servingWindowDays}
                 onChange={(event) => setDraft({ ...draft, servingWindowDays: Number(event.target.value) || 90 })} />
             </div>
           </div>
+          <div className="space-y-2 rounded-md border p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-sm">
+                <span className="font-medium">Forms:</span> any Planning Center form submission earns Form / Thrive
+                {draft.excludedFormIds.length ? `, except ${draft.excludedFormIds.length} excluded form${draft.excludedFormIds.length === 1 ? "" : "s"}` : ""}.
+              </p>
+              <Button size="sm" variant="outline" onClick={() => setShowForms(!showForms)} disabled={!data.forms.length}>
+                {showForms ? "Hide forms" : "Choose forms to leave out"}
+              </Button>
+            </div>
+            {!data.forms.length && <p className="text-xs text-muted-foreground">The form list appears after the first sync (Sync now below).</p>}
+            {showForms && (
+              <div className="max-h-64 space-y-1 overflow-y-auto">
+                {data.forms.map((form) => (
+                  <label key={form.id} className="flex items-center justify-between gap-2 rounded px-2 py-1 text-sm hover:bg-muted">
+                    <span className="flex min-w-0 items-center gap-2">
+                      <input type="checkbox" checked={!excluded.has(form.id)} onChange={() => toggleForm(form.id)} />
+                      <span className={`truncate ${excluded.has(form.id) ? "text-muted-foreground line-through" : ""}`}>{form.name}</span>
+                    </span>
+                    <span className="shrink-0 text-xs text-muted-foreground">{form.submissionCount.toLocaleString()}{form.archived ? " · archived" : ""}</span>
+                  </label>
+                ))}
+              </div>
+            )}
+            {data.formsSyncedAt && <p className="text-xs text-muted-foreground">Submissions last pulled {new Date(data.formsSyncedAt).toLocaleString()}. Only who submitted and when is saved, never answers.</p>}
+          </div>
         </section>
 
         <section className="space-y-3">
-          <h3 className="text-sm font-semibold">People: green / yellow / red</h3>
+          <h3 className="text-sm font-semibold">People: green / yellow / red (points out of {draftTotal})</h3>
           <div className="grid gap-3 sm:grid-cols-4">
             <div className="space-y-1">
               <Label htmlFor="tier-green">Green at or above</Label>
-              <Input id="tier-green" type="number" min={2} max={100} value={draft.tiers.green}
+              <Input id="tier-green" type="number" min={0.5} max={draftTotal} step={0.5} value={draft.tiers.green}
                 onChange={(event) => setDraft({ ...draft, tiers: { ...draft.tiers, green: Number(event.target.value) || 0 } })} />
             </div>
             <div className="space-y-1">
               <Label htmlFor="tier-yellow">Yellow at or above</Label>
-              <Input id="tier-yellow" type="number" min={1} max={99} value={draft.tiers.yellow}
+              <Input id="tier-yellow" type="number" min={0.5} max={draftTotal} step={0.5} value={draft.tiers.yellow}
                 onChange={(event) => setDraft({ ...draft, tiers: { ...draft.tiers, yellow: Number(event.target.value) || 0 } })} />
             </div>
             <div className="space-y-1">
@@ -296,16 +355,19 @@ export function EngagementSettingsCard() {
                 onChange={(event) => setDraft({ ...draft, missedGivingDays: Number(event.target.value) || 35 })} />
             </div>
           </div>
-          {draft.tiers.yellow >= draft.tiers.green && <p className="text-xs text-destructive">Green has to be higher than yellow.</p>}
+          {(draft.tiers.yellow >= draft.tiers.green || draft.tiers.green > draftTotal) && (
+            <p className="text-xs text-destructive">Green has to be higher than yellow and no more than {draftTotal}.</p>
+          )}
           <p className="text-xs text-muted-foreground">
             Every Monday each person who attended a tracked group or event in the last 26 weeks gets a score over the default window below, and the
-            Engagement page's People tab flags anyone who dropped a level. With a Giving field that holds a date, "missed" means that date just got
+            Engagement tool's People tab flags anyone who dropped a level. With a Giving field that holds a date, "missed" means that date just got
             older than the days above; "canceled" means the field was emptied. Changing the cutoffs re-sorts the saved weeks too. Nothing here is emailed.
           </p>
         </section>
 
         <section className="space-y-3">
           <h3 className="text-sm font-semibold">Tracked on the dashboard</h3>
+          <p className="text-xs text-muted-foreground">Each one counts toward Transform, or toward TC College for the TC College event (anything with "College" in its name starts as TC College).</p>
           {!draft.dashboard.items.length && <p className="text-sm text-muted-foreground">Nothing yet. Add Check-Ins events, groups or group types below.</p>}
           <ul className="divide-y rounded-md border">
             {draft.dashboard.items.map((item) => {
@@ -319,10 +381,22 @@ export function EngagementSettingsCard() {
                       {KIND_LABEL[item.kind]} · {state ? `history from ${state.pulledFrom}, last synced ${new Date(state.lastSyncedAt).toLocaleDateString()}` : savedKeys.has(key) ? "not synced yet" : "not saved yet"}
                     </p>
                   </div>
+                  <div className="flex shrink-0 items-center gap-1">
+                  <select
+                    aria-label={`What ${item.name} counts toward`}
+                    className="h-8 rounded-md border border-input bg-background px-2 text-xs"
+                    value={item.role}
+                    onChange={(event) => setDashboard({
+                      items: draft.dashboard.items.map((entry) => `${entry.kind}:${entry.id}` === key ? { ...entry, role: event.target.value as Role } : entry),
+                    })}
+                  >
+                    {(Object.keys(ROLE_LABEL) as Role[]).map((role) => <option key={role} value={role}>{ROLE_LABEL[role]}</option>)}
+                  </select>
                   <Button size="icon" variant="ghost" aria-label={`Stop tracking ${item.name}`}
                     onClick={() => setDashboard({ items: draft.dashboard.items.filter((entry) => `${entry.kind}:${entry.id}` !== key) })}>
                     <Trash2 className="h-4 w-4" />
                   </Button>
+                  </div>
                 </li>
               );
             })}
@@ -355,7 +429,7 @@ export function EngagementSettingsCard() {
                     key={entry.id}
                     type="button"
                     className="flex w-full items-center justify-between gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-muted"
-                    onClick={() => setDashboard({ items: [...draft.dashboard.items, { kind: pickKind, id: entry.id, name: entry.name }] })}
+                    onClick={() => setDashboard({ items: [...draft.dashboard.items, { kind: pickKind, id: entry.id, name: entry.name, role: /college/i.test(entry.name) ? "tc_college" : "transform" }] })}
                   >
                     <span className="truncate">{entry.name}</span>
                     <Plus className="h-4 w-4 shrink-0 text-muted-foreground" />

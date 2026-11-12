@@ -2,7 +2,7 @@
 // the Check-Ins events, groups and group types picked in Tool Management.
 //
 //   GET  /api/engagement/dashboard?weeks=8   numbers for the Engagement tool page
-//   GET  /api/engagement/settings            (admin) weights, fields, items...
+//   GET  /api/engagement/settings            (admin) points, fields, items, forms...
 //   PUT  /api/engagement/settings            (admin) save them
 //   GET  /api/engagement/sources             (admin) events / groups / group types to pick from
 //   POST /api/engagement/sync-now            (admin) run the weekly sync now
@@ -21,11 +21,14 @@ import { addDays, weekStartFor } from "../lib/checkinsHistory";
 import {
   DASHBOARD_WEEK_OPTIONS,
   ENGAGEMENT_PARTS,
-  loadPersonFlags,
+  loadEngagementContext,
+  normalizePoints,
   normalizeSettings,
+  normalizeTiers,
   normalizeTrackedItems,
-  normalizeWeights,
   PART_LABELS,
+  totalPoints,
+  type PartAvailability,
   readEngagementSettings,
   resolveFieldKeys,
   writeEngagementSettings,
@@ -34,7 +37,8 @@ import {
 } from "../lib/engagement";
 import { combinedMetrics, trendSeries, windowMetrics, windowWeeks, type PresenceRow, type WeekRow, type WindowMetrics } from "../lib/engagementMetrics";
 import { itemKey, readSyncState, runEngagementSync, type EngagementSyncRun } from "../lib/engagementSync";
-import { buildPeopleDashboard, retierSnapshots, type Tier } from "../lib/engagementPeople";
+import { buildPeopleDashboard, clearSnapshots, retierSnapshots, type Tier } from "../lib/engagementPeople";
+import { readFormsState } from "../lib/engagementForms";
 import { syncedFields } from "../lib/reportPeople";
 import { authorizeScheduledCall, recordScheduledJob } from "../lib/scheduledJobs";
 import { sendEmail } from "../lib/email";
@@ -60,6 +64,7 @@ type ItemDashboard = {
   kind: TrackedItem["kind"];
   id: string;
   name: string;
+  role: TrackedItem["role"];
   current: WindowMetrics;
   previous: WindowMetrics;
   trend: ReturnType<typeof trendSeries>;
@@ -72,11 +77,15 @@ export type Dashboard = {
   previousWindow: { from: string; to: string };
   items: ItemDashboard[];
   overall: { current: WindowMetrics; previous: WindowMetrics } | null;
-  weights: EngagementSettings["weights"];
+  points: EngagementSettings["points"];
+  maxPoints: number;
+  // Parts with a data source set up (others are left out and scaled).
+  available: PartAvailability;
   servingWindowDays: number;
   fieldsFound: { thrive: boolean; serveClass: boolean; lastServed: boolean };
-  // The people-sync field counted as giving, or null when none is picked.
+  // The people-sync fields counted as giving / leadership (null = none picked).
   givingField: string | null;
+  leadershipField: string | null;
   lastSync: EngagementSyncRun | null;
   generatedAt: string;
 };
@@ -89,8 +98,6 @@ export async function buildDashboard(weeks: number, now: Date = new Date()): Pro
   const previousWindow = windowWeeks(addDays(lastWeek, -7 * weeks), weeks);
   const earliest = addDays(lastWeek, -7 * (Math.max(TREND_POINTS, 2 * weeks) + weeks));
   const synced = await syncedFields();
-  const keys = resolveFieldKeys(settings.fields, synced);
-  const giving = !!keys.giving;
   const state = await readSyncState();
 
   const weekRows = items.length
@@ -111,14 +118,19 @@ export async function buildDashboard(weeks: number, now: Date = new Date()): Pro
   }));
   const windowSet = new Set([...window, ...previousWindow]);
   const people = [...new Set(presenceRows.filter((row) => windowSet.has(row.weekStart)).map((row) => row.personId))];
-  const flags = await loadPersonFlags(people, keys, addDays(lastWeek, 6), settings.servingWindowDays);
+  const context = await loadEngagementContext(settings, synced, people, addDays(lastWeek, 6));
+  const keys = context.keys;
+  const label = (key: string | null) => (key ? synced.find((field) => field.key === key)?.label ?? key : null);
+  // The big picture is Transform: TC College items have their own cards.
+  const transformItems = perItem.filter(({ item }) => item.role !== "tc_college");
 
   const itemDashboards: ItemDashboard[] = perItem.map(({ item, weekRows: rows, presence }) => ({
     kind: item.kind,
     id: item.id,
     name: item.name,
-    current: windowMetrics(rows, presence, window, flags, settings.weights, giving),
-    previous: windowMetrics(rows, presence, previousWindow, flags, settings.weights, giving),
+    role: item.role,
+    current: windowMetrics(rows, presence, window, context),
+    previous: windowMetrics(rows, presence, previousWindow, context),
     trend: trendSeries(rows, presence, lastWeek, weeks, TREND_POINTS),
     lastWeekWithData: rows.filter((row) => (row.attendees ?? 0) > 0).map((row) => row.weekStart).sort().pop() ?? null,
   }));
@@ -127,16 +139,19 @@ export async function buildDashboard(weeks: number, now: Date = new Date()): Pro
     window: { from: window[0], to: window[window.length - 1] },
     previousWindow: { from: previousWindow[0], to: previousWindow[previousWindow.length - 1] },
     items: itemDashboards,
-    overall: perItem.length > 1
+    overall: transformItems.length > 1
       ? {
-        current: combinedMetrics(perItem, window, flags, settings.weights, giving),
-        previous: combinedMetrics(perItem, previousWindow, flags, settings.weights, giving),
+        current: combinedMetrics(transformItems, window, context),
+        previous: combinedMetrics(transformItems, previousWindow, context),
       }
       : null,
-    weights: settings.weights,
+    points: settings.points,
+    maxPoints: context.maxPoints,
+    available: context.available,
     servingWindowDays: settings.servingWindowDays,
     fieldsFound: { thrive: !!keys.thrive, serveClass: !!keys.serveClass, lastServed: !!keys.lastServed },
-    givingField: keys.giving ? synced.find((field) => field.key === keys.giving)?.label ?? keys.giving : null,
+    givingField: label(keys.giving),
+    leadershipField: label(keys.leadership),
     lastSync: state.lastRun,
     generatedAt: now.toISOString(),
   };
@@ -187,7 +202,7 @@ export function dashboardEmailHtml(dashboard: Dashboard, siteUrl: string | null)
   const row = (name: string, current: WindowMetrics, previous: WindowMetrics, bold = false) => `
     <tr style="${bold ? "font-weight:bold;" : ""}">
       <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;">${escape(name)}</td>
-      <td style="${cell}">${current.engagement.score ?? "—"}${delta(current.engagement.score, previous.engagement.score, (value) => `${Math.round(value)}`)}</td>
+      <td style="${cell}">${current.engagement.score === null ? "—" : `${current.engagement.score} / ${dashboard.maxPoints}`}${delta(current.engagement.score, previous.engagement.score, (value) => `${Math.round(value * 10) / 10}`)}</td>
       <td style="${cell}">${num(current.avgAttendance)}${delta(current.avgAttendance, previous.avgAttendance, (value) => num(value))}</td>
       <td style="${cell}">${pct(current.attendanceRate)}${delta(current.attendanceRate, previous.attendanceRate, (value) => `${Math.round(value * 100)} ${Math.round(value * 100) === 1 ? "pt" : "pts"}`)}</td>
       <td style="${cell}">${num(current.avgNewGuests)}</td>
@@ -213,7 +228,7 @@ export function dashboardEmailHtml(dashboard: Dashboard, siteUrl: string | null)
         <tbody>${rows}${overall}</tbody>
       </table>
       <p style="font-size:12px;color:#6b7280;margin-top:12px;">
-        Engagement (0–100) weighs ${ENGAGEMENT_PARTS.filter((part) => (part !== "giving" || !!dashboard.givingField) && dashboard.weights[part] > 0).map((part) => `${PART_LABELS[part]} ×${dashboard.weights[part]}`).join(", ")}.
+        Engagement is points out of ${dashboard.maxPoints}: ${ENGAGEMENT_PARTS.filter((part) => dashboard.points[part] > 0).map((part) => `${PART_LABELS[part]} ${dashboard.points[part]}`).join(", ")}${ENGAGEMENT_PARTS.some((part) => dashboard.points[part] > 0 && !dashboard.available[part]) ? ` (not set up yet, so scaled: ${ENGAGEMENT_PARTS.filter((part) => dashboard.points[part] > 0 && !dashboard.available[part]).map((part) => PART_LABELS[part]).join(", ")})` : ""}.
         People = different people who attended at least once in the window. Weeks nobody attended don't count.
       </p>
       ${siteUrl ? `<p><a href="${escape(siteUrl)}/engagement">Open the dashboard</a></p>` : ""}
@@ -243,8 +258,12 @@ router.get("/settings", requireAdmin, async (req, res) => {
     const settings = await readEngagementSettings();
     const synced = await syncedFields();
     const state = await readSyncState();
+    const forms = await readFormsState();
     res.json({
       settings,
+      maxPoints: totalPoints(settings.points),
+      forms: forms.forms,
+      formsSyncedAt: forms.lastSyncedAt,
       resolvedFields: resolveFieldKeys(settings.fields, synced),
       syncedFields: synced,
       weekOptions: DASHBOARD_WEEK_OPTIONS,
@@ -275,10 +294,18 @@ router.put("/settings", requireAdmin, async (req, res) => {
         recipients = [];
       }
     }
-    const weights = body.weights !== undefined ? normalizeWeights(body.weights) : current.weights;
-    if (!ENGAGEMENT_PARTS.some((part) => part !== "giving" && weights[part] > 0)) {
-      res.status(400).json({ error: "Give at least one part of the score a weight above 0." });
+    const points = body.points !== undefined ? normalizePoints(body.points) : current.points;
+    if (totalPoints(points) <= 0) {
+      res.status(400).json({ error: "Give at least one part of the score some points." });
       return;
+    }
+    if (body.tiers !== undefined) {
+      const tiers = body.tiers as Record<string, unknown>;
+      const checked = normalizeTiers(tiers, totalPoints(points));
+      if (Number(tiers.green) !== checked.green || Number(tiers.yellow) !== checked.yellow) {
+        res.status(400).json({ error: `Green must be above yellow, and at most ${totalPoints(points)} points.` });
+        return;
+      }
     }
     const emailEnabled = dashboardBody.emailEnabled !== undefined ? dashboardBody.emailEnabled === true : current.dashboard.emailEnabled;
     if (emailEnabled && !recipients.length) {
@@ -288,11 +315,12 @@ router.put("/settings", requireAdmin, async (req, res) => {
     const user = res.locals.dbUser;
     const next = normalizeSettings({
       ...current,
-      weights,
+      points,
       fields: body.fields !== undefined ? body.fields : current.fields,
       servingWindowDays: body.servingWindowDays !== undefined ? body.servingWindowDays : current.servingWindowDays,
       tiers: body.tiers !== undefined ? body.tiers : current.tiers,
       missedGivingDays: body.missedGivingDays !== undefined ? body.missedGivingDays : current.missedGivingDays,
+      excludedFormIds: body.excludedFormIds !== undefined ? body.excludedFormIds : current.excludedFormIds,
       dashboard: {
         ...current.dashboard,
         items: dashboardBody.items !== undefined ? normalizeTrackedItems(dashboardBody.items) : current.dashboard.items,
@@ -303,15 +331,12 @@ router.put("/settings", requireAdmin, async (req, res) => {
         ownerName: [user.firstName, user.lastName].filter(Boolean).join(" ") || "an admin",
       },
     });
-    if (body.tiers !== undefined) {
-      const tiers = body.tiers as Record<string, unknown>;
-      if (Number(tiers.green) !== next.tiers.green || Number(tiers.yellow) !== next.tiers.yellow) {
-        res.status(400).json({ error: "Green must be above yellow, both between 1 and 100." });
-        return;
-      }
-    }
     await writeEngagementSettings(next);
-    if (next.tiers.green !== current.tiers.green || next.tiers.yellow !== current.tiers.yellow) {
+    const pointsChanged = ENGAGEMENT_PARTS.some((part) => next.points[part] !== current.points[part]);
+    if (pointsChanged) {
+      // Saved weeks used other point values; start a new baseline.
+      await clearSnapshots();
+    } else if (next.tiers.green !== current.tiers.green || next.tiers.yellow !== current.tiers.yellow) {
       await retierSnapshots(next.tiers);
     }
     req.log.info({ actorId: user.id, items: next.dashboard.items.length, recipients: next.dashboard.recipients.length }, "Engagement settings saved");

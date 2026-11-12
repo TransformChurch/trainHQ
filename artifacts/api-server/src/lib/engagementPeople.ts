@@ -8,13 +8,17 @@
 // LOOKBACK_WEEKS weeks, so people who stop coming slide to red instead of
 // dropping out of the numbers.
 //
-// A person's score uses the same parts and weights as everything else
-// (lib/engagement.ts), each 0 or 1 for one person except attendance:
-//   attendance -- over the score window (the dashboard's default weeks):
-//                 weeks present / weeks held, averaged over the tracked items
-//                 they attended in the lookback (items with no held weeks in
-//                 the window are skipped; none left = no attendance part)
-//   thrive / serveClass / serving / giving -- their profile flags
+// A person's score uses the same parts and points as everything else
+// (lib/engagement.ts; out of 17 by default), each all-or-nothing for one
+// person except Transform:
+//   transform -- over the score window (the dashboard's default weeks):
+//                weeks present / weeks held, averaged over the tracked
+//                Transform items they attended in the lookback (items with no
+//                held weeks in the window are skipped). Someone who only came
+//                to TC College gets 0 while Transform is meeting; if no
+//                Transform item met in the window the part is left out.
+//   formThrive / serving / tcCollege / giving / leadership / serveClass --
+//                their flags (lib/engagement.ts loadEngagementContext)
 //
 // Giving flags use only the Giving field (no Planning Center Giving access):
 //   canceled -- the field had a value at last week's snapshot, now empty
@@ -25,17 +29,17 @@ import { db, engagementAttendanceTable, engagementPersonSnapshotsTable, engageme
 import { and, desc, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm";
 import { addDays, weekStartFor } from "./checkinsHistory";
 import {
-  engagementScore,
-  loadPersonFlags,
+  loadEngagementContext,
   parseFieldDate,
   readEngagementSettings,
   resolveFieldKeys,
+  summarizeEngagement,
+  totalPoints,
   yesLike,
   type EngagementTiers,
-  type EngagementWeights,
-  type PersonFlags,
+  type TrackedItemRole,
 } from "./engagement";
-import { windowWeeks, type PresenceRow, type WeekRow } from "./engagementMetrics";
+import { windowWeeks, type PresenceRow, type ScoreContext, type WeekRow } from "./engagementMetrics";
 import { syncedFields } from "./reportPeople";
 
 export const LOOKBACK_WEEKS = 26;
@@ -52,23 +56,24 @@ export function tierFor(score: number | null, tiers: EngagementTiers): Tier | nu
   return "red";
 }
 
-export type ItemData = { key: string; weekRows: WeekRow[]; presence: PresenceRow[] };
+export type ItemData = { key: string; role?: TrackedItemRole; weekRows: WeekRow[]; presence: PresenceRow[] };
 export type PersonScore = { personId: string; attendance: number | null; score: number | null; items: string[] };
 
 export function scorePeople(
   items: ItemData[],
   window: string[],
   lookback: string[],
-  flags: Map<string, PersonFlags>,
-  weights: EngagementWeights,
-  givingTracked: boolean,
+  context: ScoreContext,
 ): PersonScore[] {
   const inWindow = new Set(window);
   const inLookback = new Set(lookback);
   const ratesByPerson = new Map<string, number[]>();
   const itemsByPerson = new Map<string, Set<string>>();
+  let transformMet = false;
   for (const item of items) {
     const held = new Set(item.weekRows.filter((row) => inWindow.has(row.weekStart) && (row.attendees ?? 0) > 0).map((row) => row.weekStart));
+    const isTransform = (item.role ?? "transform") === "transform";
+    if (isTransform && held.size) transformMet = true;
     const lookbackPeople = new Set<string>();
     const presentWeeks = new Map<string, number>();
     for (const row of item.presence) {
@@ -77,22 +82,15 @@ export function scorePeople(
     }
     for (const personId of lookbackPeople) {
       itemsByPerson.set(personId, (itemsByPerson.get(personId) ?? new Set()).add(item.key));
-      if (held.size) {
+      if (isTransform && held.size) {
         ratesByPerson.set(personId, [...(ratesByPerson.get(personId) ?? []), Math.min(1, (presentWeeks.get(personId) ?? 0) / held.size)]);
       }
     }
   }
   return [...itemsByPerson.entries()].map(([personId, itemKeys]) => {
     const rates = ratesByPerson.get(personId) ?? [];
-    const attendance = rates.length ? rates.reduce((sum, rate) => sum + rate, 0) / rates.length : null;
-    const flag = flags.get(personId);
-    const score = engagementScore({
-      attendance,
-      thrive: flag?.thrive ? 1 : 0,
-      serveClass: flag?.serveClass ? 1 : 0,
-      serving: flag?.serving ? 1 : 0,
-      giving: givingTracked ? (flag?.giving ? 1 : 0) : null,
-    }, weights);
+    const attendance = rates.length ? rates.reduce((sum, rate) => sum + rate, 0) / rates.length : transformMet ? 0 : null;
+    const { score } = summarizeEngagement([{ personId, attendanceRate: attendance }], context.flags, context.points, context.available);
     return { personId, attendance, score, items: [...itemKeys].sort() };
   });
 }
@@ -149,7 +147,6 @@ export async function takePeopleSnapshot(now: Date = new Date()): Promise<{ week
   const lookback = windowWeeks(lastWeek, LOOKBACK_WEEKS);
   const synced = await syncedFields();
   const keys = resolveFieldKeys(settings.fields, synced);
-  const givingTracked = !!keys.giving;
 
   const earliest = lookback[0] < window[0] ? lookback[0] : window[0];
   const weekRows = items.length
@@ -165,13 +162,14 @@ export async function takePeopleSnapshot(now: Date = new Date()): Promise<{ week
     : [];
   const itemData: ItemData[] = items.map((item) => ({
     key: `${item.kind}:${item.id}`,
+    role: item.role,
     weekRows: weekRows.filter((row) => row.itemKind === item.kind && row.itemId === item.id) as WeekRow[],
     presence: presenceRows.filter((row) => row.itemKind === item.kind && row.itemId === item.id),
   }));
   const lookbackSet = new Set(lookback);
   const population = [...new Set(presenceRows.filter((row) => lookbackSet.has(row.weekStart)).map((row) => row.personId))];
-  const flags = await loadPersonFlags(population, keys, addDays(lastWeek, 6), settings.servingWindowDays);
-  const scores = scorePeople(itemData, window, lookback, flags, settings.weights, givingTracked);
+  const context = await loadEngagementContext(settings, synced, population, addDays(lastWeek, 6));
+  const scores = scorePeople(itemData, window, lookback, context);
 
   // Giving field state for everyone who has it now or had it last week.
   const givingState = new Map<string, { has: boolean; date: string | null }>();
@@ -235,6 +233,7 @@ export type PeopleDashboard = {
   weekStart: string | null;          // latest snapshot (week it covers)
   previousWeekStart: string | null;  // the one compared against (null = first snapshot)
   tiers: EngagementTiers;
+  maxPoints: number;
   scoreWeeks: number;
   counts: Record<Tier, number>;
   previousCounts: Record<Tier, number> | null;
@@ -277,6 +276,7 @@ export async function buildPeopleDashboard(tierList?: Tier): Promise<PeopleDashb
     weekStart: weeks[0] ?? null,
     previousWeekStart: null,
     tiers: settings.tiers,
+    maxPoints: totalPoints(settings.points),
     scoreWeeks: settings.dashboard.defaultWeeks,
     counts: { green: 0, yellow: 0, red: 0 },
     previousCounts: null,
@@ -344,4 +344,10 @@ export async function retierSnapshots(tiers: EngagementTiers): Promise<void> {
       when ${engagementPersonSnapshotsTable.score} >= ${tiers.yellow} then 'yellow'
       else 'red' end`,
   });
+}
+
+// Scores saved under different point values can't be compared, so changing
+// the points clears the saved weeks; the next sync starts a new baseline.
+export async function clearSnapshots(): Promise<void> {
+  await db.delete(engagementPersonSnapshotsTable);
 }

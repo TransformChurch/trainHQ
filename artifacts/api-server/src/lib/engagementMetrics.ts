@@ -13,7 +13,10 @@
 //   attendance rate  -- average over those people of (weeks present / held weeks)
 //   engagement       -- lib/engagement.ts score over those people
 import { addDays } from "./checkinsHistory";
-import { summarizeEngagement, type EngagementSummary, type EngagementWeights, type PersonFlags } from "./engagement";
+import { summarizeEngagement, type EngagementSummary, type EngagementPoints, type PartAvailability, type PersonFlags } from "./engagement";
+
+// What scoring needs besides attendance (lib/engagement.ts loadEngagementContext).
+export type ScoreContext = { flags: Map<string, PersonFlags>; points: EngagementPoints; available: PartAvailability };
 
 export type WeekRow = { weekStart: string; sessions: number; attendees: number | null; firstTimers: number };
 export type PresenceRow = { weekStart: string; personId: string };
@@ -53,9 +56,7 @@ export function windowMetrics(
   weekRows: WeekRow[],
   presence: PresenceRow[],
   window: string[],
-  flags: Map<string, PersonFlags>,
-  weights: EngagementWeights,
-  givingTracked = false,
+  context: ScoreContext,
 ): WindowMetrics {
   const inWindow = new Set(window);
   const held = weekRows.filter((row) => inWindow.has(row.weekStart) && (row.attendees ?? 0) > 0);
@@ -70,7 +71,7 @@ export function windowMetrics(
     avgNewGuests: held.length ? held.reduce((sum, row) => sum + row.firstTimers, 0) / held.length : null,
     uniqueAttendees: rates.size,
     attendanceRate: rateValues.length ? rateValues.reduce((sum, rate) => sum + rate, 0) / rateValues.length : null,
-    engagement: summarizeEngagement(people, flags, weights, givingTracked),
+    engagement: summarizeEngagement(people, context.flags, context.points, context.available),
   };
 }
 
@@ -113,16 +114,14 @@ export function trendSeries(weekRows: WeekRow[], presence: PresenceRow[], lastWe
 export function combinedMetrics(
   perItem: { weekRows: WeekRow[]; presence: PresenceRow[] }[],
   window: string[],
-  flags: Map<string, PersonFlags>,
-  weights: EngagementWeights,
-  givingTracked = false,
+  context: ScoreContext,
 ): Omit<WindowMetrics, "engagement"> & { engagement: EngagementSummary } {
   const ratesByPerson = new Map<string, number[]>();
   let avgAttendance: number | null = null;
   let avgNewGuests: number | null = null;
   let heldWeeks = 0;
   for (const item of perItem) {
-    const metrics = windowMetrics(item.weekRows, item.presence, window, new Map(), weights);
+    const metrics = windowMetrics(item.weekRows, item.presence, window, { ...context, flags: new Map() });
     heldWeeks = Math.max(heldWeeks, metrics.heldWeeks);
     if (metrics.avgAttendance !== null) avgAttendance = (avgAttendance ?? 0) + metrics.avgAttendance;
     if (metrics.avgNewGuests !== null) avgNewGuests = (avgNewGuests ?? 0) + metrics.avgNewGuests;
@@ -142,7 +141,7 @@ export function combinedMetrics(
     avgNewGuests,
     uniqueAttendees: people.length,
     attendanceRate: people.length ? people.reduce((sum, person) => sum + (person.attendanceRate ?? 0), 0) / people.length : null,
-    engagement: summarizeEngagement(people, flags, weights, givingTracked),
+    engagement: summarizeEngagement(people, context.flags, context.points, context.available),
   };
 }
 

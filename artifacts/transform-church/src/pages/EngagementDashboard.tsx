@@ -12,7 +12,8 @@ import { EngagementPeopleView } from "@/components/tools/EngagementPeopleView";
 // Engagement dashboard. Numbers come from GET /api/engagement/dashboard,
 // refreshed every Monday at 6:00 AM Eastern.
 
-type Part = "attendance" | "thrive" | "serveClass" | "serving" | "giving";
+type Part = "formThrive" | "transform" | "serving" | "tcCollege" | "giving" | "leadership" | "serveClass";
+const PART_ORDER: Part[] = ["formThrive", "transform", "serving", "tcCollege", "giving", "leadership", "serveClass"];
 type Metrics = {
   from: string;
   to: string;
@@ -28,6 +29,7 @@ type Item = {
   kind: "checkins_event" | "group" | "group_type";
   id: string;
   name: string;
+  role: "transform" | "tc_college";
   current: Metrics;
   previous: Metrics;
   trend: TrendPoint[];
@@ -40,10 +42,13 @@ type Dashboard = {
   previousWindow: { from: string; to: string };
   items: Item[];
   overall: { current: Metrics; previous: Metrics } | null;
-  weights: Record<Part, number>;
+  points: Record<Part, number>;
+  maxPoints: number;
+  available: Record<Part, boolean>;
   servingWindowDays: number;
   fieldsFound: { thrive: boolean; serveClass: boolean; lastServed: boolean };
   givingField: string | null;
+  leadershipField: string | null;
   lastSync: SyncRun | null;
 };
 
@@ -51,7 +56,10 @@ const WEEK_OPTIONS = [4, 8, 12, 26];
 const WEEKS_KEY = "tc-engagement-weeks";
 const VIEW_KEY = "tc-engagement-view";
 const KIND_LABEL: Record<Item["kind"], string> = { checkins_event: "Check-Ins event", group: "Group", group_type: "Group type" };
-const PART_LABEL: Record<Part, string> = { attendance: "Attendance", thrive: "Thrive", serveClass: "Serve Class", serving: "Serving", giving: "Giving" };
+const PART_LABEL: Record<Part, string> = {
+  formThrive: "Form / Thrive", transform: "Transform", serving: "Serving", tcCollege: "TC College",
+  giving: "Giving", leadership: "Leadership", serveClass: "Serve Class",
+};
 
 const pct = (value: number | null) => (value === null ? "—" : `${Math.round(value * 100)}%`);
 const num = (value: number | null) => (value === null ? "—" : value >= 10 ? Math.round(value).toLocaleString() : value.toFixed(1));
@@ -66,7 +74,7 @@ function Change({ current, previous, kind }: { current: number | null; previous:
   if (current === null || previous === null) return <span className="text-xs text-muted-foreground">no earlier data</span>;
   const diff = current - previous;
   const points = Math.abs(Math.round(diff * 100));
-  const shown = kind === "pct" ? `${points} ${points === 1 ? "pt" : "pts"}` : kind === "score" || kind === "int" ? `${Math.abs(Math.round(diff))}` : num(Math.abs(diff));
+  const shown = kind === "pct" ? `${points} ${points === 1 ? "pt" : "pts"}` : kind === "int" ? `${Math.abs(Math.round(diff))}` : kind === "score" ? `${Math.round(Math.abs(diff) * 10) / 10}` : num(Math.abs(diff));
   if ((kind === "pct" && Math.round(diff * 100) === 0) || (kind !== "pct" && Math.abs(diff) < 0.05)) {
     return <span className="inline-flex items-center gap-1 text-xs text-muted-foreground"><Minus className="h-3 w-3" /> no change</span>;
   }
@@ -88,33 +96,35 @@ function Stat({ label, value, change }: { label: string; value: string; change: 
   );
 }
 
-// The "thermostat": a 0-100 track with the score filled in.
-function ScoreMeter({ score, size = "md" }: { score: number | null; size?: "md" | "lg" }) {
-  const value = score ?? 0;
+// The "thermostat": a 0-to-max-points track with the score filled in.
+function ScoreMeter({ score, max, size = "md" }: { score: number | null; max: number; size?: "md" | "lg" }) {
+  const value = score === null || !max ? 0 : Math.min(100, (score / max) * 100);
   return (
-    <div className="flex items-center gap-3" role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={score ?? undefined} aria-label="Engagement score">
-      <span className={`${size === "lg" ? "text-4xl" : "text-3xl"} font-bold tabular-nums`}>{score ?? "—"}</span>
+    <div className="flex items-center gap-3" role="meter" aria-valuemin={0} aria-valuemax={max} aria-valuenow={score ?? undefined} aria-label="Engagement score">
+      <span className={`${size === "lg" ? "text-4xl" : "text-3xl"} font-bold tabular-nums`}>
+        {score ?? "—"}<span className="text-base font-medium text-muted-foreground">/{max}</span>
+      </span>
       <div className="flex-1">
         <div className="h-2.5 w-full overflow-hidden rounded-full bg-muted">
           <div className="h-full rounded-full bg-[hsl(var(--chart-1))]" style={{ width: `${score === null ? 0 : value}%` }} />
         </div>
-        <div className="mt-1 flex justify-between text-[10px] text-muted-foreground"><span>0</span><span>50</span><span>100</span></div>
+        <div className="mt-1 flex justify-between text-[10px] text-muted-foreground"><span>0</span><span>{Math.round(max / 2 * 10) / 10}</span><span>{max}</span></div>
       </div>
     </div>
   );
 }
 
-function PartBars({ metrics, weights, givingField }: { metrics: Metrics; weights: Record<Part, number>; givingField: string | null }) {
-  const parts: Part[] = ["attendance", "thrive", "serveClass", "serving", "giving"];
+function PartBars({ metrics, dashboard }: { metrics: Metrics; dashboard: Dashboard }) {
+  const parts = PART_ORDER.filter((part) => dashboard.points[part] > 0);
   return (
     <div className="space-y-1.5">
       {parts.map((part) => {
         const value = metrics.engagement.percentages[part];
-        const counted = (part !== "giving" || !!givingField) && weights[part] > 0;
+        const counted = dashboard.available[part];
         return (
-          <div key={part} className="grid grid-cols-[88px_1fr_40px] items-center gap-2 text-xs">
+          <div key={part} className="grid grid-cols-[120px_1fr_40px] items-center gap-2 text-xs">
             <span className={counted ? "text-foreground" : "text-muted-foreground"}>
-              {PART_LABEL[part]}{part === "giving" && !givingField ? " (not set)" : ""}
+              {PART_LABEL[part]} <span className="text-muted-foreground">· {counted ? `${dashboard.points[part]} pt${dashboard.points[part] === 1 ? "" : "s"}` : "not set up"}</span>
             </span>
             <div className="h-2 overflow-hidden rounded-full bg-muted">
               {value !== null && <div className="h-full rounded-full bg-[hsl(var(--chart-2))]" style={{ width: `${Math.round(value * 100)}%` }} />}
@@ -169,7 +179,7 @@ function TrendCharts({ item }: { item: Item }) {
   );
 }
 
-function ItemCard({ item, weights, givingField }: { item: Item; weights: Record<Part, number>; givingField: string | null }) {
+function ItemCard({ item, dashboard }: { item: Item; dashboard: Dashboard }) {
   const { current, previous } = item;
   const noData = current.heldWeeks === 0;
   return (
@@ -178,9 +188,9 @@ function ItemCard({ item, weights, givingField }: { item: Item; weights: Record<
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div className="min-w-0">
             <CardTitle className="text-lg">{item.name}</CardTitle>
-            <p className="text-xs text-muted-foreground">{KIND_LABEL[item.kind]}{item.lastWeekWithData ? ` · last attendance week of ${shortDate(item.lastWeekWithData)}` : " · no attendance synced yet"}</p>
+            <p className="text-xs text-muted-foreground">{KIND_LABEL[item.kind]}{item.role === "tc_college" ? " · TC College" : ""}{item.lastWeekWithData ? ` · last attendance week of ${shortDate(item.lastWeekWithData)}` : " · no attendance synced yet"}</p>
           </div>
-          <div className="w-48"><ScoreMeter score={current.engagement.score} /></div>
+          <div className="w-56"><ScoreMeter score={current.engagement.score} max={dashboard.maxPoints} /></div>
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -197,7 +207,7 @@ function ItemCard({ item, weights, givingField }: { item: Item; weights: Record<
         <div className="grid gap-4 lg:grid-cols-[1fr_1.4fr]">
           <div>
             <p className="mb-2 text-xs font-medium text-muted-foreground">Engagement score parts ({current.engagement.people} people)</p>
-            <PartBars metrics={current} weights={weights} givingField={givingField} />
+            <PartBars metrics={current} dashboard={dashboard} />
           </div>
           <TrendCharts item={item} />
         </div>
@@ -261,7 +271,8 @@ export default function EngagementDashboard() {
   const activeWeeks = dashboard?.weeks ?? weeks ?? 8;
   const overall = dashboard?.overall;
   const missingFields = dashboard
-    ? (["thrive", "serveClass", "lastServed"] as const).filter((key) => !dashboard.fieldsFound[key])
+    ? (["thrive", "serveClass", "lastServed"] as const).filter((key) => !dashboard.fieldsFound[key]
+      && dashboard.points[({ thrive: "formThrive", serveClass: "serveClass", lastServed: "serving" } as const)[key]] > 0)
     : [];
 
   return (
@@ -334,22 +345,22 @@ export default function EngagementDashboard() {
 
       {dashboard && !!missingFields.length && (
         <p className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100">
-          The people sync doesn't include {missingFields.map((key) => ({ thrive: "Thrive", serveClass: "Serve Class", lastServed: "Last Served" })[key]).join(", ")},
-          so {missingFields.length === 1 ? "that part reads" : "those parts read"} 0%. Pick the field in Tool Management → Engagement.
+          The people sync doesn't include {missingFields.map((key) => ({ thrive: "Thrive", serveClass: "Serve Class", lastServed: "Last Served" })[key]).join(", ")}.
+          Add {missingFields.length === 1 ? "it" : "them"} under Tool Management → Database, or pick the field in Tool Management → Engagement.
         </p>
       )}
 
       {overall && (
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-lg">Big picture: everything tracked</CardTitle>
+            <CardTitle className="text-lg">Big picture: all Transform groups &amp; events</CardTitle>
             <p className="text-xs text-muted-foreground">People in more than one group or event count once; weekly averages add up across them.</p>
           </CardHeader>
           <CardContent>
             <div className="grid gap-3 md:grid-cols-[1.2fr_repeat(4,1fr)]">
               <div className="rounded-lg border bg-card p-3">
                 <p className="text-xs font-medium text-muted-foreground">Engagement score</p>
-                <ScoreMeter score={overall.current.engagement.score} size="lg" />
+                <ScoreMeter score={overall.current.engagement.score} max={dashboard!.maxPoints} size="lg" />
                 <Change current={overall.current.engagement.score} previous={overall.previous.engagement.score} kind="score" />
               </div>
               <Stat label="Avg. attendance rate" value={pct(overall.current.attendanceRate)} change={<Change current={overall.current.attendanceRate} previous={overall.previous.attendanceRate} kind="pct" />} />
@@ -361,7 +372,7 @@ export default function EngagementDashboard() {
         </Card>
       )}
 
-      {dashboard?.items.map((item) => <ItemCard key={`${item.kind}:${item.id}`} item={item} weights={dashboard.weights} givingField={dashboard.givingField} />)}
+      {dashboard?.items.map((item) => <ItemCard key={`${item.kind}:${item.id}`} item={item} dashboard={dashboard} />)}
 
       {dashboard && dashboard.items.length > 1 && (
         <Card>
@@ -376,25 +387,23 @@ export default function EngagementDashboard() {
                   <th className="py-2 pr-3 text-right font-medium">Avg. attendance</th>
                   <th className="py-2 pr-3 text-right font-medium">New / wk</th>
                   <th className="py-2 pr-3 text-right font-medium">People</th>
-                  <th className="py-2 pr-3 text-right font-medium">Thrive</th>
-                  <th className="py-2 pr-3 text-right font-medium">Serve Class</th>
-                  <th className="py-2 pr-3 text-right font-medium">Serving</th>
-                  {dashboard.givingField && <th className="py-2 text-right font-medium">Giving</th>}
+                  {PART_ORDER.filter((part) => part !== "transform" && dashboard.points[part] > 0 && dashboard.available[part]).map((part) => (
+                    <th key={part} className="py-2 pr-3 text-right font-medium">{PART_LABEL[part]}</th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
                 {[...dashboard.items].sort((a, b) => (b.current.engagement.score ?? -1) - (a.current.engagement.score ?? -1)).map((item) => (
                   <tr key={`${item.kind}:${item.id}`} className="border-b last:border-0">
                     <td className="py-2 pr-3">{item.name}</td>
-                    <td className="py-2 pr-3 text-right font-semibold tabular-nums">{item.current.engagement.score ?? "—"}</td>
+                    <td className="py-2 pr-3 text-right font-semibold tabular-nums">{item.current.engagement.score ?? "—"}<span className="text-xs font-normal text-muted-foreground">/{dashboard.maxPoints}</span></td>
                     <td className="py-2 pr-3 text-right tabular-nums">{pct(item.current.attendanceRate)}</td>
                     <td className="py-2 pr-3 text-right tabular-nums">{num(item.current.avgAttendance)}</td>
                     <td className="py-2 pr-3 text-right tabular-nums">{num(item.current.avgNewGuests)}</td>
                     <td className="py-2 pr-3 text-right tabular-nums">{item.current.uniqueAttendees.toLocaleString()}</td>
-                    <td className="py-2 pr-3 text-right tabular-nums">{pct(item.current.engagement.percentages.thrive)}</td>
-                    <td className="py-2 pr-3 text-right tabular-nums">{pct(item.current.engagement.percentages.serveClass)}</td>
-                    <td className="py-2 pr-3 text-right tabular-nums">{pct(item.current.engagement.percentages.serving)}</td>
-                    {dashboard.givingField && <td className="py-2 text-right tabular-nums">{pct(item.current.engagement.percentages.giving)}</td>}
+                    {PART_ORDER.filter((part) => part !== "transform" && dashboard.points[part] > 0 && dashboard.available[part]).map((part) => (
+                      <td key={part} className="py-2 pr-3 text-right tabular-nums">{pct(item.current.engagement.percentages[part])}</td>
+                    ))}
                   </tr>
                 ))}
               </tbody>
@@ -405,10 +414,15 @@ export default function EngagementDashboard() {
 
       {dashboard && (
         <p className="text-xs text-muted-foreground">
-          Engagement (0–100) is the weighted average of attendance rate, Thrive, Serve Class, serving
-          (Last Served within {dashboard.servingWindowDays} days){dashboard.givingField ? ` and giving (people whose "${dashboard.givingField}" field has a value)` : "; giving counts once a Giving field is picked in Tool Management"}. Weights:{" "}
-          {(["attendance", "thrive", "serveClass", "serving", ...(dashboard.givingField ? ["giving"] : [])] as Part[]).map((part) => `${PART_LABEL[part]} ×${dashboard.weights[part]}`).join(", ")}.
-          Attendance rate = weeks each person came ÷ weeks that met, averaged over everyone who came. Weeks nobody attended don't count.
+          Engagement is the points people earn on average, out of {dashboard.maxPoints}:{" "}
+          {PART_ORDER.filter((part) => dashboard.points[part] > 0).map((part) => `${PART_LABEL[part]} ${dashboard.points[part]}`).join(", ")}.
+          Form / Thrive = Thrive done or any Planning Center form submitted; Transform = attendance rate (partial points); Serving = Last Served
+          within {dashboard.servingWindowDays} days; TC College = checked in at the TC College event in the last 26 weeks
+          {dashboard.givingField ? `; Giving = "${dashboard.givingField}" has a value` : ""}{dashboard.leadershipField ? `; Leadership = "${dashboard.leadershipField}" has a value` : ""}.
+          {PART_ORDER.some((part) => dashboard.points[part] > 0 && !dashboard.available[part])
+            ? ` Not set up yet (left out, scores scaled to ${dashboard.maxPoints}): ${PART_ORDER.filter((part) => dashboard.points[part] > 0 && !dashboard.available[part]).map((part) => PART_LABEL[part]).join(", ")}.`
+            : ""}
+          {" "}Attendance rate = weeks each person came ÷ weeks that met, averaged over everyone who came. Weeks nobody attended don't count.
           {dashboard.lastSync?.finishedAt ? ` Last synced ${new Date(dashboard.lastSync.finishedAt).toLocaleString()}.` : ""}
         </p>
       )}
