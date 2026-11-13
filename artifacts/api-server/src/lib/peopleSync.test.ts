@@ -15,6 +15,7 @@ const page = ({
       relationships: {
         primary_campus: { data: { type: "Campus", id: "7" } },
         addresses: { data: [{ type: "Address", id: "a1" }, { type: "Address", id: "a2" }] },
+        households: { data: [{ type: "Household", id: "h5" }, { type: "Household", id: "h5" }] },
         field_data: { data: [{ type: "FieldDatum", id: "f1" }, { type: "FieldDatum", id: "f2" }, { type: "FieldDatum", id: "f3" }, { type: "FieldDatum", id: "f4" }] },
       },
     },
@@ -78,6 +79,8 @@ test("primary address gives city/state/zip and the street is never kept", () => 
   assert.deepEqual([ana.city, ana.state, ana.zip], ["Lyndhurst", "NJ", "07071"]);
   assert.equal(JSON.stringify(ana).includes("Home Ave"), false);
   assert.deepEqual([ben.city, ben.zip], [null, null]);
+  assert.deepEqual(ana.householdIds, ["h5"]);
+  assert.deepEqual(ben.householdIds, []);
 });
 
 test("standard fields are matched by name, ignoring case and punctuation", () => {

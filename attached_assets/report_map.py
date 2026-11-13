@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import math
+import textwrap
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -62,7 +63,8 @@ def load_locations(path: str | Path | None) -> dict | None:
             continue
         if len(code) == 5 and code.isdigit() and n > 0:
             zips[code] = zips.get(code, 0) + n
-    return {"zips": zips, "noZip": int(raw.get("noZip") or 0), "total": int(raw.get("total") or 0)}
+    return {"zips": zips, "noZip": int(raw.get("noZip") or 0), "total": int(raw.get("total") or 0),
+            "fromHousehold": int(raw.get("fromHousehold") or 0)}
 
 
 def class_breaks(counts: list) -> list:
@@ -307,7 +309,7 @@ def draw_location_map_page(figsize: tuple, report_name: str, period_label: str, 
     fig.text(0.06, 0.895, f"Where our {people_word} live", fontsize=13, fontweight="bold",
              color=INK_PRIMARY, ha="left", va="top")
     fig.text(0.06, 0.872, "Northern New Jersey ZIP codes, shaded by how many people in this report live in each "
-             "(home address in Planning Center).", fontsize=8, color=INK_SECONDARY, ha="left", va="top")
+             "(home or household address in Planning Center).", fontsize=8, color=INK_SECONDARY, ha="left", va="top")
 
     total = summary["total"]
     pct = (lambda n: f" ({n / total:.0%})" if total else "")
@@ -324,17 +326,19 @@ def draw_location_map_page(figsize: tuple, report_name: str, period_label: str, 
          f"{town['count']}{pct(town['count'])}"]
         for name, town in towns[:10]
     ]
+    from_household = int(locations.get("fromHousehold") or 0)
+    household_text = (f", {from_household} of them from their household's address" if from_household else "")
     note = (f"{summary['mapped'] + summary['elsewhere_nj'] + summary['outside_nj']} of {total} {people_word} "
-            f"have a ZIP code on file. Counts use each person's home address in Planning Center; "
-            f"people without one aren't on the map.")
+            f"have a ZIP code on file{household_text}. Counts use each person's home address in Planning Center, "
+            f"or their household's when they have none of their own; people with neither aren't on the map.")
     if portrait:
         _draw_map(fig, (0.06, 0.355, 0.88, 0.415), asset, summary, people_word)
         _draw_town_table(fig, (0.06, 0.07, 0.88, 0.235), rows, people_word)
-        fig.text(0.06, 0.045, note, fontsize=7, color=INK_MUTED, ha="left", va="bottom")
+        fig.text(0.06, 0.035, textwrap.fill(note, 150), fontsize=7, color=INK_MUTED, ha="left", va="bottom")
     else:
         _draw_map(fig, (0.06, 0.13, 0.52, 0.62), asset, summary, people_word)
         _draw_town_table(fig, (0.62, 0.13, 0.32, 0.62), rows, people_word, compact=True)
-        fig.text(0.06, 0.045, note, fontsize=7, color=INK_MUTED, ha="left", va="bottom")
+        fig.text(0.06, 0.03, textwrap.fill(note, 190), fontsize=7, color=INK_MUTED, ha="left", va="bottom")
     return fig
 
 

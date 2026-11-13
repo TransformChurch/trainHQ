@@ -169,7 +169,7 @@ export async function runPeopleSync(
     const missing = standard.filter((field) => !field.key).map((field) => field.label);
     if (missing.length) run.missingStandard = missing;
     const fields = effectiveFields(standard, current.fields);
-    const includes = ["primary_campus", "addresses", ...(fields.some((field) => customFieldId(field.key)) ? ["field_data"] : [])];
+    const includes = ["primary_campus", "addresses", "households", ...(fields.some((field) => customFieldId(field.key)) ? ["field_data"] : [])];
     let next: string | null = `${PEOPLE_BASE}/people?per_page=100&include=${includes.join(",")}`;
     const visited = new Set<string>();
     while (next && !visited.has(next)) {
@@ -200,6 +200,7 @@ export async function runPeopleSync(
               city: sql`excluded.city`,
               state: sql`excluded.state`,
               zip: sql`excluded.zip`,
+              householdIds: sql`excluded.household_ids`,
               pcoCreatedAt: sql`excluded.pco_created_at`,
               pcoUpdatedAt: sql`excluded.pco_updated_at`,
               fields: sql`excluded.fields`,

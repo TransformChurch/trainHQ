@@ -144,6 +144,7 @@ export type PeopleProfileRow = {
   city: string | null;
   state: string | null;
   zip: string | null;
+  householdIds: string[];
   pcoCreatedAt: Date | null;
   pcoUpdatedAt: Date | null;
   fields: Record<string, PeopleFieldValue>;
@@ -220,6 +221,7 @@ export function buildProfileRows(
       city: str(addressAttributes.city),
       state: str(addressAttributes.state),
       zip: str(addressAttributes.zip),
+      householdIds: [...new Set(relationshipIds(person, "households"))],
       pcoCreatedAt: timestamp(attributes.created_at),
       pcoUpdatedAt: timestamp(attributes.updated_at),
       fields,

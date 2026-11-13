@@ -26,9 +26,8 @@ export type ReportSchedule = {
   recipients: string[];
   frequency: ScheduleFrequency;
   enabled: boolean;
-  // Adds the "Where our ... live" map page (2026-10-21). Missing on
-  // schedules saved before then, which reads as off.
-  includeMap?: boolean;
+  // includeMap (2026-10-21) is no longer read: every report has the map
+  // page since 2026-11-13. Old schedules may still carry it.
   // Whose Planning Center connection prepares the report (the admin who
   // created or last saved the schedule).
   ownerUserId: string;
@@ -54,7 +53,7 @@ function cleanIdList(value: unknown, max: number): string[] {
 export function parseScheduleInput(
   body: unknown,
   parseRecipients: (raw: unknown) => { recipients: string[] } | { error: string },
-): { value: Pick<ReportSchedule, "name" | "templateId" | "eventIds" | "eventNames" | "recipients" | "frequency" | "enabled" | "includeMap"> } | { error: string } {
+): { value: Pick<ReportSchedule, "name" | "templateId" | "eventIds" | "eventNames" | "recipients" | "frequency" | "enabled"> } | { error: string } {
   const source = (body ?? {}) as Record<string, unknown>;
   const name = cleanText(source.name, 120);
   if (!name) return { error: "Give the schedule a name." };
@@ -76,7 +75,6 @@ export function parseScheduleInput(
       recipients: recipients.recipients,
       frequency,
       enabled: source.enabled !== false,
-      includeMap: source.includeMap === true,
     },
   };
 }

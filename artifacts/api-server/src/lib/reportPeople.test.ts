@@ -25,6 +25,7 @@ const profile = (overrides: Partial<PeopleProfile> = {}): PeopleProfile => ({
   city: "Lyndhurst",
   state: "NJ",
   zip: "07071",
+  householdIds: [],
   pcoCreatedAt: null,
   pcoUpdatedAt: null,
   fields: { "field:471476": "Yes", "field:700347": "Completed", "field:664891": null, "field:831026": ["Kids", "Worship"] },

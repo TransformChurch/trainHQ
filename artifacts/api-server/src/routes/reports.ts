@@ -1811,7 +1811,9 @@ router.post("/prepare", requireToolAccess("reporting"), async (req, res) => {
 // Renders a prepared run to PDF with its template's engine. Shared by the
 // download (POST /generate) and email (POST /email-pdf) routes.
 export type ReportPdfOptions = {
-  // Adds the "Where our ... live" map page (attached_assets/report_map.py).
+  // The "Where our ... live" map page (attached_assets/report_map.py) is on
+  // every report since 2026-11-13 (Andrew: every group or event report should
+  // show where attendees' households are). Only `false` leaves it out.
   includeMap?: boolean;
 };
 
@@ -1881,7 +1883,7 @@ async function generateReportPdf(
         console.warn("Attendance trend unavailable; using the report's own weeks.", error);
       }
     }
-    if (options.includeMap) {
+    if (options.includeMap !== false) {
       const locations = parseRunLocations(run!.meta);
       if (locations) {
         const locationsPath = join(workDir, "locations.json");
@@ -1921,9 +1923,7 @@ router.post("/generate", requireToolAccess("reporting"), async (req, res) => {
       res.status(400).json({ error: "Report run, template, and output format (pdf) are required." });
       return;
     }
-    const { pdf, fileName } = await generateReportPdf(runId, templateId, res.locals.dbUser.id, {
-      includeMap: req.body?.includeMap === true,
-    });
+    const { pdf, fileName } = await generateReportPdf(runId, templateId, res.locals.dbUser.id);
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
     res.setHeader("Cache-Control", "private, no-store");
@@ -1982,7 +1982,7 @@ export async function emailReportPdf(
 }
 
 // ── POST /api/reports/email-pdf ─────────────────────────────────────────────
-// Body: { runId, templateId, recipients, includeMap? }. Renders the same PDF as
+// Body: { runId, templateId, recipients }. Renders the same PDF as
 // /generate and emails it as an attachment. The report lists people
 // (including children) by name, so the send is logged with who sent it and
 // how many recipients, and the recipient count is capped.
@@ -2003,7 +2003,6 @@ router.post("/email-pdf", requireToolAccess("reporting"), async (req, res) => {
     const result = await emailReportPdf(
       runId, templateId, res.locals.dbUser.id, parsed.recipients,
       `Sent by ${sender} from the Transform Church reporting page.`,
-      { includeMap: req.body?.includeMap === true },
     );
     req.log.info(
       { runId, templateId, actorId: res.locals.dbUser.id, recipientCount: parsed.recipients.length, sent: result.sent },

@@ -6,15 +6,21 @@
 // primary address -- never the street), else the people_profiles table.
 // Only these counts are kept, in report_runs.meta under "locations"; the
 // engine gets them as --locations-json when the map page is switched on.
-// People not in the table yet (e.g. a first-time guest added after the last
-// weekly pull) or without an address count as "no address on file".
+// Since 2026-11-13 (Andrew: "very helpful for us to see the household
+// locations") anyone with no address of their own -- most kids -- is placed
+// at their Planning Center household's ZIP: the one most members of the
+// household have. People not in the table yet (e.g. a first-time guest added
+// after the last weekly pull) or with no address on them or their household
+// count as "no address on file".
 import { db, peopleProfilesTable } from "@workspace/db";
-import { inArray } from "drizzle-orm";
+import { and, inArray, isNull, sql } from "drizzle-orm";
 
 export type RunLocations = {
   zips: Record<string, number>;
   noZip: number;
   total: number;
+  // How many of the mapped people were placed by their household's address.
+  fromHousehold?: number;
 };
 
 // "07070-1234" / "7070" (lost leading zero) / " 07070 " -> "07070"; null if unusable.
@@ -29,16 +35,57 @@ export function zip5(raw: unknown): string | null {
 
 // Pure counting step (unit-tested): `total` is everyone in the report,
 // including people with no Planning Center id.
-export function summarizeLocations(personIds: string[], total: number, zipByPerson: Map<string, unknown>): RunLocations {
+export function summarizeLocations(
+  personIds: string[],
+  total: number,
+  zipByPerson: Map<string, unknown>,
+  householdZipByPerson: Map<string, string> = new Map(),
+): RunLocations {
   const zips: Record<string, number> = {};
   let withZip = 0;
+  let fromHousehold = 0;
   for (const id of new Set(personIds)) {
-    const zip = zip5(zipByPerson.get(id));
+    let zip = zip5(zipByPerson.get(id));
+    if (!zip) {
+      zip = zip5(householdZipByPerson.get(id));
+      if (zip) fromHousehold += 1;
+    }
     if (!zip) continue;
     zips[zip] = (zips[zip] ?? 0) + 1;
     withZip += 1;
   }
-  return { zips, noZip: Math.max(0, total - withZip), total };
+  return { zips, noZip: Math.max(0, total - withZip), total, fromHousehold };
+}
+
+// Each household's ZIP: the one most of its members have (ties -> the
+// smaller ZIP, so it's stable). Pure; unit-tested.
+export function householdZips(members: { zip: unknown; householdIds: string[] }[]): Map<string, string> {
+  const counts = new Map<string, Map<string, number>>();
+  for (const member of members) {
+    const zip = zip5(member.zip);
+    if (!zip) continue;
+    for (const household of member.householdIds ?? []) {
+      const byZip = counts.get(household) ?? new Map<string, number>();
+      byZip.set(zip, (byZip.get(zip) ?? 0) + 1);
+      counts.set(household, byZip);
+    }
+  }
+  const result = new Map<string, string>();
+  for (const [household, byZip] of counts) {
+    const best = [...byZip.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0];
+    if (best) result.set(household, best[0]);
+  }
+  return result;
+}
+
+// A person's household ZIP: from the first of their households (in
+// Planning Center's order) that has one.
+export function personHouseholdZip(householdIds: string[], zipByHousehold: Map<string, string>): string | null {
+  for (const household of householdIds ?? []) {
+    const zip = zipByHousehold.get(household);
+    if (zip) return zip;
+  }
+  return null;
 }
 
 const CHUNK = 1000;
@@ -52,13 +99,45 @@ export async function loadRunLocations(
   const zipByPerson = new Map<string, unknown>();
   for (const id of ids) if (zip5(knownZips.get(id))) zipByPerson.set(id, knownZips.get(id));
   const missing = ids.filter((id) => !zipByPerson.has(id));
+  const householdsByPerson = new Map<string, string[]>();
   for (let index = 0; index < missing.length; index += CHUNK) {
-    const rows = await db.select({ personId: peopleProfilesTable.personId, zip: peopleProfilesTable.zip })
+    const rows = await db.select({
+      personId: peopleProfilesTable.personId,
+      zip: peopleProfilesTable.zip,
+      householdIds: peopleProfilesTable.householdIds,
+    })
       .from(peopleProfilesTable)
       .where(inArray(peopleProfilesTable.personId, missing.slice(index, index + CHUNK)));
-    for (const row of rows) zipByPerson.set(row.personId, row.zip);
+    for (const row of rows) {
+      zipByPerson.set(row.personId, row.zip);
+      if (!zip5(row.zip) && Array.isArray(row.householdIds) && row.householdIds.length) {
+        householdsByPerson.set(row.personId, row.householdIds.map(String));
+      }
+    }
   }
-  return summarizeLocations(ids, total, zipByPerson);
+  // Still no ZIP: use their household's (everyone in it, not only people in
+  // this report).
+  const householdZipByPerson = new Map<string, string>();
+  const households = [...new Set([...householdsByPerson.values()].flat())];
+  if (households.length) {
+    const members: { zip: unknown; householdIds: string[] }[] = [];
+    for (let index = 0; index < households.length; index += CHUNK) {
+      const chunk = households.slice(index, index + CHUNK);
+      const rows = await db.select({ zip: peopleProfilesTable.zip, householdIds: peopleProfilesTable.householdIds })
+        .from(peopleProfilesTable)
+        .where(and(
+          isNull(peopleProfilesTable.removedAt),
+          sql`${peopleProfilesTable.householdIds} ?| ${sql`array[${sql.join(chunk.map((id) => sql`${id}`), sql`, `)}]::text[]`}`,
+        ));
+      members.push(...rows.map((row) => ({ zip: row.zip, householdIds: Array.isArray(row.householdIds) ? row.householdIds.map(String) : [] })));
+    }
+    const zipByHousehold = householdZips(members);
+    for (const [personId, ids] of householdsByPerson) {
+      const zip = personHouseholdZip(ids, zipByHousehold);
+      if (zip) householdZipByPerson.set(personId, zip);
+    }
+  }
+  return summarizeLocations(ids, total, zipByPerson, householdZipByPerson);
 }
 
 // report_runs.meta is a JSON object: season reports keep their season
@@ -78,7 +157,13 @@ export function parseRunLocations(raw: string | null | undefined): RunLocations 
       const n = Number(count);
       if (/^\d{5}$/.test(zip) && Number.isInteger(n) && n > 0) zips[zip] = n;
     }
-    return { zips, noZip: Math.max(0, Number(value.noZip) || 0), total: Math.max(0, Number(value.total) || 0) };
+    const fromHousehold = Math.max(0, Number(value.fromHousehold) || 0);
+    return {
+      zips,
+      noZip: Math.max(0, Number(value.noZip) || 0),
+      total: Math.max(0, Number(value.total) || 0),
+      ...(fromHousehold ? { fromHousehold } : {}),
+    };
   } catch {
     return null;
   }

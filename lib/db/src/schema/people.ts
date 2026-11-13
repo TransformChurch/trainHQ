@@ -33,6 +33,10 @@ export const peopleProfilesTable = pgTable("people_profiles", {
   city: text("city"),
   state: text("state"),
   zip: text("zip"),
+  // Planning Center household ids (2026-11-13). A person with no address of
+  // their own (most kids) is placed at their household's address on report
+  // map pages (lib/reportLocations.ts).
+  householdIds: jsonb("household_ids").$type<string[]>().notNull().default([]),
   pcoCreatedAt: timestamp("pco_created_at"),
   pcoUpdatedAt: timestamp("pco_updated_at"),
   fields: jsonb("fields").$type<Record<string, string | string[] | number | boolean | null>>().notNull().default({}),
@@ -41,6 +45,7 @@ export const peopleProfilesTable = pgTable("people_profiles", {
 }, (table) => [
   index("people_profiles_last_name_idx").on(table.lastName),
   index("people_profiles_campus_idx").on(table.campusId),
+  index("people_profiles_household_ids_idx").using("gin", table.householdIds),
 ]);
 
 export type PeopleProfile = typeof peopleProfilesTable.$inferSelect;
