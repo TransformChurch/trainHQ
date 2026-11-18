@@ -52,6 +52,7 @@ import {
 } from "../lib/reportGroups";
 import { loadEngagementContext, readEngagementSettings, summarizeEngagement } from "../lib/engagement";
 import { loadRunLocations, parseRunLocations, runMetaWithLocations, type RunLocations } from "../lib/reportLocations";
+import { cleanupScriptArgs, isKidsEngine, KIDS_ENGINES } from "../lib/reportCleanup";
 
 const router: IRouter = Router();
 const storage = new ObjectStorageService();
@@ -561,6 +562,10 @@ const REPORT_ENGINES: Array<{ engine: ReportEngine; label: string; script: strin
   { engine: "season_young_adults", label: "Young Adults Season Report", script: "report_season.py", args: ["--audience", "young_adults"], trendWeeks: 0, season: true },
   { engine: "season_groups", label: "Transform Groups Season Report", script: "report_season.py", args: ["--audience", "groups"], trendWeeks: 0, season: true },
 ];
+
+// Compile-time check that every Kids engine name is a real engine.
+const KIDS_ENGINE_NAMES: readonly ReportEngine[] = KIDS_ENGINES;
+void KIDS_ENGINE_NAMES;
 
 function isReportEngine(value: unknown): value is ReportEngine {
   return typeof value === "string" && REPORT_ENGINES.some((item) => item.engine === value);
@@ -1095,6 +1100,8 @@ async function savePreparedRun(options: {
   startDate: string;
   endDate: string;
   templateId: number;
+  // The template's report engine; Kids engines skip the grade floor.
+  engine: string | null;
   userId: string;
   meta: SeasonRunMeta | null;
 }): Promise<{ runId: string; expiresAt: Date; reviewCount: number; flags: string }> {
@@ -1121,8 +1128,15 @@ async function savePreparedRun(options: {
     const cleanedPath = join(workDir, "cleaned.csv");
     const flagsPath = join(workDir, "flags.txt");
     await writeFile(rawPath, rawCsv, "utf8");
+    const cleanupScript = await pythonScript(options.cleanupMode);
+    const extraArgs = isKidsEngine(options.engine)
+      ? cleanupScriptArgs(options.engine, await readFile(cleanupScript, "utf8").catch(() => ""))
+      : [];
+    if (isKidsEngine(options.engine) && extraArgs.length === 0) {
+      console.warn("The cleanup script in use doesn't support --no-grade-floor, so this Kids report's grades are recoded to the floor.");
+    }
     const output = await runPython(
-      [await pythonScript(options.cleanupMode), rawPath, cleanedPath, "--flags-out", flagsPath],
+      [cleanupScript, rawPath, cleanedPath, "--flags-out", flagsPath, ...extraArgs],
       cleanupScriptTimeoutMs(options.rowCount),
     );
     const cleaned = selectCleanedColumns(await readFile(cleanedPath, "utf8"), options.pullFields, options.customLabels);
@@ -1551,7 +1565,7 @@ async function prepareCheckInsRun(
 
   const saved = await savePreparedRun({
     records, serviceDates, selectedCustomFields, customLabels, pullFields, cleanupMode,
-    rowCount: inRange.length, eventId, eventName, startDate, endDate, templateId, userId, meta,
+    rowCount: inRange.length, eventId, eventName, startDate, endDate, templateId, engine: template.engine, userId, meta,
   });
   markProgressComplete(userId, progressId, totalProfileBatches);
   return {
@@ -1768,7 +1782,7 @@ async function prepareGroupsRun(
   const saved = await savePreparedRun({
     records, serviceDates, selectedCustomFields, customLabels, pullFields, cleanupMode,
     rowCount: season.presentRecords, eventId: `groups:${groupIds.join(",")}`, eventName,
-    startDate, endDate, templateId, userId, meta,
+    startDate, endDate, templateId, engine: template.engine, userId, meta,
   });
   markProgressComplete(userId, progressId, totalProfileBatches);
   const membershipGaps = personIds.length - memberships.size;

@@ -109,6 +109,11 @@ on the template's Performance tab (e.g. "6th grade" for a 6-8/9-10/11-12
 split). If the template changes its categories, update this section.
 This section is simply ignored (no grade flags at all) for a roster
 that has no "Grade" column, such as a young-adults export.
+
+Pass --no-grade-floor to skip it too: Grade values are left exactly as
+they came in (no recoding to the floor, no "Unknown" for blanks) and no
+grade flags are reported. The site does this for TC Kids reports, whose
+engine works out grade groups from Birthdate and never reads Grade.
 """
 
 import argparse
@@ -510,10 +515,11 @@ def merge_duplicates(rows, fixed_cols, week_cols, flags):
 # Category anomaly checks (recode grade, resolve/flag gender)
 # ============================================================================
 
-def apply_anomaly_checks(records, flags):
+def apply_anomaly_checks(records, flags, grade_floor=True):
+    """grade_floor=False (--no-grade-floor) leaves Grade exactly as it came in."""
     for r in records:
         who = f"{r['First Name']} {r['Last Name']}"
-        if "Grade" in r:
+        if grade_floor and "Grade" in r:
             r["Grade"] = recode_grade(r["Grade"], flags, who)
         if "Gender" in r:
             r["Gender"] = clean_gender(r["Gender"], r["First Name"], flags, who)
@@ -652,6 +658,9 @@ def main():
     ap.add_argument("input_csv")
     ap.add_argument("output_csv")
     ap.add_argument("--flags-out", help="optional: also write the full review-flag details to this text file")
+    ap.add_argument("--no-grade-floor", action="store_true",
+                    help="leave Grade values exactly as they came in: no recoding up to LOWEST_GRADE_BUCKET "
+                         "and no grade flags (used for TC Kids reports, which group by Birthdate)")
     ap.add_argument("--period", choices=["auto", "month", "quarter"], default="auto",
                     help="force the reporting period instead of auto-detecting it from the week-column dates "
                          "(default: auto -- see the module docstring's PERIOD DETECTION section)")
@@ -673,7 +682,14 @@ def main():
           )
 
     records = merge_duplicates(rows, fixed_cols, week_cols, flags)
-    apply_anomaly_checks(records, flags)
+    grade_floor = not args.no_grade_floor
+    if not grade_floor:
+        # Duplicates are still merged the same way (first non-blank Grade
+        # kept); only the grade flags are dropped.
+        for key in ("grade_conflict", "grade_recoded", "grade_blank", "grade_unexpected"):
+            flags.pop(key, None)
+        print("Grade floor: off (--no-grade-floor) -- Grade values passed through unchanged, no grade flags.")
+    apply_anomaly_checks(records, flags, grade_floor=grade_floor)
     find_near_matches(records, flags)
 
     write_output(records, fixed_cols, week_cols, args.output_csv)
@@ -704,6 +720,8 @@ def main():
         ("first_timer_conflict", "Duplicates where only some rows were first-timers (kept as NOT first-timers)"),
         ("near_match", "Near-matches flagged (left as separate records, NOT merged)"),
     ]
+    if not grade_floor:
+        section_titles = [(key, title) for key, title in section_titles if key not in ("grade_conflict", "grade_recoded", "grade_blank", "grade_unexpected")]
     for key, title in section_titles:
         items = flags[key]
         lines.append(f"--- {title} ({len(items)}) ---")
