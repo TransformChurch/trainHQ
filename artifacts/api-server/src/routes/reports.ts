@@ -53,6 +53,7 @@ import {
 import { loadEngagementContext, readEngagementSettings, summarizeEngagement } from "../lib/engagement";
 import { loadRunLocations, parseRunLocations, runMetaWithLocations, type RunLocations } from "../lib/reportLocations";
 import { cleanupScriptArgs, isKidsEngine, KIDS_ENGINES } from "../lib/reportCleanup";
+import { masterEventIdsInRange, masterToken, readMasters, splitMasterTokens, type CheckinMaster } from "../lib/checkinMasters";
 
 const router: IRouter = Router();
 const storage = new ObjectStorageService();
@@ -699,6 +700,21 @@ function reportError(status: number, message: string): Error & { status: number 
 }
 
 export const MAX_JOINED_EVENTS = 10;
+export const MAX_MASTER_REPORT_EVENTS = 40;
+
+// A master's events that existed from (start, or 26 weeks back) or 13 weeks
+// before the end date (the trend chart), through the end date.
+async function expandMasters(masterIds: string[], startDate: string, endDate: string, userId: string): Promise<{ eventIds: string[]; names: string[] }> {
+  const state = await readMasters();
+  const masters = masterIds.map((id) => state.masters.find((master) => master.id === id));
+  if (masters.some((master) => !master)) throw reportError(404, "That Check-In master no longer exists.");
+  const trendStart = addDays(endDate, -7 * 13);
+  const since = startDate && startDate < trendStart ? startDate : startDate ? trendStart : addDays(endDate, -7 * 26);
+  const { listCheckInsEvents } = await import("./attendanceHistory");
+  const dated = await listCheckInsEvents(await getValidPlanningCenterAccessToken(userId)).catch(() => null);
+  const eventIds = [...new Set(masters.flatMap((master) => masterEventIdsInRange(master!, dated, since, addDays(endDate, 1))))];
+  return { eventIds, names: masters.map((master) => master!.name) };
+}
 
 // The Check-Ins event ids a prepare request asks for: `eventIds` (array or
 // comma-separated string) or the older single `eventId`; de-duplicated.
@@ -787,10 +803,18 @@ router.get("/events", requireToolAccess("reporting"), async (req, res) => {
       frequency: firstValue(event.attributes ?? {}, "frequency"),
       archived: isArchived,
     });
+    // Check-In masters first (id "master:<id>"); preparing a report expands
+    // them into their events.
+    const masters = (await readMasters().catch(() => ({ masters: [] as CheckinMaster[] }))).masters
+      .filter((master) => master.events.length)
+      .map((master) => ({ id: masterToken(master.id), name: master.name, frequency: "", archived: false, master: true, eventCount: master.events.length }));
     res.json([
-      ...active.data.map((event) => toOption(event, false)),
-      ...archived.data.filter((event) => !activeIds.has(event.id)).map((event) => toOption(event, true)),
-    ].sort((a, b) => a.name.localeCompare(b.name)));
+      ...masters,
+      ...[
+        ...active.data.map((event) => toOption(event, false)),
+        ...archived.data.filter((event) => !activeIds.has(event.id)).map((event) => toOption(event, true)),
+      ].sort((a, b) => a.name.localeCompare(b.name)),
+    ]);
   } catch (error) {
     sendError(req, res, error, "Failed to load Planning Center events");
   }
@@ -1385,14 +1409,28 @@ async function prepareCheckInsRun(
   progressId: string,
   log: ReportLog,
 ): Promise<PreparedReport> {
-  const eventIdList = parseEventIds(body);
-  const eventId = eventIdList.join(",");
-  if (!eventId || !endDate || !Number.isInteger(templateId)) {
+  const requestedIds = parseEventIds(body);
+  if (!requestedIds.length || !endDate || !Number.isInteger(templateId)) {
     throw reportError(400, "Select an event, template, and valid end date.");
   }
-  if (eventIdList.length > MAX_JOINED_EVENTS) {
+  const { eventIds: plainEventIds, masterIds } = splitMasterTokens(requestedIds);
+  if (plainEventIds.length > MAX_JOINED_EVENTS) {
     throw reportError(400, `Join at most ${MAX_JOINED_EVENTS} events in one report.`);
   }
+  // Check-In masters ("master:<id>", lib/checkinMasters.ts) become their
+  // events that existed around this report's dates (and the 13-week trend).
+  const masterNames: string[] = [];
+  let eventIdList = plainEventIds;
+  if (masterIds.length) {
+    const expanded = await expandMasters(masterIds, requestedStartDate, endDate, userId);
+    masterNames.push(...expanded.names);
+    eventIdList = [...new Set([...plainEventIds, ...expanded.eventIds])];
+    if (eventIdList.length - plainEventIds.length > MAX_MASTER_REPORT_EVENTS) {
+      throw reportError(400, `The master has ${expanded.eventIds.length} events in this period; at most ${MAX_MASTER_REPORT_EVENTS} can be joined. Pick a shorter period.`);
+    }
+    if (!eventIdList.length) throw reportError(404, "The Check-In master has no approved events in this period.");
+  }
+  const eventId = eventIdList.join(",");
 
   const { template, isSeason } = await loadTemplateForPrepare(templateId);
   const pullFields = normalizePullFields(template.pullFields);
@@ -1455,7 +1493,10 @@ async function prepareCheckInsRun(
     preparedEvents.push(data);
   }
   const combined = mergeEventData(preparedEvents);
-  const eventName = combined.eventName;
+  // A master's report is named after the master, not its 20 class events.
+  const eventName = masterNames.length
+    ? [...masterNames, ...loadedEvents.filter((event) => plainEventIds.includes(event.eventId)).map((event) => event.eventName)].join(" + ")
+    : combined.eventName;
 
   // Weeks with a Planning Center session but no attendee check-ins (a
   // break week) stay in the report as a 0 week -- shown as "0 (week off)"

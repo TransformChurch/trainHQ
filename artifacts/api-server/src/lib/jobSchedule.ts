@@ -17,10 +17,17 @@
 export const CHURCH_TIME_ZONE = "America/New_York";
 export const TICK_MINUTES = 15;
 
-export type FixedJobId = "people_sync" | "wiki_drive_sync" | "group_history_sync" | "checkins_history_sync" | "engagement_dashboard" | "scheduled_reports";
+export type FixedJobId = "people_sync" | "wiki_drive_sync" | "group_history_sync" | "checkins_history_sync" | "engagement_dashboard" | "scheduled_reports" | "checkin_masters_search";
 
 // weekday: 0 = Sunday ... 6 = Saturday; null = every day.
-export type EasternTime = { weekday: number | null; hour: number; minute: number };
+// monthDay "last": only on the last day of the month (weekday must be null).
+export type EasternTime = { weekday: number | null; hour: number; minute: number; monthDay?: "last" };
+
+// Is YYYY-MM-DD the last day of its month?
+export function isLastDayOfMonth(ymd: string): boolean {
+  const [year, month, day] = ymd.split("-").map(Number);
+  return new Date(Date.UTC(year, month - 1, day + 1)).getUTCDate() === 1;
+}
 
 export const FIXED_JOB_TIMES: Record<FixedJobId, EasternTime & { path: string; secret: "pulse" | "wiki" }> = {
   people_sync: { weekday: 1, hour: 1, minute: 0, path: "/api/people-sync/run-scheduled", secret: "pulse" },
@@ -33,6 +40,9 @@ export const FIXED_JOB_TIMES: Record<FixedJobId, EasternTime & { path: string; s
   // item, then emails the Engagement dashboard summary (routes/engagement.ts).
   engagement_dashboard: { weekday: 1, hour: 6, minute: 0, path: "/api/engagement/run-scheduled", secret: "pulse" },
   scheduled_reports: { weekday: null, hour: 8, minute: 0, path: "/api/scheduled-reports/run-scheduled", secret: "pulse" },
+  // Last day of each month, 9:00 PM: looks for new Check-Ins events matching
+  // each Check-In master's terms and emails admins to approve them.
+  checkin_masters_search: { weekday: null, monthDay: "last", hour: 21, minute: 0, path: "/api/checkin-masters/run-scheduled", secret: "pulse" },
 };
 
 export const WEEKLY_PULSE_PATH = "/api/weekly-pulse/run-scheduled";
@@ -109,6 +119,7 @@ export function dueJobs(instant: Date, pulseSlots: string[]): { fixed: FixedJobI
   const slot = slotKey(now.weekday, now.hour, now.minute);
   const fixed = (Object.keys(FIXED_JOB_TIMES) as FixedJobId[]).filter((id) => {
     const job = FIXED_JOB_TIMES[id];
+    if (job.monthDay === "last" && !isLastDayOfMonth(now.ymd)) return false;
     return (job.weekday === null || job.weekday === now.weekday) && slotKey(now.weekday, job.hour, job.minute) === slot;
   });
   return { fixed, pulseSlot: pulseSlots.includes(slot) ? slot : null };
@@ -132,12 +143,14 @@ export function lastEasternOccurrence(times: EasternTime[], now: Date): Date | n
   let best: Date | null = null;
   const today = easternParts(now);
   const [year, month, day] = today.ymd.split("-").map(Number);
-  for (let back = 0; back <= 7; back += 1) {
+  const maxBack = times.some((time) => time.monthDay === "last") ? 32 : 7;
+  for (let back = 0; back <= maxBack; back += 1) {
     const date = new Date(Date.UTC(year, month - 1, day - back));
     const ymd = date.toISOString().slice(0, 10);
     const weekday = date.getUTCDay();
     for (const time of times) {
       if (time.weekday !== null && time.weekday !== weekday) continue;
+      if (time.monthDay === "last" && !isLastDayOfMonth(ymd)) continue;
       const candidate = easternToUtc(ymd, time.hour, time.minute);
       if (candidate.getTime() <= now.getTime() && (!best || candidate > best)) best = candidate;
     }

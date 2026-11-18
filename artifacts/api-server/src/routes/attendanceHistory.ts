@@ -38,6 +38,7 @@ import { logger } from "../lib/logger";
 import { getValidPlanningCenterAccessToken } from "../lib/planningCenter";
 import { authorizeScheduledCall, autoSyncOutcome, recordScheduledJob } from "../lib/scheduledJobs";
 import { groupActiveInRange } from "./groupHistory";
+import { readMasters } from "../lib/checkinMasters";
 import {
   CHECK_INS_BASE,
   type JsonApiResource,
@@ -125,6 +126,32 @@ export function buildHistoryCsv(rows: {
     row.sessions,
   ]);
   return [header, ...lines].map((line) => line.map(csvCell).join(",")).join("\r\n") + "\r\n";
+}
+
+type CsvRow = Parameters<typeof buildHistoryCsv>[0][number];
+
+// One row per week for each Check-In master (lib/checkinMasters.ts): its
+// events' weekly numbers added together (someone at two of its events in the
+// same week counts twice, as in the report trend charts).
+export function masterHistoryRows(masters: { id: string; name: string; events: { id: string }[] }[], rows: CsvRow[]): CsvRow[] {
+  const result: CsvRow[] = [];
+  for (const master of masters) {
+    const ids = new Set(master.events.map((event) => event.id));
+    const byWeek = new Map<string, CsvRow>();
+    for (const row of rows) {
+      if (!ids.has(row.eventId)) continue;
+      const week = byWeek.get(row.weekStart) ?? {
+        eventName: `${master.name} (master)`, eventId: `master:${master.id}`, eventArchived: false,
+        weekStart: row.weekStart, weekEnd: row.weekEnd, uniqueAttendees: 0, totalCheckIns: 0, sessions: 0,
+      };
+      week.uniqueAttendees += row.uniqueAttendees;
+      week.totalCheckIns += row.totalCheckIns;
+      week.sessions += row.sessions;
+      byWeek.set(row.weekStart, week);
+    }
+    result.push(...[...byWeek.values()].sort((a, b) => a.weekStart.localeCompare(b.weekStart)));
+  }
+  return result;
 }
 
 export type CheckInsEvent = { id: string; name: string; archived: boolean; createdAt: string | null; archivedAt: string | null };
@@ -543,7 +570,8 @@ router.get("/summary", requireAdmin, async (req, res) => {
       lastWeek: sql<string | null>`max(${checkinsWeeklyHistoryTable.weekStart})`,
       lastFetchedAt: max(checkinsWeeklyHistoryTable.fetchedAt),
     }).from(checkinsWeeklyHistoryTable);
-    res.json(row);
+    const { masters } = await readMasters().catch(() => ({ masters: [] }));
+    res.json({ ...row, masters: masters.length });
   } catch (error) {
     sendError(req, res, error, "Failed to load attendance history summary");
   }
@@ -557,7 +585,8 @@ router.get("/history.csv", requireAdmin, async (req, res) => {
     res.setHeader("Content-Type", "text/csv; charset=utf-8");
     res.setHeader("Content-Disposition", `attachment; filename="attendance-history-by-week.csv"`);
     res.setHeader("Cache-Control", "no-store");
-    res.send("﻿" + buildHistoryCsv(rows));
+    const { masters } = await readMasters().catch(() => ({ masters: [] }));
+    res.send("﻿" + buildHistoryCsv([...masterHistoryRows(masters, rows), ...rows]));
   } catch (error) {
     sendError(req, res, error, "Failed to download attendance history");
   }

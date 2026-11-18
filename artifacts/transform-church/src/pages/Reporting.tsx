@@ -13,7 +13,8 @@ import { api, BASE } from "@/lib/toolApi";
 import { FIELD_OPTIONS, type AvailableField, type ReportFieldKey } from "@/lib/reportFields";
 import { defaultPeriodKind, formatRange, localToday, previousPeriod } from "@/lib/reportPeriods";
 
-type EventOption = { id: string; name: string; frequency: string; archived?: boolean };
+// master: a Check-In master (Tool Management > Database), id "master:<id>".
+type EventOption = { id: string; name: string; frequency: string; archived?: boolean; master?: boolean; eventCount?: number };
 type CleanupMode = "month_quarter" | "all_dates";
 // How a Monthly/Quarterly template picks its sessions: a whole calendar
 // month/quarter (default, so 4- and 5-week months both come out right), a
@@ -194,7 +195,7 @@ export default function Reporting() {
       const response = await api("/api/reports/events?archived=include");
       const rows = await response.json() as EventOption[];
       setEvents(rows);
-      const firstActive = rows.find((row) => !row.archived) ?? rows[0];
+      const firstActive = rows.find((row) => !row.archived && !row.master) ?? rows[0];
       setEventIds((current) => (current.length ? current : firstActive ? [firstActive.id] : []));
     } catch (error) {
       setEventsError(error instanceof Error ? error.message : "Could not load events.");
@@ -517,13 +518,15 @@ export default function Reporting() {
                       disabled={eventsLoading || !!eventsError}
                     />
                     {event.name}
+                    {event.master && <span className="rounded-full border px-1.5 text-xs text-muted-foreground">master · {event.eventCount} events</span>}
                     {event.archived && <span className="text-xs text-muted-foreground">archived</span>}
                   </label>
                 ))}
             </div>
             <p className="text-xs text-muted-foreground">
               Pick one event, or several to combine them into a single report (their sessions and people are pooled; sessions
-              on the same date share a column). Works best for events that meet on the same day.
+              on the same date share a column). Works best for events that meet on the same day. A master uses its approved events
+              that ran in the report's dates.
             </p>
           </div>
           )}

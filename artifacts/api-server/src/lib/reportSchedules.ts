@@ -59,7 +59,8 @@ export function parseScheduleInput(
   if (!name) return { error: "Give the schedule a name." };
   const templateId = Number(source.templateId);
   if (!Number.isInteger(templateId) || templateId <= 0) return { error: "Pick a report template." };
-  const eventIds = cleanIdList(source.eventIds, 10).filter((id) => /^\d{1,20}$/.test(id));
+  // Event ids, or "master:<id>" for a Check-In master (lib/checkinMasters.ts).
+  const eventIds = cleanIdList(source.eventIds, 10).filter((id) => /^\d{1,20}$/.test(id) || /^master:\d{1,9}$/.test(id));
   if (!eventIds.length) return { error: "Pick at least one event." };
   const eventNames = cleanIdList(source.eventNames, 10).map((name) => name.slice(0, 200));
   const frequency = source.frequency as ScheduleFrequency;

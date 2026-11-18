@@ -26,6 +26,7 @@ import toolAccessRouter from "./toolAccess";
 import peopleSyncRouter from "./peopleSync";
 import scheduledReportsRouter from "./scheduledReports";
 import engagementRouter from "./engagement";
+import checkinMastersRouter from "./checkinMasters";
 
 const router: IRouter = Router();
 
@@ -57,5 +58,6 @@ router.use("/tool-access", toolAccessRouter);
 router.use("/people-sync", peopleSyncRouter);
 router.use("/scheduled-reports", scheduledReportsRouter);
 router.use("/engagement", engagementRouter);
+router.use("/checkin-masters", checkinMastersRouter);
 
 export default router;

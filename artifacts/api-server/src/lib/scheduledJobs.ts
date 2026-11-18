@@ -29,7 +29,7 @@ import {
 } from "./jobSchedule";
 import { activePulseSendTimes } from "./pulseSchedule";
 
-export type ScheduledJobId = "weekly_pulse" | "group_history_sync" | "checkins_history_sync" | "wiki_drive_sync" | "people_sync" | "engagement_dashboard" | "scheduled_reports";
+export type ScheduledJobId = "weekly_pulse" | "group_history_sync" | "checkins_history_sync" | "wiki_drive_sync" | "people_sync" | "engagement_dashboard" | "scheduled_reports" | "checkin_masters_search";
 
 // When each job runs is defined once, in US Eastern time, in
 // lib/jobSchedule.ts (shared with the Worker); the Weekly Pulse's times are
@@ -50,6 +50,7 @@ export const SCHEDULED_JOBS: ScheduledJobDefinition[] = [
   { id: "engagement_dashboard", label: "Engagement dashboard sync + email", secretEnv: "WEEKLY_PULSE_RUN_SECRET", graceMinutes: 30 },
   { id: "weekly_pulse", label: "Weekly Pulse email", secretEnv: "WEEKLY_PULSE_RUN_SECRET", graceMinutes: 30 },
   { id: "wiki_drive_sync", label: "Wiki Drive sync", secretEnv: "WIKI_DRIVE_SYNC_RUN_SECRET", graceMinutes: 30 },
+  { id: "checkin_masters_search", label: "Check-In masters monthly search", secretEnv: "WEEKLY_PULSE_RUN_SECRET", graceMinutes: 30 },
 ];
 
 export type ScheduledJobResult = "running" | "ok" | "partial" | "skipped" | "error" | "rejected";
@@ -175,7 +176,7 @@ function jobTimes(id: ScheduledJobId, pulseTimes: PulseSendTime[]): EasternTime[
     });
   }
   const job = FIXED_JOB_TIMES[id];
-  return [{ weekday: job.weekday, hour: job.hour, minute: job.minute }];
+  return [{ weekday: job.weekday, hour: job.hour, minute: job.minute, monthDay: job.monthDay }];
 }
 
 // The most recent time this job should have fired at or before `now`
@@ -191,6 +192,7 @@ export function scheduleText(id: ScheduledJobId, pulseTimes: PulseSendTime[] = D
   const job = FIXED_JOB_TIMES[id];
   const when = formatEasternTime(job.hour, job.minute);
   if (id === "scheduled_reports") return `Daily check at ${when} Eastern`;
+  if (job.monthDay === "last") return `Last day of each month at ${when} Eastern`;
   return job.weekday === null ? `Daily at ${when} Eastern` : `${WEEKDAY_NAMES[job.weekday]}s at ${when} Eastern`;
 }
 

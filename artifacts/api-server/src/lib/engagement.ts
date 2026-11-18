@@ -217,7 +217,8 @@ export function resolveFieldKeys(saved: Partial<EngagementFieldKeys> | undefined
 
 // ── Settings (settings table, key "engagement_settings"; no migration) ─────
 
-export type TrackedItemKind = "checkins_event" | "group" | "group_type";
+// checkins_master: a Check-In master (lib/checkinMasters.ts); id = master id.
+export type TrackedItemKind = "checkins_event" | "group" | "group_type" | "checkins_master";
 // transform: counts toward the Transform part; tc_college: attending it
 // earns the TC College part (2026-11-10).
 export type TrackedItemRole = "transform" | "tc_college";
@@ -275,7 +276,7 @@ export type EngagementSettings = {
 export const DASHBOARD_WEEK_OPTIONS = [4, 8, 12, 26] as const;
 export const MAX_TRACKED_ITEMS = 30;
 const SETTINGS_KEY = "engagement_settings";
-const ITEM_KINDS: TrackedItemKind[] = ["checkins_event", "group", "group_type"];
+const ITEM_KINDS: TrackedItemKind[] = ["checkins_event", "group", "group_type", "checkins_master"];
 
 export function normalizeTrackedItems(raw: unknown): TrackedItem[] {
   const list = Array.isArray(raw) ? raw : [];

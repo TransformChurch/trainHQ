@@ -18,7 +18,7 @@ import { api } from "@/lib/toolApi";
 // (routes/engagement.ts).
 
 type Part = "formThrive" | "transform" | "serving" | "tcCollege" | "giving" | "leadership" | "serveClass";
-type Kind = "checkins_event" | "group" | "group_type";
+type Kind = "checkins_event" | "group" | "group_type" | "checkins_master";
 type Role = "transform" | "tc_college";
 type TrackedEvent = { id: string; name: string };
 type TrackedItem = { kind: Kind; id: string; name: string; role: Role; extraEvents?: TrackedEvent[] };
@@ -44,7 +44,7 @@ type SettingsResponse = {
   syncState: Record<string, { pulledFrom: string; lastSyncedAt: string } | null>;
   lastSync: SyncRun | null;
 };
-type Sources = { checkinsEvents: { id: string; name: string; archived?: boolean; archivedAt?: string | null }[]; groups: { id: string; name: string }[]; groupTypes: { id: string; name: string; description: string }[] };
+type Sources = { checkinsEvents: { id: string; name: string; archived?: boolean; archivedAt?: string | null }[]; groups: { id: string; name: string }[]; groupTypes: { id: string; name: string; description: string }[]; checkinMasters?: { id: string; name: string; eventCount: number }[] };
 
 const PARTS: { key: Part; label: string; help: string }[] = [
   { key: "formThrive", label: "Form / Thrive", help: "Thrive done, or any form submitted" },
@@ -61,7 +61,7 @@ const FIELD_ROWS: { key: "thrive" | "serveClass" | "lastServed"; label: string }
   { key: "lastServed", label: "Last Served" },
 ];
 const ROLE_LABEL: Record<Role, string> = { transform: "Transform", tc_college: "TC College" };
-const KIND_LABEL: Record<Kind, string> = { checkins_event: "Check-Ins event", group: "Group", group_type: "Group type (every group of this type)" };
+const KIND_LABEL: Record<Kind, string> = { checkins_event: "Check-Ins event", group: "Group", group_type: "Group type (every group of this type)", checkins_master: "Check-In master (approved events)" };
 const MAX_EVENTS_PER_ITEM = 20;
 const itemKeyOf = (item: Pick<TrackedItem, "kind" | "id">) => `${item.kind}:${item.id}`;
 const roleFor = (name: string): Role => (/college/i.test(name) ? "tc_college" : "transform");
@@ -138,7 +138,7 @@ export function EngagementSettingsCard() {
         .sort((a, b) => Number(!!a.archived) - Number(!!b.archived) || a.name.localeCompare(b.name))
         .slice(0, 150);
     }
-    const list = pickKind === "group" ? sources.groups : sources.groupTypes;
+    const list = pickKind === "group" ? sources.groups : pickKind === "checkins_master" ? sources.checkinMasters ?? [] : sources.groupTypes;
     const tracked = new Set(draft.dashboard.items.map((item) => `${item.kind}:${item.id}`));
     return list.filter((entry) => !tracked.has(`${pickKind}:${entry.id}`) && (!needle || entry.name.toLowerCase().includes(needle))).slice(0, 60);
   }, [sources, draft, pickKind, filter, showArchived]);
@@ -496,6 +496,7 @@ export function EngagementSettingsCard() {
                   <option value="group_type">Group type (recommended for seasonal groups)</option>
                   <option value="group">One group</option>
                   <option value="checkins_event">Check-Ins event</option>
+                  <option value="checkins_master">Check-In master (Tool Management › Database)</option>
                 </select>
               </div>
               <div className="min-w-[200px] flex-1 space-y-1">

@@ -9,6 +9,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { api, BASE } from "@/lib/toolApi";
+import { CheckinMastersCard } from "./CheckinMastersCard";
 import { FIELD_OPTIONS, type AvailableField, type ReportFieldKey } from "@/lib/reportFields";
 
 // The admin-only setup cards for the Reporting tool, shown on the Tool
@@ -907,6 +908,7 @@ export function DatabaseAdminCards() {
       <PeopleSyncCard />
       <AttendanceHistoryCard />
       <GroupHistoryCard />
+      <CheckinMastersCard />
       <CheckInCopyCard />
     </div>
   );
@@ -939,7 +941,7 @@ function eventActiveInRange(event: HistoryEvent, since: string, until: string): 
   return true;
 }
 type HistoryWeek = { weekStart: string; weekEnd: string; periodIds: string[] };
-type HistorySummary = { rows: number; events: number; firstWeek: string | null; lastWeek: string | null; lastFetchedAt: string | null };
+type HistorySummary = { rows: number; events: number; firstWeek: string | null; lastWeek: string | null; lastFetchedAt: string | null; masters?: number };
 
 function batchHistoryWeeks(weeks: HistoryWeek[]): HistoryWeek[][] {
   const batches: HistoryWeek[][] = [];
@@ -1228,7 +1230,7 @@ function AttendanceHistoryCard() {
       <CardContent className="space-y-4">
         <p className="text-sm text-muted-foreground">
           {summary && summary.rows > 0
-            ? `${summary.rows} event-weeks saved across ${summary.events} events (${summary.firstWeek} to ${summary.lastWeek}).`
+            ? `${summary.rows} event-weeks saved across ${summary.events} events (${summary.firstWeek} to ${summary.lastWeek}).${summary.masters ? ` The CSV also has a row per week for each of the ${summary.masters} Check-In master${summary.masters === 1 ? "" : "s"} (its events added together).` : ""}`
             : "No history pulled yet."}
         </p>
         <TimeframePicker selected={timeframe} onChange={setTimeframe} disabled={running} />
@@ -2420,7 +2422,7 @@ type ReportScheduleRow = {
 };
 type ScheduleDraft = { id: string | null; name: string; templateId: string; eventIds: string[]; recipients: string; frequency: ScheduleFrequency; enabled: boolean };
 type TemplateOption = { id: number; name: string; engine: string | null };
-type ScheduleEventOption = { id: string; name: string };
+type ScheduleEventOption = { id: string; name: string; master?: boolean; eventCount?: number };
 
 const FREQUENCY_LABEL: Record<ScheduleFrequency, string> = {
   week: "Weekly (Mondays)",
@@ -2636,6 +2638,7 @@ function ScheduledReportsCard() {
                           })}
                         />
                         {event.name}
+                        {event.master && <span className="rounded-full border px-1.5 text-xs text-muted-foreground">master · {event.eventCount} events</span>}
                       </label>
                     ))}
                   </div>

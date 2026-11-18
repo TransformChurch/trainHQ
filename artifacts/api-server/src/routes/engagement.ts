@@ -47,6 +47,7 @@ import { getValidPlanningCenterAccessToken } from "../lib/planningCenter";
 import { logger } from "../lib/logger";
 import { fetchCollection, firstValue, parseReportRecipients, text, type JsonApiResource } from "./reports";
 import { listCheckInsEvents } from "./attendanceHistory";
+import { readMasters } from "../lib/checkinMasters";
 import { listGroups } from "./groupHistory";
 
 const router: IRouter = Router();
@@ -102,6 +103,7 @@ export async function buildDashboard(weeks: number, now: Date = new Date()): Pro
   const earliest = addDays(lastWeek, -7 * (Math.max(TREND_POINTS, 2 * weeks) + weeks));
   const synced = await syncedFields();
   const state = await readSyncState();
+  const masterList = items.some((item) => item.kind === "checkins_master") ? (await readMasters()).masters : [];
 
   const weekRows = items.length
     ? await db.select().from(engagementWeeksTable).where(gte(engagementWeeksTable.weekStart, earliest))
@@ -132,7 +134,9 @@ export async function buildDashboard(weeks: number, now: Date = new Date()): Pro
     id: item.id,
     name: item.name,
     role: item.role,
-    eventCount: item.kind === "checkins_event" ? 1 + (item.extraEvents?.length ?? 0) : undefined,
+    eventCount: item.kind === "checkins_event"
+      ? 1 + (item.extraEvents?.length ?? 0)
+      : item.kind === "checkins_master" ? masterList.find((master) => master.id === item.id)?.events.length ?? 0 : undefined,
     current: windowMetrics(rows, presence, window, context),
     previous: windowMetrics(rows, presence, previousWindow, context),
     trend: trendSeries(rows, presence, lastWeek, weeks, TREND_POINTS),
@@ -355,7 +359,8 @@ router.get("/sources", requireAdmin, async (req, res) => {
   try {
     const accessToken = await getValidPlanningCenterAccessToken(res.locals.dbUser.id);
     const settings = await readEngagementSettings();
-    const trackedEventIds = new Set(settings.dashboard.items.flatMap(itemEventIds));
+    const trackedEventIds = new Set(settings.dashboard.items.filter((item) => item.kind === "checkins_event").flatMap(itemEventIds));
+    const masters = await readMasters();
     const [events, groups, types] = await Promise.all([
       listCheckInsEvents(accessToken).catch(() => []),
       listGroups(accessToken).catch(() => []),
@@ -369,6 +374,7 @@ router.get("/sources", requireAdmin, async (req, res) => {
         .filter((event) => archivedEventInWindow(event) || trackedEventIds.has(event.id))
         .map((event) => ({ id: event.id, name: event.name, archived: event.archived, archivedAt: event.archivedAt })),
       groups: groups.filter((group) => !group.archived).map((group) => ({ id: group.id, name: group.name })),
+      checkinMasters: masters.masters.map((master) => ({ id: master.id, name: master.name, eventCount: master.events.length })),
       groupTypes: types.data.filter((type) => type.id).map((type) => ({
         id: type.id,
         name: firstValue(type.attributes ?? {}, "name") || `Group type ${type.id}`,
