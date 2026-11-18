@@ -50,7 +50,7 @@ export const SCHEDULED_JOBS: ScheduledJobDefinition[] = [
   { id: "engagement_dashboard", label: "Engagement dashboard sync + email", secretEnv: "WEEKLY_PULSE_RUN_SECRET", graceMinutes: 30 },
   { id: "weekly_pulse", label: "Weekly Pulse email", secretEnv: "WEEKLY_PULSE_RUN_SECRET", graceMinutes: 30 },
   { id: "wiki_drive_sync", label: "Wiki Drive sync", secretEnv: "WIKI_DRIVE_SYNC_RUN_SECRET", graceMinutes: 30 },
-  { id: "checkin_masters_search", label: "Check-In masters monthly search", secretEnv: "WEEKLY_PULSE_RUN_SECRET", graceMinutes: 30 },
+  { id: "checkin_masters_search", label: "Masters monthly search (Check-Ins + groups)", secretEnv: "WEEKLY_PULSE_RUN_SECRET", graceMinutes: 30 },
 ];
 
 export type ScheduledJobResult = "running" | "ok" | "partial" | "skipped" | "error" | "rejected";

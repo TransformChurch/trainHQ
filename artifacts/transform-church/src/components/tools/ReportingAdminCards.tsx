@@ -1495,7 +1495,7 @@ async function apiWithRetry(path: string, options: RequestInit | undefined, onWa
   }
 }
 type GroupHistoryWeek = { weekStart: string; weekEnd: string; meetingIds: string[] };
-type GroupHistorySummary = { rows: number; groups: number; firstWeek: string | null; lastWeek: string | null; lastFetchedAt: string | null };
+type GroupHistorySummary = { rows: number; groups: number; firstWeek: string | null; lastWeek: string | null; lastFetchedAt: string | null; masters?: number };
 
 function batchGroupWeeks(weeks: GroupHistoryWeek[]): GroupHistoryWeek[][] {
   const batches: GroupHistoryWeek[][] = [];
@@ -1664,7 +1664,7 @@ function GroupHistoryCard() {
       <CardContent className="space-y-4">
         <p className="text-sm text-muted-foreground">
           {summary && summary.rows > 0
-            ? `${summary.rows} group-weeks saved across ${summary.groups} groups (${summary.firstWeek} to ${summary.lastWeek}).`
+            ? `${summary.rows} group-weeks saved across ${summary.groups} groups (${summary.firstWeek} to ${summary.lastWeek}).${summary.masters ? ` The CSV also has a row per week for each of the ${summary.masters} group master${summary.masters === 1 ? "" : "s"} (its groups added together).` : ""}`
             : "No group history pulled yet."}
         </p>
         <TimeframePicker selected={timeframe} onChange={setTimeframe} disabled={running} />

@@ -7,7 +7,9 @@ import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { api } from "@/lib/toolApi";
 
-// Tool Management > Database: Check-In masters (routes/checkinMasters.ts).
+// Tool Management > Database: masters (routes/checkinMasters.ts). Kind
+// "checkins" joins Check-Ins events; kind "groups" joins Planning Center
+// groups (e.g. every season's running group).
 // A master joins many Check-Ins events (e.g. every Thrive class) so the
 // Engagement dashboard, Check-Ins reports and Attendance history can treat
 // them as one. At the end of each month a search finds new events matching
@@ -15,8 +17,10 @@ import { api } from "@/lib/toolApi";
 
 type MasterEvent = { id: string; name: string };
 type PendingEvent = MasterEvent & { foundAt: string; archived: boolean };
+type Kind = "checkins" | "groups";
 type Master = {
   id: string;
+  kind: Kind;
   name: string;
   includeTerms: string[];
   excludeTerms: string[];
@@ -27,7 +31,9 @@ type Master = {
 };
 type SearchRun = { startedAt: string; finishedAt: string | null; trigger: string; status: string; found: { masterName: string; events: MasterEvent[] }[]; emailedTo: string[]; message?: string };
 type PreviewEvent = { id: string; name: string; archived: boolean; createdAt: string | null; archivedAt: string | null; inMaster: string | null };
-type Draft = { id: string | null; name: string; include: string; exclude: string; events: MasterEvent[] };
+type Draft = { id: string | null; kind: Kind; name: string; include: string; exclude: string; events: MasterEvent[] };
+const noun = (kind: Kind, count = 2) => (kind === "groups" ? (count === 1 ? "group" : "groups") : (count === 1 ? "event" : "events"));
+const KIND_TITLE: Record<Kind, string> = { checkins: "Check-In master", groups: "Group master" };
 
 const terms = (value: string) => value.split(",").map((term) => term.trim()).filter(Boolean);
 const shortDate = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString() : "");
@@ -59,9 +65,9 @@ export function CheckinMastersCard() {
   };
   useEffect(() => { load(); }, []);
 
-  const startNew = () => {
+  const startNew = (kind: Kind) => {
     setOpen("new");
-    setDraft({ id: null, name: "", include: "", exclude: "", events: [] });
+    setDraft({ id: null, kind, name: "", include: "", exclude: "", events: [] });
     setPreview(null);
     setEventFilter("");
   };
@@ -72,7 +78,7 @@ export function CheckinMastersCard() {
       return;
     }
     setOpen(master.id);
-    setDraft({ id: master.id, name: master.name, include: master.includeTerms.join(", "), exclude: master.excludeTerms.join(", "), events: master.events });
+    setDraft({ id: master.id, kind: master.kind, name: master.name, include: master.includeTerms.join(", "), exclude: master.excludeTerms.join(", "), events: master.events });
     setPreview(null);
     setEventFilter("");
   };
@@ -83,7 +89,7 @@ export function CheckinMastersCard() {
     try {
       const response = await api("/api/checkin-masters/preview", {
         method: "POST",
-        body: JSON.stringify({ includeTerms: terms(draft.include), excludeTerms: terms(draft.exclude) }),
+        body: JSON.stringify({ kind: draft.kind, includeTerms: terms(draft.include), excludeTerms: terms(draft.exclude) }),
       });
       const data = await response.json() as { events: PreviewEvent[] };
       setPreview(data.events);
@@ -92,7 +98,7 @@ export function CheckinMastersCard() {
         setDraft({ ...draft, events: data.events.filter((event) => !event.inMaster).map(({ id, name }) => ({ id, name })) });
       }
     } catch (error) {
-      toast({ title: "Could not search events", description: error instanceof Error ? error.message : "Request failed.", variant: "destructive" });
+      toast({ title: `Could not search ${noun(draft.kind)}`, description: error instanceof Error ? error.message : "Request failed.", variant: "destructive" });
     } finally {
       setPreviewing(false);
     }
@@ -106,14 +112,14 @@ export function CheckinMastersCard() {
     }
     setSaving(true);
     try {
-      const body = JSON.stringify({ name: draft.name, includeTerms: terms(draft.include), excludeTerms: terms(draft.exclude), events: draft.events });
+      const body = JSON.stringify({ kind: draft.kind, name: draft.name, includeTerms: terms(draft.include), excludeTerms: terms(draft.exclude), events: draft.events });
       const response = draft.id
         ? await api(`/api/checkin-masters/${draft.id}`, { method: "PUT", body })
         : await api("/api/checkin-masters", { method: "POST", body });
       const data = await response.json() as { master: Master };
-      toast({ title: "Master saved", description: `${data.master.name}: ${data.master.events.length} events.` });
+      toast({ title: "Master saved", description: `${data.master.name}: ${data.master.events.length} ${noun(data.master.kind, data.master.events.length)}.` });
       setOpen(data.master.id);
-      setDraft({ id: data.master.id, name: data.master.name, include: data.master.includeTerms.join(", "), exclude: data.master.excludeTerms.join(", "), events: data.master.events });
+      setDraft({ id: data.master.id, kind: data.master.kind, name: data.master.name, include: data.master.includeTerms.join(", "), exclude: data.master.excludeTerms.join(", "), events: data.master.events });
       setPreview(null);
       await load();
     } catch (error) {
@@ -124,7 +130,7 @@ export function CheckinMastersCard() {
   };
 
   const remove = async (master: Master) => {
-    if (!window.confirm(`Delete "${master.name}"? Its events stay in Planning Center; dashboard cards and scheduled reports using it will stop working.`)) return;
+    if (!window.confirm(`Delete "${master.name}"? Its ${noun(master.kind)} stay in Planning Center; dashboard cards and scheduled reports using it will stop working.`)) return;
     try {
       await api(`/api/checkin-masters/${master.id}`, { method: "DELETE" });
       setOpen(null);
@@ -143,7 +149,7 @@ export function CheckinMastersCard() {
         body: JSON.stringify(all ? { all: true } : { eventIds }),
       });
       const count = all ? master.pending.length : eventIds.length;
-      toast({ title: approve ? `${count} event${count === 1 ? "" : "s"} added to ${master.name}` : `${count} event${count === 1 ? "" : "s"} dismissed` });
+      toast({ title: approve ? `${count} ${noun(master.kind, count)} added to ${master.name}` : `${count} ${noun(master.kind, count)} dismissed` });
       setPendingPick({ ...pendingPick, [master.id]: [] });
       await load();
       if (draft?.id === master.id) setOpen(null);
@@ -177,27 +183,27 @@ export function CheckinMastersCard() {
       <div className="grid gap-3 sm:grid-cols-3">
         <div className="space-y-1">
           <Label htmlFor="master-name">Name</Label>
-          <Input id="master-name" value={draft.name} placeholder="Thrive Master" onChange={(event) => setDraft({ ...draft, name: event.target.value })} />
+          <Input id="master-name" value={draft.name} placeholder={draft.kind === "groups" ? "Running Group Master" : "Thrive Master"} onChange={(event) => setDraft({ ...draft, name: event.target.value })} />
         </div>
         <div className="space-y-1">
-          <Label htmlFor="master-include">Event name contains any of</Label>
-          <Input id="master-include" value={draft.include} placeholder="Thrive" onChange={(event) => setDraft({ ...draft, include: event.target.value })} />
+          <Label htmlFor="master-include">{draft.kind === "groups" ? "Group" : "Event"} name contains any of</Label>
+          <Input id="master-include" value={draft.include} placeholder={draft.kind === "groups" ? "Running" : "Thrive"} onChange={(event) => setDraft({ ...draft, include: event.target.value })} />
         </div>
         <div className="space-y-1">
           <Label htmlFor="master-exclude">But none of</Label>
           <Input id="master-exclude" value={draft.exclude} placeholder="Leader, Test" onChange={(event) => setDraft({ ...draft, exclude: event.target.value })} />
         </div>
       </div>
-      <p className="text-xs text-muted-foreground">Separate terms with commas. Not case-sensitive. The monthly search uses these terms to suggest new events.</p>
+      <p className="text-xs text-muted-foreground">{KIND_TITLE[draft.kind]}. Separate terms with commas. Not case-sensitive. The monthly search uses these terms to suggest new {noun(draft.kind)}.</p>
       <div className="flex flex-wrap gap-2">
         <Button size="sm" variant="outline" onClick={runPreview} disabled={previewing || !terms(draft.include).length}>
-          {previewing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Search className="mr-2 h-4 w-4" />} Find matching events
+          {previewing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Search className="mr-2 h-4 w-4" />} Find matching {noun(draft.kind)}
         </Button>
-        <span className="self-center text-sm">{draft.events.length} event{draft.events.length === 1 ? "" : "s"} in this master</span>
+        <span className="self-center text-sm">{draft.events.length} {noun(draft.kind, draft.events.length)} in this master</span>
       </div>
       {preview && (
         <div className="space-y-1">
-          <p className="text-sm font-medium">{preview.length} matching event{preview.length === 1 ? "" : "s"} (current and archived). Checked ones are in the master.</p>
+          <p className="text-sm font-medium">{preview.length} matching {noun(draft.kind, preview.length)} (current and archived). Checked ones are in the master.</p>
           <div className="max-h-72 space-y-0.5 overflow-y-auto rounded border bg-background p-1">
             {preview.map((event) => {
               const elsewhere = event.inMaster && event.inMaster !== draft.name && !draftIds.has(event.id);
@@ -218,7 +224,7 @@ export function CheckinMastersCard() {
       )}
       {draft.id && draft.events.length > 0 && !preview && (
         <div className="space-y-1">
-          <Input value={eventFilter} placeholder="Filter this master's events…" onChange={(event) => setEventFilter(event.target.value)} className="h-8" />
+          <Input value={eventFilter} placeholder={`Filter this master's ${noun(draft.kind)}…`} onChange={(event) => setEventFilter(event.target.value)} className="h-8" />
           <div className="max-h-56 space-y-0.5 overflow-y-auto rounded border bg-background p-1">
             {draft.events.filter((event) => !eventFilter || event.name.toLowerCase().includes(eventFilter.toLowerCase())).map((event) => (
               <div key={event.id} className="flex items-center justify-between gap-2 rounded px-2 py-1 text-sm hover:bg-muted">
@@ -243,11 +249,12 @@ export function CheckinMastersCard() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="flex items-center gap-2"><Layers className="h-5 w-5" /> Check-In masters</CardTitle>
+        <CardTitle className="flex items-center gap-2"><Layers className="h-5 w-5" /> Masters</CardTitle>
         <p className="text-sm text-muted-foreground">
-          Join many Check-Ins events into one master, like every Thrive class into "Thrive Master". Masters can be picked on the Engagement
-          dashboard and in Check-Ins reports, and appear as their own rows in the Attendance history CSV. On the last day of each month
-          (9 PM) a search looks for new events matching each master's terms and emails admins to approve them.
+          Join many Check-Ins events into one Check-In master (every Thrive class into "Thrive Master"), or many Planning Center groups
+          into one group master (every season's running group). Masters can be picked on the Engagement dashboard and in reports
+          (Check-Ins or Groups), and get their own rows in the attendance history CSVs. On the last day of each month (9 PM) a search
+          looks for new events and groups matching each master's terms and emails admins to approve them.
         </p>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -266,7 +273,7 @@ export function CheckinMastersCard() {
                         {master.name} {open === master.id ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                       </p>
                       <p className="text-xs text-muted-foreground">
-                        {master.events.length} events · contains "{master.includeTerms.join('", "')}"{master.excludeTerms.length ? `, not "${master.excludeTerms.join('", "')}"` : ""}
+                        {KIND_TITLE[master.kind]} · {master.events.length} {noun(master.kind, master.events.length)} · contains "{master.includeTerms.join('", "')}"{master.excludeTerms.length ? `, not "${master.excludeTerms.join('", "')}"` : ""}
                       </p>
                     </button>
                     <div className="flex items-center gap-2">
@@ -278,7 +285,7 @@ export function CheckinMastersCard() {
                   </div>
                   {master.pending.length > 0 && (
                     <div className="space-y-2 rounded-md border border-amber-300 p-2">
-                      <p className="text-sm font-medium">New matching events</p>
+                      <p className="text-sm font-medium">New matching {noun(master.kind)}</p>
                       <div className="max-h-48 space-y-0.5 overflow-y-auto">
                         {master.pending.map((event) => (
                           <label key={event.id} className="flex cursor-pointer items-center justify-between gap-2 rounded px-2 py-1 text-sm hover:bg-muted">
@@ -306,16 +313,17 @@ export function CheckinMastersCard() {
         )}
         {open === "new" && editor}
         <div className="flex flex-wrap items-center gap-2 border-t pt-4">
-          <Button variant="outline" onClick={startNew} disabled={open === "new"}><Plus className="mr-2 h-4 w-4" /> New master</Button>
+          <Button variant="outline" onClick={() => startNew("checkins")} disabled={open === "new"}><Plus className="mr-2 h-4 w-4" /> New Check-In master</Button>
+          <Button variant="outline" onClick={() => startNew("groups")} disabled={open === "new"}><Plus className="mr-2 h-4 w-4" /> New group master</Button>
           <Button variant="outline" onClick={searchNow} disabled={searching || !masters?.length}>
-            {searching ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Search className="mr-2 h-4 w-4" />} Search for new events now
+            {searching ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Search className="mr-2 h-4 w-4" />} Search for new matches now
           </Button>
         </div>
         <p className="text-xs text-muted-foreground">
           {lastRun
             ? `Last search ${new Date(lastRun.startedAt).toLocaleString()} (${lastRun.trigger}): ${lastRun.message ?? lastRun.status}${lastRun.emailedTo.length ? ` Emailed ${lastRun.emailedTo.length} admin${lastRun.emailedTo.length === 1 ? "" : "s"}.` : ""}`
             : "No search has run yet."}
-          {" "}New events are never counted until approved, and dismissed ones aren't suggested again.
+          {" "}New matches are never counted until approved, and dismissed ones aren't suggested again.
         </p>
       </CardContent>
     </Card>

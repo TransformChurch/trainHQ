@@ -16,6 +16,8 @@
 //  - checkins_master: a Check-In master's approved events (lib/checkinMasters.ts),
 //    pulled like a combined Check-Ins item; only events that existed in the
 //    pull window are visited. Approving new events re-pulls the backfill.
+//  - group_master: a group master's approved groups, pulled like a group type
+//    (only groups that existed in the window); approvals re-pull too.
 //  - group / group_type: Groups attendance per meeting; present = not marked
 //    absent (lib/groupAttendance.ts rule). A group type covers every group of
 //    that type that existed during the week, so tracking survives groups
@@ -34,7 +36,7 @@ import { takePeopleSnapshot } from "./engagementPeople";
 import { syncFormSubmissions } from "./engagementForms";
 import { masterEventIdsInRange, readMasters, type DatedEvent } from "./checkinMasters";
 import { listCheckInsEvents } from "../routes/attendanceHistory";
-import { groupActiveInRange, listGroupWeeks } from "../routes/groupHistory";
+import { groupActiveInRange, listGroups, listGroupWeeks } from "../routes/groupHistory";
 
 const GROUPS_BASE = "https://api.planningcenteronline.com/groups/v2";
 export const REFRESH_WEEKS = 3;
@@ -198,7 +200,7 @@ async function groupsOfType(accessToken: string, groupTypeId: string, since: str
 }
 
 async function saveWeeks(item: TrackedItem, weeks: PulledWeek[]): Promise<number> {
-  const isGroups = item.kind === "group" || item.kind === "group_type";
+  const isGroups = item.kind === "group" || item.kind === "group_type" || item.kind === "group_master";
   // Everyone seen for this item before each week, for groups' "new" rule.
   const history = isGroups
     ? await db.select({ weekStart: engagementAttendanceTable.weekStart, personId: engagementAttendanceTable.personId })
@@ -273,7 +275,7 @@ async function prune(items: TrackedItem[], thisWeek: string): Promise<void> {
   for (const table of [engagementWeeksTable, engagementAttendanceTable] as const) {
     await db.delete(table).where(lt(table.weekStart, cutoff));
   }
-  const kinds = ["checkins_event", "group", "group_type", "checkins_master"] as const;
+  const kinds = ["checkins_event", "group", "group_type", "checkins_master", "group_master"] as const;
   for (const kind of kinds) {
     const ids = items.filter((item) => item.kind === kind).map((item) => item.id);
     for (const table of [engagementWeeksTable, engagementAttendanceTable] as const) {
@@ -319,18 +321,21 @@ export async function runEngagementSync(
       });
     }
     // Check-In masters and the Check-Ins event dates, loaded once if needed.
-    const masters = items.some((item) => item.kind === "checkins_master") ? await readMasters() : null;
+    const masters = items.some((item) => item.kind === "checkins_master" || item.kind === "group_master") ? await readMasters() : null;
     let datedEvents: DatedEvent[] | null = null;
+    let datedGroups: DatedEvent[] | null = null;
     for (const item of items) {
       try {
         const accessToken = await getToken(settings.dashboard.ownerUserId);
         const isCheckins = item.kind === "checkins_event" || item.kind === "checkins_master";
-        const master = item.kind === "checkins_master" ? masters?.masters.find((entry) => entry.id === item.id) : null;
-        if (item.kind === "checkins_master" && !master) throw new Error("This Check-In master was deleted.");
+        const isMaster = item.kind === "checkins_master" || item.kind === "group_master";
+        const wantKind = item.kind === "group_master" ? "groups" : "checkins";
+        const master = isMaster ? masters?.masters.find((entry) => entry.id === item.id && entry.kind === wantKind) : null;
+        if (isMaster && !master) throw new Error("This master was deleted.");
         const eventIds = master ? master.events.map((event) => event.id) : itemEventIds(item);
         const prior = state.items[itemKey(item)];
-        // A changed event list re-pulls the backfill so every week is merged.
-        const repull = isCheckins && prior && eventsChanged(prior.events, eventIds);
+        // A changed event / group list re-pulls the backfill so every week is merged.
+        const repull = (isCheckins || isMaster) && prior && eventsChanged(prior.events, eventIds);
         const from = syncFrom(repull ? undefined : prior?.pulledFrom, thisWeek);
         let weeks: PulledWeek[];
         if (isCheckins) {
@@ -343,6 +348,9 @@ export async function runEngagementSync(
           const lists: PulledWeek[][] = [];
           for (const eventId of pullIds) lists.push(await pullCheckinsEvent(accessToken, eventId, from, delayMs));
           weeks = mergeEventWeeks(lists);
+        } else if (master) {
+          datedGroups ??= await listGroups(accessToken).catch(() => null);
+          weeks = await pullGroups(accessToken, masterEventIdsInRange(master, datedGroups, from, addDays(thisWeek, 7)), from, delayMs);
         } else {
           weeks = await pullGroups(accessToken, item.kind === "group" ? [item.id] : await groupsOfType(accessToken, item.id, from), from, delayMs);
         }
@@ -353,7 +361,7 @@ export async function runEngagementSync(
         state.items[itemKey(item)] = {
           pulledFrom: previous && previous < from ? previous : from,
           lastSyncedAt: new Date().toISOString(),
-          ...(isCheckins ? { events: eventsSignature(eventIds) } : {}),
+          ...(isCheckins || isMaster ? { events: eventsSignature(eventIds) } : {}),
         };
       } catch (error) {
         const typed = error as Error & { status?: number };

@@ -1,5 +1,5 @@
-// Check-In masters (lib/checkinMasters.ts), managed in Tool Management >
-// Database.
+// Check-In masters and group masters (lib/checkinMasters.ts; kind
+// "checkins" or "groups"), managed in Tool Management > Database.
 //
 //   GET    /api/checkin-masters                  (admin) masters + last search
 //   GET    /api/checkin-masters/events           (admin) every Check-Ins event, for picking
@@ -37,6 +37,13 @@ import {
   type MastersState,
 } from "../lib/checkinMasters";
 import { listCheckInsEvents, type CheckInsEvent } from "./attendanceHistory";
+import { listGroups, type GroupInfo } from "./groupHistory";
+import type { MasterKind } from "../lib/checkinMasters";
+
+const kindOf = (value: unknown): MasterKind => (value === "groups" ? "groups" : "checkins");
+async function listFor(kind: MasterKind, accessToken: string): Promise<(CheckInsEvent | GroupInfo)[]> {
+  return kind === "groups" ? listGroups(accessToken) : listCheckInsEvents(accessToken);
+}
 
 const router: IRouter = Router();
 
@@ -63,7 +70,7 @@ router.get("/", requireAdmin, async (req, res) => {
 
 router.get("/events", requireAdmin, async (req, res) => {
   try {
-    res.json(await listCheckInsEvents(await getValidPlanningCenterAccessToken(res.locals.dbUser.id)));
+    res.json(await listFor(kindOf(req.query.kind), await getValidPlanningCenterAccessToken(res.locals.dbUser.id)));
   } catch (error) {
     sendError(req, res, error, "Failed to load Check-Ins events");
   }
@@ -79,12 +86,13 @@ router.post("/preview", requireAdmin, async (req, res) => {
       res.json({ events: [] });
       return;
     }
+    const kind = kindOf(req.body?.kind);
     const [events, state] = await Promise.all([
-      listCheckInsEvents(await getValidPlanningCenterAccessToken(res.locals.dbUser.id)),
+      listFor(kind, await getValidPlanningCenterAccessToken(res.locals.dbUser.id)),
       readMasters(),
     ]);
     const owner = new Map<string, string>();
-    for (const master of state.masters) for (const event of master.events) owner.set(event.id, master.name);
+    for (const master of state.masters.filter((entry) => entry.kind === kind)) for (const event of master.events) owner.set(event.id, master.name);
     res.json({
       events: events
         .filter((event) => matchesTerms(event.name, includeTerms, excludeTerms))
@@ -120,7 +128,7 @@ router.post("/", requireAdmin, async (req, res) => {
     }
     const now = new Date().toISOString();
     const master: CheckinMaster = {
-      id: String(state.nextId), name: "", includeTerms: [], excludeTerms: [], events: [], pending: [], dismissedIds: [], createdAt: now, updatedAt: now,
+      id: String(state.nextId), kind: kindOf(req.body?.kind), name: "", includeTerms: [], excludeTerms: [], events: [], pending: [], dismissedIds: [], createdAt: now, updatedAt: now,
     };
     const problem = applyEdits(master, { events: [], ...req.body });
     if (!master.name) master.name = master.includeTerms[0] ? `${master.includeTerms[0]} Master` : `Master ${master.id}`;
@@ -211,14 +219,14 @@ router.post("/:id/dismiss", requireAdmin, async (req, res) => {
 export function approvalEmailHtml(found: MasterSearchRun["found"], link: string): string {
   const total = found.reduce((sum, entry) => sum + entry.events.length, 0);
   const sections = found.map((entry) => `
-<h3 style="margin:20px 0 6px;font-size:16px;">${escape(entry.masterName)} &middot; ${entry.events.length} new</h3>
+<h3 style="margin:20px 0 6px;font-size:16px;">${escape(entry.masterName)} &middot; ${entry.events.length} new ${entry.kind === "groups" ? `group${entry.events.length === 1 ? "" : "s"}` : `event${entry.events.length === 1 ? "" : "s"}`}</h3>
 <ul style="margin:0;padding-left:20px;">${entry.events.map((event) => `<li>${escape(event.name)}</li>`).join("")}</ul>`).join("");
   return brandEmailHtml(`
-<h2 style="margin:0 0 8px;font-size:20px;">Check-In events waiting for approval</h2>
-<p style="margin:0;">The monthly search found ${total} new Check-Ins event${total === 1 ? "" : "s"} matching your Check-In masters. They aren't counted until an admin approves them.</p>
+<h2 style="margin:0 0 8px;font-size:20px;">Masters: new matches waiting for approval</h2>
+<p style="margin:0;">The monthly search found ${total} new Check-Ins event${total === 1 ? "" : "s"} or group${total === 1 ? "" : "s"} matching your masters. They aren't counted until an admin approves them.</p>
 ${sections}
 ${emailButton("Review in Tool Management", link)}
-<p style="margin:0;font-size:13px;color:#6b7280;">Tool Management &rsaquo; Database &rsaquo; Check-In masters. Approve or dismiss each event; dismissed events aren't suggested again.</p>`);
+<p style="margin:0;font-size:13px;color:#6b7280;">Tool Management &rsaquo; Database &rsaquo; Masters. Approve or dismiss each one; dismissed ones aren't suggested again.</p>`);
 }
 
 async function adminEmails(): Promise<string[]> {
@@ -228,7 +236,13 @@ async function adminEmails(): Promise<string[]> {
 
 let searching = false;
 
-export async function runMasterSearch(trigger: MasterSearchRun["trigger"], userId: string | null, now: Date = new Date(), listEvents: (token: string) => Promise<CheckInsEvent[]> = listCheckInsEvents): Promise<MasterSearchRun> {
+export async function runMasterSearch(
+  trigger: MasterSearchRun["trigger"],
+  userId: string | null,
+  now: Date = new Date(),
+  listEvents: (token: string) => Promise<CheckInsEvent[]> = listCheckInsEvents,
+  listGroupsFn: (token: string) => Promise<GroupInfo[]> = listGroups,
+): Promise<MasterSearchRun> {
   const run: MasterSearchRun = { startedAt: now.toISOString(), finishedAt: null, trigger, status: "running", found: [], emailedTo: [] };
   const state = await readMasters();
   if (!state.masters.length) return { ...run, finishedAt: new Date().toISOString(), status: "success", message: "No masters set up yet." };
@@ -237,17 +251,20 @@ export async function runMasterSearch(trigger: MasterSearchRun["trigger"], userI
   if (searching) return { ...run, finishedAt: new Date().toISOString(), status: "error", message: "A search is already running." };
   searching = true;
   try {
-    const events = await listEvents(await getValidPlanningCenterAccessToken(ownerId));
+    const token = await getValidPlanningCenterAccessToken(ownerId);
+    const kinds = new Set(state.masters.map((master) => master.kind));
+    const events = kinds.has("checkins") ? await listEvents(token) : [];
+    const groups = kinds.has("groups") ? await listGroupsFn(token) : [];
     // Re-read so edits made while listing aren't lost.
     const fresh = await readMasters();
-    run.found = findPending(fresh, events, now);
+    run.found = [...findPending(fresh, events, now, "checkins"), ...findPending(fresh, groups, now, "groups")];
     const total = run.found.reduce((sum, entry) => sum + entry.events.length, 0);
     if (total) {
       const to = await adminEmails();
       if (to.length) {
         const result = await sendEmail({
           to,
-          subject: `${total} Check-In event${total === 1 ? "" : "s"} waiting for approval`,
+          subject: `${total} new master match${total === 1 ? "" : "es"} waiting for approval`,
           html: approvalEmailHtml(run.found, `${siteUrl()}/admin/tools#database`),
         });
         if (result.sent) run.emailedTo = to;
@@ -257,7 +274,7 @@ export async function runMasterSearch(trigger: MasterSearchRun["trigger"], userI
       }
     }
     run.status = "success";
-    run.message = run.message ?? (total ? `${total} new event${total === 1 ? "" : "s"} waiting for approval.` : "No new matching events.");
+    run.message = run.message ?? (total ? `${total} new match${total === 1 ? "" : "es"} waiting for approval.` : "No new matches.");
     fresh.lastRun = { ...run, finishedAt: new Date().toISOString() };
     await writeMasters(fresh);
     return fresh.lastRun;

@@ -38,7 +38,7 @@ import { logger } from "../lib/logger";
 import { getValidPlanningCenterAccessToken } from "../lib/planningCenter";
 import { authorizeScheduledCall, autoSyncOutcome, recordScheduledJob } from "../lib/scheduledJobs";
 import { groupActiveInRange } from "./groupHistory";
-import { readMasters } from "../lib/checkinMasters";
+import { readMasters, type CheckinMaster } from "../lib/checkinMasters";
 import {
   CHECK_INS_BASE,
   type JsonApiResource,
@@ -570,7 +570,7 @@ router.get("/summary", requireAdmin, async (req, res) => {
       lastWeek: sql<string | null>`max(${checkinsWeeklyHistoryTable.weekStart})`,
       lastFetchedAt: max(checkinsWeeklyHistoryTable.fetchedAt),
     }).from(checkinsWeeklyHistoryTable);
-    const { masters } = await readMasters().catch(() => ({ masters: [] }));
+    const masters = (await readMasters().catch(() => ({ masters: [] as CheckinMaster[] }))).masters.filter((master) => master.kind === "checkins");
     res.json({ ...row, masters: masters.length });
   } catch (error) {
     sendError(req, res, error, "Failed to load attendance history summary");
@@ -585,7 +585,7 @@ router.get("/history.csv", requireAdmin, async (req, res) => {
     res.setHeader("Content-Type", "text/csv; charset=utf-8");
     res.setHeader("Content-Disposition", `attachment; filename="attendance-history-by-week.csv"`);
     res.setHeader("Cache-Control", "no-store");
-    const { masters } = await readMasters().catch(() => ({ masters: [] }));
+    const masters = (await readMasters().catch(() => ({ masters: [] as CheckinMaster[] }))).masters.filter((master) => master.kind === "checkins");
     res.send("﻿" + buildHistoryCsv([...masterHistoryRows(masters, rows), ...rows]));
   } catch (error) {
     sendError(req, res, error, "Failed to download attendance history");

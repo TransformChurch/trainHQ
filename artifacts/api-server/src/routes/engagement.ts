@@ -103,7 +103,7 @@ export async function buildDashboard(weeks: number, now: Date = new Date()): Pro
   const earliest = addDays(lastWeek, -7 * (Math.max(TREND_POINTS, 2 * weeks) + weeks));
   const synced = await syncedFields();
   const state = await readSyncState();
-  const masterList = items.some((item) => item.kind === "checkins_master") ? (await readMasters()).masters : [];
+  const masterList = items.some((item) => item.kind === "checkins_master" || item.kind === "group_master") ? (await readMasters()).masters : [];
 
   const weekRows = items.length
     ? await db.select().from(engagementWeeksTable).where(gte(engagementWeeksTable.weekStart, earliest))
@@ -136,7 +136,7 @@ export async function buildDashboard(weeks: number, now: Date = new Date()): Pro
     role: item.role,
     eventCount: item.kind === "checkins_event"
       ? 1 + (item.extraEvents?.length ?? 0)
-      : item.kind === "checkins_master" ? masterList.find((master) => master.id === item.id)?.events.length ?? 0 : undefined,
+      : item.kind === "checkins_master" || item.kind === "group_master" ? masterList.find((master) => master.id === item.id)?.events.length ?? 0 : undefined,
     current: windowMetrics(rows, presence, window, context),
     previous: windowMetrics(rows, presence, previousWindow, context),
     trend: trendSeries(rows, presence, lastWeek, weeks, TREND_POINTS),
@@ -374,7 +374,8 @@ router.get("/sources", requireAdmin, async (req, res) => {
         .filter((event) => archivedEventInWindow(event) || trackedEventIds.has(event.id))
         .map((event) => ({ id: event.id, name: event.name, archived: event.archived, archivedAt: event.archivedAt })),
       groups: groups.filter((group) => !group.archived).map((group) => ({ id: group.id, name: group.name })),
-      checkinMasters: masters.masters.map((master) => ({ id: master.id, name: master.name, eventCount: master.events.length })),
+      checkinMasters: masters.masters.filter((master) => master.kind === "checkins").map((master) => ({ id: master.id, name: master.name, eventCount: master.events.length })),
+      groupMasters: masters.masters.filter((master) => master.kind === "groups").map((master) => ({ id: master.id, name: master.name, eventCount: master.events.length })),
       groupTypes: types.data.filter((type) => type.id).map((type) => ({
         id: type.id,
         name: firstValue(type.attributes ?? {}, "name") || `Group type ${type.id}`,

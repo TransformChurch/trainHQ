@@ -10,6 +10,12 @@
 // checkins_master), in Check-Ins reports and scheduled reports (event id
 // token "master:<id>"), and in the Attendance history CSV.
 //
+// Group masters (2026-11-18, same day): kind "groups" does the same for
+// Planning Center Groups (e.g. every season's running group), used on the
+// Engagement dashboard (item kind group_master), in Groups season reports
+// ("master:<id>" in groupIds) and in the Group attendance history CSV.
+// "events" then holds groups; the monthly search lists groups instead.
+//
 // Stored as JSON in the settings table (key "checkin_masters"); no
 // migration. Planning Center is only read.
 import { db, settingsTable } from "@workspace/db";
@@ -17,8 +23,11 @@ import { eq } from "drizzle-orm";
 
 export type MasterEvent = { id: string; name: string };
 export type PendingEvent = MasterEvent & { foundAt: string; archived: boolean };
+export type MasterKind = "checkins" | "groups";
 export type CheckinMaster = {
   id: string;
+  // checkins: events are Check-Ins events; groups: Planning Center groups.
+  kind: MasterKind;
   name: string;
   includeTerms: string[];
   excludeTerms: string[];
@@ -35,7 +44,7 @@ export type MasterSearchRun = {
   finishedAt: string | null;
   trigger: "scheduled" | "manual";
   status: "running" | "success" | "error";
-  found: { masterId: string; masterName: string; events: MasterEvent[] }[];
+  found: { masterId: string; masterName: string; kind?: MasterKind; events: MasterEvent[] }[];
   emailedTo: string[];
   message?: string;
 };
@@ -100,6 +109,7 @@ export function normalizeMaster(raw: unknown): CheckinMaster | null {
   const now = new Date().toISOString();
   return {
     id,
+    kind: source.kind === "groups" ? "groups" : "checkins",
     name: String(source.name ?? "").trim().slice(0, 120) || `Master ${id}`,
     includeTerms: cleanTerms(source.includeTerms),
     excludeTerms: cleanTerms(source.excludeTerms),
@@ -161,9 +171,9 @@ export function newMatches(master: CheckinMaster, events: ListedEvent[]): Listed
 
 // The monthly search: adds new matches to each master's pending list.
 // Returns what was found per master (masters with nothing new left out).
-export function findPending(state: MastersState, events: ListedEvent[], now: Date): MasterSearchRun["found"] {
+export function findPending(state: MastersState, events: ListedEvent[], now: Date, kind: MasterKind = "checkins"): MasterSearchRun["found"] {
   const found: MasterSearchRun["found"] = [];
-  for (const master of state.masters) {
+  for (const master of state.masters.filter((entry) => entry.kind === kind)) {
     const matches = newMatches(master, events);
     if (!matches.length) continue;
     const room = Math.max(0, MAX_MASTER_EVENTS - master.events.length - master.pending.length);
@@ -171,7 +181,7 @@ export function findPending(state: MastersState, events: ListedEvent[], now: Dat
     if (!added.length) continue;
     master.pending.push(...added);
     master.updatedAt = now.toISOString();
-    found.push({ masterId: master.id, masterName: master.name, events: added.map(({ id, name }) => ({ id, name })) });
+    found.push({ masterId: master.id, masterName: master.name, kind: master.kind, events: added.map(({ id, name }) => ({ id, name })) });
   }
   return found;
 }

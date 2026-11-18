@@ -40,8 +40,8 @@ export const FIXED_JOB_TIMES: Record<FixedJobId, EasternTime & { path: string; s
   // item, then emails the Engagement dashboard summary (routes/engagement.ts).
   engagement_dashboard: { weekday: 1, hour: 6, minute: 0, path: "/api/engagement/run-scheduled", secret: "pulse" },
   scheduled_reports: { weekday: null, hour: 8, minute: 0, path: "/api/scheduled-reports/run-scheduled", secret: "pulse" },
-  // Last day of each month, 9:00 PM: looks for new Check-Ins events matching
-  // each Check-In master's terms and emails admins to approve them.
+  // Last day of each month, 9:00 PM: looks for new Check-Ins events / groups
+  // matching each master's terms and emails admins to approve them.
   checkin_masters_search: { weekday: null, monthDay: "last", hour: 21, minute: 0, path: "/api/checkin-masters/run-scheduled", secret: "pulse" },
 };
 

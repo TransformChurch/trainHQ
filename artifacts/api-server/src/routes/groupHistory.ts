@@ -26,6 +26,7 @@ import { getValidPlanningCenterAccessToken } from "../lib/planningCenter";
 import { addDays, weekStartFor } from "../lib/checkinsHistory";
 import { summarizeGroupAttendance } from "../lib/groupAttendance";
 import { authorizeScheduledCall, autoSyncOutcome, recordScheduledJob } from "../lib/scheduledJobs";
+import { readMasters, type CheckinMaster } from "../lib/checkinMasters";
 import { type JsonApiResource, fetchCollection, firstValue, planningCenterRequest, text } from "./reports";
 
 const router: IRouter = Router();
@@ -115,6 +116,32 @@ export function buildGroupHistoryCsv(rows: {
     row.attendees === null ? "No" : "Yes",
   ]);
   return [header, ...lines].map((line) => line.map(csvCell).join(",")).join("\r\n") + "\r\n";
+}
+
+type GroupCsvRow = Parameters<typeof buildGroupHistoryCsv>[0][number];
+
+// One row per week for each group master (lib/checkinMasters.ts): its groups'
+// meetings and present counts added together. A week where none of its
+// groups took attendance stays blank.
+export function groupMasterHistoryRows(masters: { id: string; name: string; events: { id: string }[] }[], rows: GroupCsvRow[]): GroupCsvRow[] {
+  const result: GroupCsvRow[] = [];
+  for (const master of masters) {
+    const ids = new Set(master.events.map((group) => group.id));
+    const byWeek = new Map<string, GroupCsvRow>();
+    for (const row of rows) {
+      if (!ids.has(row.groupId)) continue;
+      const week = byWeek.get(row.weekStart) ?? {
+        groupName: `${master.name} (master)`, groupId: `master:${master.id}`, groupArchived: false,
+        weekStart: row.weekStart, weekEnd: row.weekEnd, meetings: 0, attendees: null, attendanceRecords: 0,
+      };
+      week.meetings += row.meetings;
+      week.attendanceRecords += row.attendanceRecords;
+      if (row.attendees !== null) week.attendees = (week.attendees ?? 0) + row.attendees;
+      byWeek.set(row.weekStart, week);
+    }
+    result.push(...[...byWeek.values()].sort((a, b) => a.weekStart.localeCompare(b.weekStart)));
+  }
+  return result;
 }
 
 // ── Core pull logic (shared by the routes and the weekly auto-sync) ─────────
@@ -481,7 +508,8 @@ router.get("/summary", requireAdmin, async (req, res) => {
       lastWeek: sql<string | null>`max(${groupsWeeklyHistoryTable.weekStart})`,
       lastFetchedAt: max(groupsWeeklyHistoryTable.fetchedAt),
     }).from(groupsWeeklyHistoryTable);
-    res.json(row);
+    const groupMasters = (await readMasters().catch(() => ({ masters: [] as CheckinMaster[] }))).masters.filter((master) => master.kind === "groups");
+    res.json({ ...row, masters: groupMasters.length });
   } catch (error) {
     sendError(req, res, error, "Failed to load group history summary");
   }
@@ -495,7 +523,8 @@ router.get("/history.csv", requireAdmin, async (req, res) => {
     res.setHeader("Content-Type", "text/csv; charset=utf-8");
     res.setHeader("Content-Disposition", `attachment; filename="group-attendance-history-by-week.csv"`);
     res.setHeader("Cache-Control", "no-store");
-    res.send("﻿" + buildGroupHistoryCsv(rows));
+    const groupMasters = (await readMasters().catch(() => ({ masters: [] as CheckinMaster[] }))).masters.filter((master) => master.kind === "groups");
+    res.send("﻿" + buildGroupHistoryCsv([...groupMasterHistoryRows(groupMasters, rows), ...rows]));
   } catch (error) {
     sendError(req, res, error, "Failed to download group history");
   }

@@ -14,7 +14,7 @@ import { isLastDayOfMonth, dueJobs, lastEasternOccurrence } from "./jobSchedule"
 import { masterHistoryRows } from "../routes/attendanceHistory";
 
 const master = (overrides: Partial<CheckinMaster> = {}): CheckinMaster => ({
-  id: "1", name: "Thrive Master", includeTerms: ["Thrive"], excludeTerms: ["Leader"],
+  id: "1", kind: "checkins", name: "Thrive Master", includeTerms: ["Thrive"], excludeTerms: ["Leader"],
   events: [{ id: "10", name: "Thrive Jan" }], pending: [], dismissedIds: [],
   createdAt: "2026-11-01T00:00:00Z", updatedAt: "2026-11-01T00:00:00Z", ...overrides,
 });
@@ -35,7 +35,7 @@ test("findPending suggests only new matches, skipping members, pending and dismi
     { id: "13", name: "Thrive Apr", archived: false },
     { id: "14", name: "Thrive Leader Night", archived: false },
   ], new Date("2026-11-30T12:00:00Z"));
-  assert.deepEqual(found, [{ masterId: "1", masterName: "Thrive Master", events: [{ id: "13", name: "Thrive Apr" }] }]);
+  assert.deepEqual(found, [{ masterId: "1", masterName: "Thrive Master", kind: "checkins", events: [{ id: "13", name: "Thrive Apr" }] }]);
   assert.deepEqual(state.masters[0].pending.map((event) => event.id), ["11", "13"]);
 });
 
@@ -84,5 +84,27 @@ test("masterHistoryRows adds the master's events together per week", () => {
   ]);
   assert.deepEqual(rows.map((entry) => [entry.eventId, entry.weekStart, entry.uniqueAttendees, entry.sessions]), [
     ["master:1", "2026-11-02", 8, 2], ["master:1", "2026-11-09", 4, 1],
+  ]);
+});
+
+test("group masters only search groups, Check-In masters only events", () => {
+  const state = normalizeState({ masters: [master(), { ...master(), id: "2", kind: "groups", name: "Running Master", includeTerms: ["Running"], excludeTerms: [], events: [] }] });
+  assert.equal(state.masters[1].kind, "groups");
+  const groups = [{ id: "50", name: "Running Group Fall", archived: false }, { id: "51", name: "Thrive Group", archived: false }];
+  const found = findPending(state, groups, new Date("2026-11-30T12:00:00Z"), "groups");
+  assert.deepEqual(found.map((entry) => [entry.masterName, entry.events.map((event) => event.id)]), [["Running Master", ["50"]]]);
+  assert.equal(state.masters[0].pending.length, 0);
+});
+
+test("groupMasterHistoryRows adds groups per week and keeps 'not taken' weeks blank", async () => {
+  const { groupMasterHistoryRows } = await import("../routes/groupHistory");
+  const row = (groupId: string, weekStart: string, attendees: number | null) => ({
+    groupName: `G${groupId}`, groupId, groupArchived: false, weekStart, weekEnd: weekStart, meetings: 1, attendees, attendanceRecords: attendees ?? 0,
+  });
+  const rows = groupMasterHistoryRows([{ id: "2", name: "Running", events: [{ id: "50" }, { id: "51" }] }], [
+    row("50", "2026-11-02", 6), row("51", "2026-11-02", 4), row("50", "2026-11-09", null),
+  ]);
+  assert.deepEqual(rows.map((entry) => [entry.groupId, entry.weekStart, entry.attendees, entry.meetings]), [
+    ["master:2", "2026-11-02", 10, 2], ["master:2", "2026-11-09", null, 1],
   ]);
 });

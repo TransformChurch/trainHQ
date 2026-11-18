@@ -26,7 +26,7 @@ type Metrics = {
 };
 type TrendPoint = { weekStart: string; attendees: number | null; newGuests: number | null; rollingRate: number | null; rollingAvgAttendance: number | null };
 type Item = {
-  kind: "checkins_event" | "group" | "group_type" | "checkins_master";
+  kind: "checkins_event" | "group" | "group_type" | "checkins_master" | "group_master";
   id: string;
   name: string;
   role: "transform" | "tc_college";
@@ -56,7 +56,7 @@ type Dashboard = {
 const WEEK_OPTIONS = [4, 8, 12, 26];
 const WEEKS_KEY = "tc-engagement-weeks";
 const VIEW_KEY = "tc-engagement-view";
-const KIND_LABEL: Record<Item["kind"], string> = { checkins_event: "Check-Ins event", group: "Group", group_type: "Group type", checkins_master: "Check-In master" };
+const KIND_LABEL: Record<Item["kind"], string> = { checkins_event: "Check-Ins event", group: "Group", group_type: "Group type", checkins_master: "Check-In master", group_master: "Group master" };
 const PART_LABEL: Record<Part, string> = {
   formThrive: "Form / Thrive", transform: "Transform", serving: "Serving", tcCollege: "TC College",
   giving: "Giving", leadership: "Leadership", serveClass: "Serve Class",
@@ -189,7 +189,7 @@ function ItemCard({ item, dashboard }: { item: Item; dashboard: Dashboard }) {
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div className="min-w-0">
             <CardTitle className="text-lg">{item.name}</CardTitle>
-            <p className="text-xs text-muted-foreground">{item.kind === "checkins_master" ? `Check-In master · ${item.eventCount ?? 0} events` : item.eventCount && item.eventCount > 1 ? `${item.eventCount} Check-Ins events combined` : KIND_LABEL[item.kind]}{item.role === "tc_college" ? " · TC College" : ""}{item.lastWeekWithData ? ` · last attendance week of ${shortDate(item.lastWeekWithData)}` : " · no attendance synced yet"}</p>
+            <p className="text-xs text-muted-foreground">{item.kind === "checkins_master" ? `Check-In master · ${item.eventCount ?? 0} events` : item.kind === "group_master" ? `Group master · ${item.eventCount ?? 0} groups` : item.eventCount && item.eventCount > 1 ? `${item.eventCount} Check-Ins events combined` : KIND_LABEL[item.kind]}{item.role === "tc_college" ? " · TC College" : ""}{item.lastWeekWithData ? ` · last attendance week of ${shortDate(item.lastWeekWithData)}` : " · no attendance synced yet"}</p>
           </div>
           <div className="w-56"><ScoreMeter score={current.engagement.score} max={dashboard.maxPoints} /></div>
         </div>

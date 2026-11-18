@@ -25,7 +25,7 @@ type ReportEngine = "youth_quarterly" | "youth_monthly" | "kids_rutherford" | "k
 // Season reports (2026-10-15) can read attendance from Check-Ins events or
 // from Planning Center Groups.
 type AttendanceSource = "checkins" | "groups";
-type GroupOption = { id: string; name: string; groupType: string; archived: boolean; createdAt: string | null };
+type GroupOption = { id: string; name: string; groupType: string; archived: boolean; createdAt: string | null; master?: boolean; eventCount?: number };
 type ReportTemplate = {
   id: number;
   name: string;
@@ -446,7 +446,7 @@ export default function Reporting() {
                       />
                       <span>{group.name}</span>
                       <span className="text-xs text-muted-foreground">
-                        {[group.groupType, group.archived ? "archived" : ""].filter(Boolean).join(" · ")}
+                        {[group.master ? `master · ${group.eventCount} groups` : group.groupType, group.archived ? "archived" : ""].filter(Boolean).join(" · ")}
                       </span>
                     </label>
                   ))}
@@ -456,7 +456,8 @@ export default function Reporting() {
               </div>
               <p className="text-xs text-muted-foreground">
                 Pick one group, or several to combine them (for example every group from one season). People marked present in
-                any of them count; meetings on the same date share a column.
+                any of them count; meetings on the same date share a column. A group master uses its approved groups that
+                existed in the start–end dates (or all of them with no dates; at most 30).
               </p>
               {groupsLoading && <p className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> Loading Planning Center groups…</p>}
               {groupsError && (

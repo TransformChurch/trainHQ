@@ -702,11 +702,28 @@ function reportError(status: number, message: string): Error & { status: number 
 export const MAX_JOINED_EVENTS = 10;
 export const MAX_MASTER_REPORT_EVENTS = 40;
 
+// A group master's groups that existed in [start, end] (all of them when no
+// dates are given: a Groups report then uses the groups' own dates).
+async function expandGroupMasters(masterIds: string[], startDate: string, endDate: string, userId: string): Promise<{ groupIds: string[]; names: string[] }> {
+  const state = await readMasters();
+  const masters = masterIds.map((id) => state.masters.find((master) => master.id === id && master.kind === "groups"));
+  if (masters.some((master) => !master)) throw reportError(404, "That group master no longer exists.");
+  let dated: { id: string; createdAt: string | null; archivedAt: string | null }[] | null = null;
+  if (startDate && endDate) {
+    const { listGroups } = await import("./groupHistory");
+    dated = await listGroups(await getValidPlanningCenterAccessToken(userId)).catch(() => null);
+  }
+  const groupIds = [...new Set(masters.flatMap((master) => startDate && endDate
+    ? masterEventIdsInRange(master!, dated, startDate, addDays(endDate, 1))
+    : master!.events.map((event) => event.id)))];
+  return { groupIds, names: masters.map((master) => master!.name) };
+}
+
 // A master's events that existed from (start, or 26 weeks back) or 13 weeks
 // before the end date (the trend chart), through the end date.
 async function expandMasters(masterIds: string[], startDate: string, endDate: string, userId: string): Promise<{ eventIds: string[]; names: string[] }> {
   const state = await readMasters();
-  const masters = masterIds.map((id) => state.masters.find((master) => master.id === id));
+  const masters = masterIds.map((id) => state.masters.find((master) => master.id === id && master.kind === "checkins"));
   if (masters.some((master) => !master)) throw reportError(404, "That Check-In master no longer exists.");
   const trendStart = addDays(endDate, -7 * 13);
   const since = startDate && startDate < trendStart ? startDate : startDate ? trendStart : addDays(endDate, -7 * 26);
@@ -806,7 +823,7 @@ router.get("/events", requireToolAccess("reporting"), async (req, res) => {
     // Check-In masters first (id "master:<id>"); preparing a report expands
     // them into their events.
     const masters = (await readMasters().catch(() => ({ masters: [] as CheckinMaster[] }))).masters
-      .filter((master) => master.events.length)
+      .filter((master) => master.kind === "checkins" && master.events.length)
       .map((master) => ({ id: masterToken(master.id), name: master.name, frequency: "", archived: false, master: true, eventCount: master.events.length }));
     res.json([
       ...masters,
@@ -1212,7 +1229,8 @@ const GROUP_MEMBERSHIP_BATCH_DELAY_MS = 2_000;
 export function parseGroupIds(body: unknown): string[] {
   const raw = (body as { groupIds?: unknown } | null | undefined)?.groupIds;
   const list = Array.isArray(raw) ? raw : typeof raw === "string" ? raw.split(",") : [];
-  return [...new Set(list.map((value) => text(value)).filter((value) => /^\d{1,20}$/.test(value)))];
+  // Group ids, or "master:<id>" for a group master (lib/checkinMasters.ts).
+  return [...new Set(list.map((value) => text(value)).filter((value) => /^\d{1,20}$/.test(value) || /^master:\d{1,9}$/.test(value)))];
 }
 
 function groupsAccessError(error: unknown): unknown {
@@ -1317,7 +1335,11 @@ router.get("/groups", requireToolAccess("reporting"), async (req, res) => {
     }
     // Newest first: groups are recreated every season.
     groups.sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? "") || a.name.localeCompare(b.name));
-    res.json(groups);
+    // Group masters first (id "master:<id>"); preparing expands them.
+    const masters = (await readMasters().catch(() => ({ masters: [] as CheckinMaster[] }))).masters
+      .filter((master) => master.kind === "groups" && master.events.length)
+      .map((master) => ({ id: masterToken(master.id), name: master.name, groupType: "Group master", archived: false, createdAt: null, archivedAt: null, master: true, eventCount: master.events.length }));
+    res.json([...masters, ...groups]);
   } catch (error) {
     sendError(req, res, groupsAccessError(error), "Failed to load Planning Center groups");
   }
@@ -1347,17 +1369,30 @@ export async function prepareReportRun(
     const endDate = dateOnly(body?.endDate);
     const templateId = Number(body?.templateId);
     if (source === "groups") {
-      const groupIdList = parseGroupIds(body);
-      if (!groupIdList.length || !Number.isInteger(templateId)) {
+      const requestedGroupIds = parseGroupIds(body);
+      if (!requestedGroupIds.length || !Number.isInteger(templateId)) {
         throw reportError(400, "Select at least one group and a template.");
-      }
-      if (groupIdList.length > MAX_REPORT_GROUPS) {
-        throw reportError(400, `Combine at most ${MAX_REPORT_GROUPS} groups in one report.`);
       }
       if ((requestedStartDate && !endDate) || (!requestedStartDate && endDate) || (requestedStartDate && requestedStartDate > endDate)) {
         throw reportError(400, "Give both a start and end date (start on or before end), or leave both blank to use the groups' own meeting dates.");
       }
-      return await prepareGroupsRun(body, groupIdList, requestedStartDate, endDate, templateId, userId, progressId, log);
+      // Group masters become their approved groups that existed in the dates.
+      const { eventIds: plainGroupIds, masterIds } = splitMasterTokens(requestedGroupIds);
+      let groupIdList = plainGroupIds;
+      let masterName: string | null = null;
+      if (masterIds.length) {
+        const expanded = await expandGroupMasters(masterIds, requestedStartDate, endDate, userId);
+        groupIdList = [...new Set([...plainGroupIds, ...expanded.groupIds])];
+        masterName = [...expanded.names, ...(plainGroupIds.length ? [`${plainGroupIds.length} more group${plainGroupIds.length === 1 ? "" : "s"}`] : [])].join(" + ");
+        if (!groupIdList.length) throw reportError(404, "The group master has no approved groups in these dates.");
+        if (groupIdList.length > MAX_REPORT_GROUPS) {
+          throw reportError(400, `That is ${groupIdList.length} groups; at most ${MAX_REPORT_GROUPS} can be combined. ${requestedStartDate ? "Pick a shorter date range." : "Give a start and end date so only the groups that met then are used."}`);
+        }
+      }
+      if (groupIdList.length > MAX_REPORT_GROUPS) {
+        throw reportError(400, `Combine at most ${MAX_REPORT_GROUPS} groups in one report.`);
+      }
+      return await prepareGroupsRun({ ...body, masterName }, groupIdList, requestedStartDate, endDate, templateId, userId, progressId, log);
     }
     return await prepareCheckInsRun(body, requestedStartDate, endDate, templateId, userId, progressId, log);
   } catch (error) {
@@ -1800,7 +1835,7 @@ async function prepareGroupsRun(
     records.set(personId, record);
   }
 
-  const eventName = groupNames.length <= 3 ? groupNames.join(" + ") : `${groupNames.length} groups`;
+  const eventName = text(body?.masterName) || (groupNames.length <= 3 ? groupNames.join(" + ") : `${groupNames.length} groups`);
   const typed = parseWeekLabels(text(body?.weekLabels), serviceDates);
   const meta: SeasonRunMeta | null = isSeason
     ? {
