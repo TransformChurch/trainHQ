@@ -1,4 +1,4 @@
-import { pgTable, serial, text, integer, timestamp, pgEnum, smallint } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, integer, timestamp, pgEnum, smallint, jsonb } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { usersTable } from "./users";
@@ -8,11 +8,15 @@ export const groupsTable = pgTable("groups", {
   name: text("name").notNull(),
   description: text("description"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
-  // When set, a user is automatically added to this group at login if their
-  // Planning Center profile has this custom field equal to pcoFieldValue.
+  // When set, a user is automatically added to this group at sign-in (or
+  // when an admin clicks "Run now") if any of their values for this Planning
+  // Center custom field matches any of pcoFieldKeywords. Matching rules live in
+  // api-server/src/lib/groupAutoAssign.ts. (The old single-value
+  // pco_field_value column was copied into pco_field_keywords by migration
+  // 0045 and is no longer read.)
   pcoFieldDefinitionId: text("pco_field_definition_id"),
   pcoFieldDefinitionLabel: text("pco_field_definition_label"),
-  pcoFieldValue: text("pco_field_value"),
+  pcoFieldKeywords: jsonb("pco_field_keywords").$type<string[]>().notNull().default([]),
 });
 
 export const groupMembersTable = pgTable("group_members", {
@@ -20,6 +24,11 @@ export const groupMembersTable = pgTable("group_members", {
   groupId: integer("group_id").notNull().references(() => groupsTable.id, { onDelete: "cascade" }),
   userId: text("user_id").notNull().references(() => usersTable.id, { onDelete: "cascade" }),
   addedAt: timestamp("added_at").notNull().defaultNow(),
+  // "auto" = added by the group's Planning Center rule (sign-in or the weekly
+  // sync), so the weekly sync may remove it again when the person no longer
+  // matches. "manual" = added by a person (or before 2026-11-18); the sync
+  // never removes these.
+  source: text("source").$type<"manual" | "auto">().notNull().default("manual"),
 });
 
 export const groupManagersTable = pgTable("group_managers", {

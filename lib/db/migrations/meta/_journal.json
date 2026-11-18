@@ -316,6 +316,13 @@
       "when": 1791058200020,
       "tag": "0044_people_households",
       "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1791058200030,
+      "tag": "0045_group_auto_assign_keywords",
+      "breakpoints": true
     }
   ]
 }

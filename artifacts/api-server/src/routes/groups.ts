@@ -17,6 +17,12 @@ import {
 import { eq, and, inArray } from "drizzle-orm";
 import { requireManagerOrAdmin, requireAdmin, requireAuth } from "../middlewares/requireAuth";
 import { getAuth } from "../middlewares/auth";
+import { normalizeKeywords } from "../lib/groupAutoAssign";
+import {
+  getValidPlanningCenterAccessToken,
+  PlanningCenterError,
+  runGroupAutoAssign,
+} from "../lib/planningCenter";
 
 const router = Router();
 
@@ -193,13 +199,13 @@ router.post("/", requireManagerOrAdmin, async (req, res) => {
       description,
       pcoFieldDefinitionId,
       pcoFieldDefinitionLabel,
-      pcoFieldValue,
+      pcoFieldKeywords,
     } = req.body as {
       name?: string;
       description?: string | null;
       pcoFieldDefinitionId?: string | null;
       pcoFieldDefinitionLabel?: string | null;
-      pcoFieldValue?: string | null;
+      pcoFieldKeywords?: unknown;
     };
     if (!name || typeof name !== "string" || !name.trim()) {
       res.status(400).json({ error: "name is required" });
@@ -210,7 +216,7 @@ router.post("/", requireManagerOrAdmin, async (req, res) => {
       description: description ?? null,
       pcoFieldDefinitionId: pcoFieldDefinitionId?.trim() || null,
       pcoFieldDefinitionLabel: pcoFieldDefinitionLabel?.trim() || null,
-      pcoFieldValue: pcoFieldValue?.trim() || null,
+      pcoFieldKeywords: pcoFieldDefinitionId?.trim() ? normalizeKeywords(pcoFieldKeywords) : [],
     }).returning();
     const g = inserted[0];
 
@@ -238,26 +244,27 @@ router.patch("/:groupId", requireManagerOrAdmin, async (req, res) => {
       description,
       pcoFieldDefinitionId,
       pcoFieldDefinitionLabel,
-      pcoFieldValue,
+      pcoFieldKeywords,
     } = req.body as {
       name?: string;
       description?: string | null;
       pcoFieldDefinitionId?: string | null;
       pcoFieldDefinitionLabel?: string | null;
-      pcoFieldValue?: string | null;
+      pcoFieldKeywords?: unknown;
     };
     const updates: Partial<{
       name: string;
       description: string | null;
       pcoFieldDefinitionId: string | null;
       pcoFieldDefinitionLabel: string | null;
-      pcoFieldValue: string | null;
+      pcoFieldKeywords: string[];
     }> = {};
     if (name && typeof name === "string" && name.trim()) updates.name = name.trim();
     if (description !== undefined) updates.description = description ?? null;
     if (pcoFieldDefinitionId !== undefined) updates.pcoFieldDefinitionId = pcoFieldDefinitionId?.trim() || null;
     if (pcoFieldDefinitionLabel !== undefined) updates.pcoFieldDefinitionLabel = pcoFieldDefinitionLabel?.trim() || null;
-    if (pcoFieldValue !== undefined) updates.pcoFieldValue = pcoFieldValue?.trim() || null;
+    if (pcoFieldKeywords !== undefined) updates.pcoFieldKeywords = normalizeKeywords(pcoFieldKeywords);
+    if (pcoFieldDefinitionId !== undefined && !pcoFieldDefinitionId?.trim()) updates.pcoFieldKeywords = [];
     if (Object.keys(updates).length === 0) {
       res.status(400).json({ error: "No fields to update" });
       return;
@@ -269,6 +276,33 @@ router.patch("/:groupId", requireManagerOrAdmin, async (req, res) => {
     }
     res.json({ ...updated[0], createdAt: updated[0].createdAt.toISOString() });
   } catch {
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ─── POST /groups/:groupId/auto-assign/run ───────────────────────────────────
+// Syncs the group with its saved Planning Center rule right now (the same
+// thing the weekly people sync does for every group): adds new matches and
+// removes auto-added members who no longer match. Never removes people who
+// were added by hand. Uses the admin's own Planning Center connection.
+
+router.post("/:groupId/auto-assign/run", requireAdmin, async (req, res) => {
+  try {
+    const groupId = parseInt(req.params.groupId as string);
+    if (!Number.isFinite(groupId)) {
+      res.status(400).json({ error: "Invalid group" });
+      return;
+    }
+    const accessToken = await getValidPlanningCenterAccessToken(res.locals.dbUser.id);
+    const result = await runGroupAutoAssign(groupId, accessToken);
+    req.log.info({ groupId, matched: result.matched, added: result.added.length }, "Group auto-assign run");
+    res.json(result);
+  } catch (err) {
+    if (err instanceof PlanningCenterError) {
+      res.status(err.status).json({ error: err.message, code: err.code });
+      return;
+    }
+    req.log.error({ err }, "Group auto-assign run failed");
     res.status(500).json({ error: "Internal server error" });
   }
 });
@@ -303,6 +337,7 @@ router.get("/:groupId/members", requireManagerOrAdmin, async (req, res) => {
       id: r.member.id,
       groupId: r.member.groupId,
       addedAt: r.member.addedAt.toISOString(),
+      source: r.member.source,
       user: {
         id: r.user.id,
         firstName: r.user.firstName,
@@ -318,7 +353,9 @@ router.get("/:groupId/members", requireManagerOrAdmin, async (req, res) => {
 
 // ─── POST /groups/:groupId/members ────────────────────────────────────────────
 
-router.post("/:groupId/members", requireManagerOrAdmin, async (req, res) => {
+// Admin only (Andrew, 2026-11-18): people should reach groups through the
+// Planning Center auto-assign rule; adding someone by hand is rare.
+router.post("/:groupId/members", requireAdmin, async (req, res) => {
   try {
     const dbUser = res.locals.dbUser;
     const groupId = parseInt(req.params.groupId as string);
@@ -608,7 +645,8 @@ router.get("/:groupId/export.csv", requireManagerOrAdmin, async (req, res) => {
   }
 });
 
-router.post("/:groupId/self-join", requireManagerOrAdmin, async (req, res) => {
+// Admin only (2026-11-18). Managers and students send a join request instead.
+router.post("/:groupId/self-join", requireAdmin, async (req, res) => {
   try {
     const dbUser = res.locals.dbUser;
     const groupId = parseInt(req.params.groupId as string);
@@ -700,8 +738,8 @@ router.post("/:groupId/join-requests", requireAuth, async (req, res) => {
     }
     const dbUser = dbUserRows[0];
     // Only students can request to join; managers/admins manage groups directly
-    if (dbUser.role !== "student") {
-      res.status(403).json({ error: "Only students can submit join requests" });
+    if (dbUser.role === "admin") {
+      res.status(403).json({ error: "Admins can join groups directly" });
       return;
     }
     const userId = dbUser.id;
@@ -756,6 +794,12 @@ router.patch("/:groupId/join-requests/:requestId", requireManagerOrAdmin, async 
     const { action } = req.body as { action?: "approve" | "deny" };
     if (action !== "approve" && action !== "deny") {
       res.status(400).json({ error: "action must be 'approve' or 'deny'" });
+      return;
+    }
+    // Approving adds someone by hand, which only admins may do (2026-11-18).
+    // Managers can still deny.
+    if (action === "approve" && dbUser.role !== "admin") {
+      res.status(403).json({ error: "Only admins can approve join requests" });
       return;
     }
 

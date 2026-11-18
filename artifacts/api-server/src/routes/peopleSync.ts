@@ -18,7 +18,11 @@ import { db, peopleProfilesTable, settingsTable } from "@workspace/db";
 import { and, asc, count, eq, isNotNull, isNull, lt, max, sql } from "drizzle-orm";
 import { requireAdmin } from "../middlewares/requireAuth";
 import { logger } from "../lib/logger";
-import { getValidPlanningCenterAccessToken } from "../lib/planningCenter";
+import {
+  getValidPlanningCenterAccessToken,
+  syncAllAutoAssignGroups,
+  type GroupSyncSummary,
+} from "../lib/planningCenter";
 import { authorizeScheduledCall, recordScheduledJob } from "../lib/scheduledJobs";
 import {
   BUILT_IN_PEOPLE_FIELDS,
@@ -51,6 +55,8 @@ type PeopleSyncRun = {
   removed: number;
   message?: string;
   missingStandard?: string[];
+  // Group auto-assign sync that runs after a successful pull (2026-11-18).
+  groupSync?: GroupSyncSummary;
 };
 
 type PeopleSyncSettings = {
@@ -154,6 +160,7 @@ export async function runPeopleSync(
   trigger: PeopleSyncRun["trigger"],
   getToken: (userId: string) => Promise<string> = getValidPlanningCenterAccessToken,
   delayMs: number = PAGE_DELAY_MS,
+  syncGroups: (accessToken: string) => Promise<GroupSyncSummary> = syncAllAutoAssignGroups,
 ): Promise<PeopleSyncRun> {
   const startedAtDate = new Date();
   const run: PeopleSyncRun = { startedAt: startedAtDate.toISOString(), finishedAt: null, status: "running", trigger, pages: 0, people: 0, removed: 0 };
@@ -221,6 +228,20 @@ export async function runPeopleSync(
       .returning({ personId: peopleProfilesTable.personId });
     run.removed = removed.length;
     run.status = "success";
+
+    // Then bring every auto-assign group in line with its Planning Center
+    // rule: add new matches, remove auto-added members who stopped matching
+    // (never people added by hand). A failure here is logged on the run but
+    // doesn't fail the people pull.
+    try {
+      run.groupSync = await syncGroups(await getToken(userId));
+      if (run.groupSync.failed.length) {
+        logger.warn({ failed: run.groupSync.failed }, "Some groups failed to auto-assign sync");
+      }
+    } catch (error) {
+      run.groupSync = { groups: 0, added: 0, removed: 0, failed: [{ groupId: 0, message: peopleError(error) }] };
+      logger.error({ err: error }, "Group auto-assign sync failed");
+    }
   } catch (error) {
     run.status = "error";
     run.message = peopleError(error);
@@ -340,9 +361,9 @@ router.post("/run-scheduled", async (req, res) => {
   const run = await runPeopleSync(settings.userId, "scheduled");
   await recordScheduledJob(
     "people_sync",
-    run.status !== "success" ? "error" : run.missingStandard?.length ? "partial" : "ok",
+    run.status !== "success" ? "error" : run.missingStandard?.length || run.groupSync?.failed.length ? "partial" : "ok",
     run.status === "success"
-      ? `${run.people} people synced, ${run.removed} marked removed${run.missingStandard?.length ? `. Not found in Planning Center: ${run.missingStandard.join(", ")}` : ""}`
+      ? `${run.people} people synced, ${run.removed} marked removed${run.groupSync ? `. Groups: ${run.groupSync.added} added, ${run.groupSync.removed} removed across ${run.groupSync.groups} group${run.groupSync.groups === 1 ? "" : "s"}${run.groupSync.failed.length ? ` (${run.groupSync.failed.length} failed)` : ""}` : ""}${run.missingStandard?.length ? `. Not found in Planning Center: ${run.missingStandard.join(", ")}` : ""}`
       : run.message ?? "Failed.",
   );
   req.log.info({ run }, "Scheduled people sync finished");

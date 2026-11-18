@@ -35,6 +35,8 @@ export const STANDARD_CUSTOM_FIELDS: { label: string; names: string[] }[] = [
   { label: "Baptized?", names: ["Baptized?", "Baptized"] },
   { label: "Thrive", names: ["Thrive"] },
   { label: "Last Served", names: ["Last Served"] },
+  // The "Team" checkbox field, also used by group auto-assign (2026-11-18).
+  { label: "Team", names: ["Team"] },
 ];
 
 export type StandardFieldResolution = { label: string; key: string | null };

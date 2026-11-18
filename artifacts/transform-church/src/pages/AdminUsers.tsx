@@ -15,6 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { UserSearchPicker } from "@/components/UserSearchPicker";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger,
 } from "@/components/ui/dialog";
@@ -41,13 +42,20 @@ type Group = {
   pendingRequests: number;
   pcoFieldDefinitionId?: string | null;
   pcoFieldDefinitionLabel?: string | null;
-  pcoFieldValue?: string | null;
+  pcoFieldKeywords?: string[] | null;
+};
+type AutoAssignRunResult = {
+  matched: number;
+  added: { id: string; name: string }[];
+  removed: { id: string; name: string }[];
+  alreadyMembers: number;
 };
 type PcoFieldDefinition = { id: string; label: string };
 type GroupMember = {
   id: number;
   groupId: number;
   addedAt: string;
+  source?: "manual" | "auto";
   user: { id: string; firstName: string; lastName: string; email: string; role: string };
 };
 type GroupManagerRow = {
@@ -99,8 +107,11 @@ function GroupsTab() {
   const [pcoFieldDefinitions, setPcoFieldDefinitions] = useState<PcoFieldDefinition[]>([]);
   const [loadingPcoFields, setLoadingPcoFields] = useState(false);
   const [autoAssignFieldId, setAutoAssignFieldId] = useState("");
-  const [autoAssignValue, setAutoAssignValue] = useState("");
+  const [autoAssignKeywords, setAutoAssignKeywords] = useState<string[]>([]);
+  const [keywordDraft, setKeywordDraft] = useState("");
   const [savingAutoAssign, setSavingAutoAssign] = useState(false);
+  const [runningAutoAssign, setRunningAutoAssign] = useState(false);
+  const [autoAssignRunResult, setAutoAssignRunResult] = useState<AutoAssignRunResult | null>(null);
 
   const loadGroups = async () => {
     try {
@@ -194,28 +205,85 @@ function GroupsTab() {
     }
   };
 
+  // Adds whatever is typed (comma-separated is fine) to the keyword list,
+  // skipping blanks and case-insensitive duplicates.
+  const addKeywords = (text: string) => {
+    const incoming = text.split(/[,\n]/).map(k => k.trim().replace(/\s+/g, " ")).filter(Boolean);
+    if (incoming.length === 0) return;
+    setAutoAssignKeywords(current => {
+      const next = [...current];
+      for (const keyword of incoming) {
+        if (!next.some(k => k.toLowerCase() === keyword.toLowerCase())) next.push(keyword);
+      }
+      return next;
+    });
+    setKeywordDraft("");
+  };
+
+  const savedKeywords = selectedGroup?.pcoFieldKeywords ?? [];
+  const autoAssignDirty = !!selectedGroup && (
+    (selectedGroup.pcoFieldDefinitionId ?? "") !== autoAssignFieldId ||
+    savedKeywords.join("\u0000") !== autoAssignKeywords.join("\u0000")
+  );
+
   const handleSaveAutoAssign = async () => {
     if (!selectedGroup) return;
+    // Include anything still sitting in the box so it isn't silently lost.
+    const pending = keywordDraft.split(/[,\n]/).map(k => k.trim().replace(/\s+/g, " ")).filter(Boolean);
+    const keywords = [...autoAssignKeywords];
+    for (const keyword of pending) {
+      if (!keywords.some(k => k.toLowerCase() === keyword.toLowerCase())) keywords.push(keyword);
+    }
     setSavingAutoAssign(true);
     try {
-      const fieldLabel = pcoFieldDefinitions.find(f => f.id === autoAssignFieldId)?.label ?? null;
-      await apiFetch(`/api/groups/${selectedGroup.id}`, {
+      const fieldLabel = pcoFieldDefinitions.find(f => f.id === autoAssignFieldId)?.label ?? selectedGroup.pcoFieldDefinitionLabel ?? null;
+      const saved: Group = await apiFetch(`/api/groups/${selectedGroup.id}`, {
         method: "PATCH",
         body: JSON.stringify({
           pcoFieldDefinitionId: autoAssignFieldId || null,
           pcoFieldDefinitionLabel: autoAssignFieldId ? fieldLabel : null,
-          pcoFieldValue: autoAssignFieldId ? autoAssignValue : null,
+          pcoFieldKeywords: autoAssignFieldId ? keywords : [],
         }),
       });
       toast({ title: autoAssignFieldId ? "Auto-assignment rule saved" : "Auto-assignment rule cleared" });
+      setKeywordDraft("");
+      setAutoAssignKeywords(saved?.pcoFieldKeywords ?? []);
+      setAutoAssignRunResult(null);
       await loadGroups();
       setSelectedGroup(current => current && current.id === selectedGroup.id
-        ? { ...current, pcoFieldDefinitionId: autoAssignFieldId || null, pcoFieldDefinitionLabel: autoAssignFieldId ? fieldLabel : null, pcoFieldValue: autoAssignFieldId ? autoAssignValue : null }
+        ? {
+            ...current,
+            pcoFieldDefinitionId: saved?.pcoFieldDefinitionId ?? null,
+            pcoFieldDefinitionLabel: saved?.pcoFieldDefinitionLabel ?? null,
+            pcoFieldKeywords: saved?.pcoFieldKeywords ?? [],
+          }
         : current);
     } catch {
       toast({ title: "Failed to save auto-assignment rule", variant: "destructive" });
     } finally {
       setSavingAutoAssign(false);
+    }
+  };
+
+  const handleRunAutoAssign = async () => {
+    if (!selectedGroup) return;
+    setRunningAutoAssign(true);
+    setAutoAssignRunResult(null);
+    try {
+      const result: AutoAssignRunResult = await apiFetch(`/api/groups/${selectedGroup.id}/auto-assign/run`, { method: "POST" });
+      setAutoAssignRunResult(result);
+      const changes = [
+        result.added.length ? `added ${result.added.length}` : "",
+        result.removed.length ? `removed ${result.removed.length}` : "",
+      ].filter(Boolean).join(", ");
+      toast({ title: changes ? `${selectedGroup.name}: ${changes}` : `${selectedGroup.name} is already up to date` });
+      await Promise.all([loadGroups(), loadGroupData(selectedGroup.id)]);
+    } catch (err) {
+      let message = "Failed to sync members";
+      try { message = JSON.parse((err as Error).message)?.error ?? message; } catch { /* not JSON */ }
+      toast({ title: message, variant: "destructive" });
+    } finally {
+      setRunningAutoAssign(false);
     }
   };
 
@@ -257,7 +325,9 @@ function GroupsTab() {
     setNewResourceUrl("");
     setManageDialogTab(tab);
     setAutoAssignFieldId(group.pcoFieldDefinitionId ?? "");
-    setAutoAssignValue(group.pcoFieldValue ?? "");
+    setAutoAssignKeywords(group.pcoFieldKeywords ?? []);
+    setKeywordDraft("");
+    setAutoAssignRunResult(null);
     loadGroupData(group.id);
     if (isAdmin) {
       loadManagers(group.id);
@@ -443,7 +513,7 @@ function GroupsTab() {
                     <button
                       className="inline-flex items-center gap-1 rounded-full border border-blue-300 bg-blue-50 px-2 py-0.5 text-xs font-semibold text-blue-700 hover:bg-blue-100 transition-colors"
                       onClick={() => openManageDialog(group, "settings")}
-                      title={`${group.pcoFieldDefinitionLabel ?? "Planning Center field"} = ${group.pcoFieldValue ?? ""}`}
+                      title={`${group.pcoFieldDefinitionLabel ?? "Planning Center field"} includes: ${(group.pcoFieldKeywords ?? []).join(", ") || "(no keywords yet)"}`}
                     >
                       <UserCog className="w-3 h-3" />
                       Auto-assign
@@ -524,29 +594,32 @@ function GroupsTab() {
 
             {/* Members Tab */}
             <TabsContent value="members" className="space-y-4 mt-4">
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Add Member</label>
-                <div className="flex gap-2">
-                  <select
-                    className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
-                    value={addMemberUserId}
-                    onChange={e => setAddMemberUserId(e.target.value)}
-                  >
-                    <option value="">Select a user...</option>
-                    {eligibleUsers.map(u => (
-                      <option key={u.id} value={u.id}>
-                        {u.firstName} {u.lastName} ({u.email})
-                      </option>
-                    ))}
-                  </select>
-                  <Button size="sm" onClick={handleAddMember} disabled={!addMemberUserId}>
-                    <UserPlus className="w-4 h-4" />
-                  </Button>
-                </div>
-                {eligibleUsers.length === 0 && (
-                  <p className="text-xs text-muted-foreground">All users are already in this group.</p>
-                )}
-              </div>
+              {isAdmin ? (
+                <details className="rounded-md border px-3 py-2">
+                  <summary className="cursor-pointer text-sm font-medium">Add someone by hand (admins only)</summary>
+                  <div className="space-y-2 pt-2">
+                    <p className="text-xs text-muted-foreground">
+                      Use this rarely. People should normally come in through the Planning Center rule on the
+                      Auto-Assign tab. Anyone added here stays until removed by hand.
+                    </p>
+                    <div className="flex gap-2 items-start">
+                      <div className="flex-1 min-w-0">
+                        <UserSearchPicker users={eligibleUsers} value={addMemberUserId} onChange={setAddMemberUserId} />
+                      </div>
+                      <Button size="sm" onClick={handleAddMember} disabled={!addMemberUserId}>
+                        <UserPlus className="w-4 h-4" />
+                      </Button>
+                    </div>
+                    {eligibleUsers.length === 0 && (
+                      <p className="text-xs text-muted-foreground">All users are already in this group.</p>
+                    )}
+                  </div>
+                </details>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  Members are added from Planning Center. Ask an admin if someone is missing.
+                </p>
+              )}
 
               <div className="space-y-2">
                 <label className="text-sm font-medium">Current Members ({members.length})</label>
@@ -559,7 +632,17 @@ function GroupsTab() {
                     {members.map(m => (
                       <div key={m.id} className="flex items-center justify-between bg-muted/30 rounded px-3 py-2">
                         <div>
-                          <p className="text-sm font-medium">{m.user.firstName} {m.user.lastName}</p>
+                          <p className="text-sm font-medium flex items-center gap-1.5">
+                            {m.user.firstName} {m.user.lastName}
+                            {m.source === "auto" && (
+                              <span
+                                className="rounded-full border border-blue-300 bg-blue-50 px-1.5 py-0 text-[10px] font-semibold text-blue-700"
+                                title="Added by the Planning Center rule. Removed automatically if they stop matching."
+                              >
+                                Auto
+                              </span>
+                            )}
+                          </p>
                           <p className="text-xs text-muted-foreground">{m.user.email}</p>
                         </div>
                         <Button
@@ -581,19 +664,10 @@ function GroupsTab() {
                 <div className="space-y-2">
                   <label className="text-sm font-medium">Assign Manager</label>
                   <p className="text-xs text-muted-foreground">Assigned managers can manage members and approve join requests for this group.</p>
-                  <div className="flex gap-2">
-                    <select
-                      className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
-                      value={addManagerUserId}
-                      onChange={e => setAddManagerUserId(e.target.value)}
-                    >
-                      <option value="">Select a manager or admin...</option>
-                      {eligibleManagers.map(u => (
-                        <option key={u.id} value={u.id}>
-                          {u.firstName} {u.lastName} ({u.role})
-                        </option>
-                      ))}
-                    </select>
+                  <div className="flex gap-2 items-start">
+                    <div className="flex-1 min-w-0">
+                      <UserSearchPicker users={eligibleManagers} value={addManagerUserId} onChange={setAddManagerUserId} showRole placeholder="Search managers and admins..." />
+                    </div>
                     <Button size="sm" onClick={handleAddManager} disabled={!addManagerUserId}>
                       <UserPlus className="w-4 h-4" />
                     </Button>
@@ -650,17 +724,19 @@ function GroupsTab() {
                         </p>
                       </div>
                       <div className="flex gap-1.5">
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Button
-                              size="icon" className="h-7 w-7 bg-green-600 hover:bg-green-700 text-white"
-                              onClick={() => handleJoinRequestAction(jr.id, "approve")}
-                            >
-                              <UserCheck className="w-3.5 h-3.5" />
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent>Approve</TooltipContent>
-                        </Tooltip>
+                        {isAdmin && (
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                size="icon" className="h-7 w-7 bg-green-600 hover:bg-green-700 text-white"
+                                onClick={() => handleJoinRequestAction(jr.id, "approve")}
+                              >
+                                <UserCheck className="w-3.5 h-3.5" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>Approve</TooltipContent>
+                          </Tooltip>
+                        )}
                         <Tooltip>
                           <TooltipTrigger asChild>
                             <Button
@@ -751,8 +827,8 @@ function GroupsTab() {
                 <div className="space-y-1.5">
                   <label className="text-sm font-medium">Planning Center Auto-Assignment</label>
                   <p className="text-xs text-muted-foreground">
-                    When set, anyone who signs in with Church Center and has this profile field equal to the
-                    value below is automatically added to this group — no manual approval needed.
+                    Anyone who signs in with Church Center is added to this group automatically when their
+                    Planning Center field below contains any of the keywords. No approval needed.
                   </p>
                 </div>
 
@@ -761,13 +837,18 @@ function GroupsTab() {
                   <select
                     className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
                     value={autoAssignFieldId}
-                    onChange={e => setAutoAssignFieldId(e.target.value)}
+                    onChange={e => { setAutoAssignFieldId(e.target.value); setAutoAssignRunResult(null); }}
                     disabled={loadingPcoFields}
                   >
                     <option value="">No automatic assignment</option>
-                    {pcoFieldDefinitions.map(field => (
-                      <option key={field.id} value={field.id}>{field.label}</option>
-                    ))}
+                    {autoAssignFieldId && !pcoFieldDefinitions.some(f => f.id === autoAssignFieldId) && (
+                      <option value={autoAssignFieldId}>{selectedGroup?.pcoFieldDefinitionLabel ?? `Planning Center field ${autoAssignFieldId}`}</option>
+                    )}
+                    {[...pcoFieldDefinitions]
+                      .sort((a, b) => (a.label === "Team" ? -1 : b.label === "Team" ? 1 : 0))
+                      .map(field => (
+                        <option key={field.id} value={field.id}>{field.label === "Team" ? "Team (recommended)" : field.label}</option>
+                      ))}
                   </select>
                   {loadingPcoFields && (
                     <p className="text-xs text-muted-foreground">Loading Planning Center fields...</p>
@@ -781,25 +862,100 @@ function GroupsTab() {
 
                 {autoAssignFieldId && (
                   <div className="space-y-1.5">
-                    <label className="text-sm font-medium">Required value</label>
-                    <Input
-                      value={autoAssignValue}
-                      onChange={e => setAutoAssignValue(e.target.value)}
-                      placeholder="e.g. Youth Volunteer"
-                    />
+                    <label className="text-sm font-medium">Accepted keywords</label>
+                    <div className="flex gap-2">
+                      <Input
+                        value={keywordDraft}
+                        onChange={e => {
+                          const value = e.target.value;
+                          if (value.includes(",")) addKeywords(value);
+                          else setKeywordDraft(value);
+                        }}
+                        onKeyDown={e => {
+                          if (e.key === "Enter") { e.preventDefault(); addKeywords(keywordDraft); }
+                          if (e.key === "Backspace" && !keywordDraft && autoAssignKeywords.length > 0) {
+                            setAutoAssignKeywords(current => current.slice(0, -1));
+                          }
+                        }}
+                        placeholder="e.g. Youth, Fearless YTH"
+                      />
+                      <Button type="button" size="sm" variant="outline" onClick={() => addKeywords(keywordDraft)} disabled={!keywordDraft.trim()}>
+                        <Plus className="w-4 h-4" />
+                      </Button>
+                    </div>
+                    {autoAssignKeywords.length > 0 ? (
+                      <div className="flex flex-wrap gap-1.5 pt-1">
+                        {autoAssignKeywords.map(keyword => (
+                          <span key={keyword} className="inline-flex items-center gap-1 rounded-full border bg-muted/40 pl-2.5 pr-1 py-0.5 text-xs font-medium">
+                            {keyword}
+                            <button
+                              type="button"
+                              className="rounded-full p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+                              onClick={() => setAutoAssignKeywords(current => current.filter(k => k !== keyword))}
+                              title={`Remove "${keyword}"`}
+                            >
+                              <XCircle className="w-3 h-3" />
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">No keywords yet. Add at least one.</p>
+                    )}
                     <p className="text-xs text-muted-foreground">
-                      Users are added to this group when their Planning Center profile has this field set to this value (not case-sensitive).
+                      A person matches if any of their values for this field contains any keyword as whole words.
+                      Capital letters and punctuation don&apos;t matter: &ldquo;YTH&rdquo; matches &ldquo;Fearless YTH&rdquo;,
+                      &ldquo;Men&rdquo; matches &ldquo;Men&apos;s&rdquo; but not &ldquo;Women&apos;s&rdquo;. For checkbox fields, use &ldquo;yes&rdquo;.
                     </p>
                   </div>
                 )}
 
-                <Button
-                  size="sm"
-                  onClick={handleSaveAutoAssign}
-                  disabled={savingAutoAssign || (!!autoAssignFieldId && !autoAssignValue.trim())}
-                >
-                  {savingAutoAssign ? "Saving..." : "Save Rule"}
-                </Button>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    size="sm"
+                    onClick={handleSaveAutoAssign}
+                    disabled={savingAutoAssign || (!!autoAssignFieldId && autoAssignKeywords.length === 0 && !keywordDraft.trim())}
+                  >
+                    {savingAutoAssign ? "Saving..." : "Save Rule"}
+                  </Button>
+                  {selectedGroup?.pcoFieldDefinitionId && (selectedGroup.pcoFieldKeywords ?? []).length > 0 && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={handleRunAutoAssign}
+                      disabled={runningAutoAssign || autoAssignDirty || !!keywordDraft.trim()}
+                      title={autoAssignDirty ? "Save the rule first" : "Check everyone who already has an account"}
+                    >
+                      <UserCheck className="w-4 h-4 mr-1.5" />
+                      {runningAutoAssign ? "Checking Planning Center..." : "Sync members now"}
+                    </Button>
+                  )}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  The rule runs when someone signs in, and every group is synced after the weekly Planning Center people
+                  sync: new matches are added, and people the rule added who no longer match are removed. People you add
+                  by hand are never removed. &ldquo;Sync members now&rdquo; does the same for this group right away.
+                </p>
+
+                {autoAssignRunResult && (
+                  <div className="rounded-md border bg-muted/30 px-3 py-2 text-xs space-y-1">
+                    <p className="font-medium">
+                      {autoAssignRunResult.added.length > 0
+                        ? `Added ${autoAssignRunResult.added.length}: ${autoAssignRunResult.added.map(a => a.name).join(", ")}`
+                        : "No one new to add."}
+                    </p>
+                    {autoAssignRunResult.removed.length > 0 && (
+                      <p className="font-medium">
+                        Removed {autoAssignRunResult.removed.length} who no longer match: {autoAssignRunResult.removed.map(r => r.name).join(", ")}
+                      </p>
+                    )}
+                    <p className="text-muted-foreground">
+                      {autoAssignRunResult.matched} account{autoAssignRunResult.matched === 1 ? "" : "s"} matched
+                      {autoAssignRunResult.alreadyMembers > 0 ? `, ${autoAssignRunResult.alreadyMembers} already in this group` : ""}.
+                      People who match but haven&apos;t signed in yet are added on their first sign-in.
+                    </p>
+                  </div>
+                )}
               </TabsContent>
             )}
 

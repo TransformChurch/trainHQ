@@ -8,6 +8,14 @@ import {
   groupMembersTable,
 } from "@workspace/db";
 import { eq, or, and, inArray, isNotNull } from "drizzle-orm";
+import {
+  collectFieldValues,
+  collectValuesByPerson,
+  normalizeKeywords,
+  planGroupSync,
+  valuesMatchKeywords,
+  type FieldDatumLike,
+} from "./groupAutoAssign";
 
 const AUTHORIZE_URL = "https://api.planningcenteronline.com/oauth/authorize";
 const TOKEN_URL = "https://api.planningcenteronline.com/oauth/token";
@@ -838,66 +846,60 @@ async function updatePlanningCenterDateField(
   return updatePlanningCenterFieldById(user, fieldDefinitionId, date);
 }
 
-type FieldDatumResource = {
-  attributes?: { value?: unknown };
-  relationships?: { field_definition?: { data?: { id?: unknown } } };
-};
-
 /**
- * Returns a map of field_definition id -> trimmed string value for every
- * custom field populated on this Planning Center person's profile.
- * Used to automatically assign a newly signed-in user to groups whose
- * admin-configured Planning Center field/value rule matches their profile.
+ * Returns field_definition id -> every non-blank value on this Planning
+ * Center person's profile. Checkbox fields with several ticked options have
+ * one value per option, so each entry is a list.
  */
 export async function fetchPlanningCenterFieldValues(
   personId: string,
   accessToken: string,
-): Promise<Map<string, string>> {
-  const records = await fetchPeopleCollection<FieldDatumResource>(
+): Promise<Map<string, string[]>> {
+  const records = await fetchPeopleCollection<FieldDatumLike>(
     `/people/${encodeURIComponent(personId)}/field_data`,
     accessToken,
   );
-  const values = new Map<string, string>();
-  for (const record of records) {
-    const fieldDefinitionId = record.relationships?.field_definition?.data?.id;
-    const value = record.attributes?.value;
-    if (
-      typeof fieldDefinitionId === "string" && fieldDefinitionId &&
-      typeof value === "string" && value.trim()
-    ) {
-      values.set(fieldDefinitionId, value.trim());
-    }
-  }
-  return values;
+  return collectFieldValues(records);
+}
+
+type AutoAssignRule = { id: number; pcoFieldDefinitionId: string; pcoFieldKeywords: string[] };
+
+async function loadAutoAssignRules(groupId?: number): Promise<AutoAssignRule[]> {
+  const rows = await db
+    .select({
+      id: groupsTable.id,
+      pcoFieldDefinitionId: groupsTable.pcoFieldDefinitionId,
+      pcoFieldKeywords: groupsTable.pcoFieldKeywords,
+    })
+    .from(groupsTable)
+    .where(groupId === undefined
+      ? isNotNull(groupsTable.pcoFieldDefinitionId)
+      : and(isNotNull(groupsTable.pcoFieldDefinitionId), eq(groupsTable.id, groupId)));
+  return rows
+    .map((row) => ({
+      id: row.id,
+      pcoFieldDefinitionId: row.pcoFieldDefinitionId ?? "",
+      pcoFieldKeywords: normalizeKeywords(row.pcoFieldKeywords),
+    }))
+    .filter((rule) => !!rule.pcoFieldDefinitionId && rule.pcoFieldKeywords.length > 0);
 }
 
 /**
  * Adds the signed-in user to any group whose admin-configured Planning
- * Center field/value rule matches this person's profile. Safe to call on
- * every sign-in: it's a no-op when no groups have a rule configured, and
- * any Planning Center API failure is swallowed so it never blocks login.
+ * Center field + keywords rule matches this person's profile (see
+ * lib/groupAutoAssign.ts for the matching rules). Safe to call on every
+ * sign-in: it's a no-op when no groups have a rule configured, and any
+ * Planning Center API failure is swallowed so it never blocks login.
  */
 export async function autoAssignGroupsFromPlanningCenter(
   user: { id: string },
   personId: string,
   accessToken: string,
 ): Promise<void> {
-  const rules = await db
-    .select({
-      id: groupsTable.id,
-      pcoFieldDefinitionId: groupsTable.pcoFieldDefinitionId,
-      pcoFieldValue: groupsTable.pcoFieldValue,
-    })
-    .from(groupsTable)
-    .where(isNotNull(groupsTable.pcoFieldDefinitionId));
-
-  const activeRules = rules.filter(
-    (rule): rule is { id: number; pcoFieldDefinitionId: string; pcoFieldValue: string } =>
-      !!rule.pcoFieldDefinitionId && !!rule.pcoFieldValue,
-  );
+  const activeRules = await loadAutoAssignRules();
   if (activeRules.length === 0) return;
 
-  let fieldValues: Map<string, string>;
+  let fieldValues: Map<string, string[]>;
   try {
     fieldValues = await fetchPlanningCenterFieldValues(personId, accessToken);
   } catch {
@@ -905,7 +907,7 @@ export async function autoAssignGroupsFromPlanningCenter(
   }
 
   const matchingGroupIds = activeRules
-    .filter((rule) => fieldValues.get(rule.pcoFieldDefinitionId)?.toLowerCase() === rule.pcoFieldValue.toLowerCase())
+    .filter((rule) => valuesMatchKeywords(fieldValues.get(rule.pcoFieldDefinitionId) ?? [], rule.pcoFieldKeywords))
     .map((rule) => rule.id);
   if (matchingGroupIds.length === 0) return;
 
@@ -919,8 +921,121 @@ export async function autoAssignGroupsFromPlanningCenter(
   if (newGroupIds.length === 0) return;
 
   await db.insert(groupMembersTable).values(
-    newGroupIds.map((groupId) => ({ groupId, userId: user.id })),
+    newGroupIds.map((groupId) => ({ groupId, userId: user.id, source: "auto" as const })),
   );
+}
+
+export type GroupAutoAssignRunResult = {
+  // Site users (signed in at least once) whose field value matches.
+  matched: number;
+  added: { id: string; name: string }[];
+  // Members the rule had added earlier who no longer match.
+  removed: { id: string; name: string }[];
+  alreadyMembers: number;
+};
+
+/**
+ * Syncs one group's members with its saved Planning Center rule, for
+ * everyone who already has a site account: adds new matches (as "auto") and
+ * removes "auto" members who no longer match. People added by hand are never
+ * removed. Reads the field for the whole church in one paged call
+ * (GET /field_data filtered by field definition). Runs from the group's
+ * "Sync members now" button and after every weekly people sync.
+ */
+export async function runGroupAutoAssign(groupId: number, accessToken: string): Promise<GroupAutoAssignRunResult> {
+  const [rule] = await loadAutoAssignRules(groupId);
+  if (!rule) {
+    throw new PlanningCenterError(
+      "auto_assign_rule_missing",
+      "Pick a Planning Center field and at least one keyword, then save the rule first.",
+      400,
+    );
+  }
+  return syncGroupWithRule(rule, accessToken);
+}
+
+async function syncGroupWithRule(rule: AutoAssignRule, accessToken: string): Promise<GroupAutoAssignRunResult> {
+  const groupId = rule.id;
+  const records = await fetchPeopleCollection<FieldDatumLike>(
+    `/field_data?where[field_definition_id]=${encodeURIComponent(rule.pcoFieldDefinitionId)}`,
+    accessToken,
+  );
+  const byPerson = collectValuesByPerson(records);
+  const matchingPersonIds = [...byPerson.entries()]
+    .filter(([, values]) => valuesMatchKeywords(values, rule.pcoFieldKeywords))
+    .map(([personId]) => personId);
+
+  const matchedUsers: { id: string; firstName: string; lastName: string }[] = [];
+  for (let index = 0; index < matchingPersonIds.length; index += 500) {
+    const chunk = matchingPersonIds.slice(index, index + 500);
+    matchedUsers.push(...await db
+      .select({ id: usersTable.id, firstName: usersTable.firstName, lastName: usersTable.lastName })
+      .from(usersTable)
+      .where(inArray(usersTable.planningCenterPersonId, chunk)));
+  }
+
+  const members = await db
+    .select({
+      userId: groupMembersTable.userId,
+      source: groupMembersTable.source,
+      firstName: usersTable.firstName,
+      lastName: usersTable.lastName,
+    })
+    .from(groupMembersTable)
+    .innerJoin(usersTable, eq(groupMembersTable.userId, usersTable.id))
+    .where(eq(groupMembersTable.groupId, groupId));
+
+  const plan = planGroupSync(matchedUsers.map((user) => user.id), members, records.length > 0);
+  if (plan.add.length > 0) {
+    await db.insert(groupMembersTable).values(plan.add.map((userId) => ({ groupId, userId, source: "auto" as const })));
+  }
+  if (plan.remove.length > 0) {
+    await db.delete(groupMembersTable).where(and(
+      eq(groupMembersTable.groupId, groupId),
+      eq(groupMembersTable.source, "auto"),
+      inArray(groupMembersTable.userId, plan.remove),
+    ));
+  }
+  const nameOf = (user: { firstName: string; lastName: string }) => `${user.firstName} ${user.lastName}`.trim();
+  const addSet = new Set(plan.add);
+  const removeSet = new Set(plan.remove);
+  return {
+    matched: matchedUsers.length,
+    added: matchedUsers.filter((user) => addSet.has(user.id)).map((user) => ({ id: user.id, name: nameOf(user) })),
+    removed: members.filter((member) => removeSet.has(member.userId)).map((member) => ({ id: member.userId, name: nameOf(member) })),
+    alreadyMembers: plan.alreadyMembers,
+  };
+}
+
+export type GroupSyncSummary = {
+  groups: number;
+  added: number;
+  removed: number;
+  failed: { groupId: number; message: string }[];
+};
+
+/**
+ * Syncs every group that has a rule. One group failing (e.g. its Planning
+ * Center field was deleted) doesn't stop the others. Used by the weekly
+ * people sync (routes/peopleSync.ts).
+ */
+export async function syncAllAutoAssignGroups(accessToken: string): Promise<GroupSyncSummary> {
+  const rules = await loadAutoAssignRules();
+  const summary: GroupSyncSummary = { groups: 0, added: 0, removed: 0, failed: [] };
+  for (const rule of rules) {
+    try {
+      const result = await syncGroupWithRule(rule, accessToken);
+      summary.groups += 1;
+      summary.added += result.added.length;
+      summary.removed += result.removed.length;
+    } catch (error) {
+      summary.failed.push({
+        groupId: rule.id,
+        message: error instanceof Error ? error.message : "Group sync failed",
+      });
+    }
+  }
+  return summary;
 }
 
 export type PlanningCenterFieldDefinition = { id: string; label: string };

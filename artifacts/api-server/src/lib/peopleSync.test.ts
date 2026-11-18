@@ -89,12 +89,15 @@ test("standard fields are matched by name, ignoring case and punctuation", () =>
     { id: "12", name: "thrive" },
     { id: "13", name: "Serve-Class" }, // no longer standard (Andrew, 10/14): must not be matched
     { id: "14", name: "Baptism Date" },
+    { id: "15", name: "Team Name" }, // only the field named exactly "Team" is standard
+    { id: "16", name: "Team" },
   ]);
   assert.deepEqual(resolved, [
     { label: "Baptized?", key: "field:11" },
     { label: "Thrive", key: "field:12" },
     { label: "Last Served", key: null },
+    { label: "Team", key: "field:16" },
   ]);
   const fields = effectiveFields(resolved, [{ key: "field:12", label: "dup" }, { key: "attr:nickname", label: "Nickname" }]);
-  assert.deepEqual(fields.map((field) => field.label), ["Baptized?", "Thrive", "Nickname"]);
+  assert.deepEqual(fields.map((field) => field.label), ["Baptized?", "Thrive", "Team", "Nickname"]);
 });

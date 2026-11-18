@@ -186,7 +186,8 @@ export default function Groups() {
               const isPending = group.requestStatus === "pending";
               const isDenied = group.requestStatus === "denied";
               const isRequesting = requestingIds.has(group.id);
-              const canRequestToJoin = me?.role === "student";
+              // Only admins add people directly; everyone else asks (2026-11-18).
+              const canRequestToJoin = !!me && me.role !== "admin";
               return (
                 <Card key={group.id} className="hover:shadow-md transition-shadow">
                   <CardContent className="p-5">
@@ -221,7 +222,7 @@ export default function Groups() {
                           <UserPlus className="w-3 h-3 mr-1" />
                           {isRequesting ? "Sending..." : "Request to Join"}
                         </Button>
-                      ) : canSelfManageMembership ? (
+                      ) : me?.role === "admin" ? (
                         <Button
                           size="sm"
                           variant="outline"

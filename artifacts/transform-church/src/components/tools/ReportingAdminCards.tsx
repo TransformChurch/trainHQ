@@ -2094,6 +2094,7 @@ type PeopleSyncRun = {
   removed: number;
   message?: string;
   missingStandard?: string[];
+  groupSync?: { groups: number; added: number; removed: number; failed: { groupId: number; message: string }[] };
 };
 type PeopleSyncState = {
   enabled: boolean;
@@ -2111,7 +2112,7 @@ const PEOPLE_BASIC_COLUMNS = [
 ];
 // Church-standard custom fields (matched by name in Planning Center; see the
 // API's STANDARD_CUSTOM_FIELDS in lib/peopleSync.ts).
-const PEOPLE_STANDARD_LABELS = ["Baptized?", "Thrive", "Last Served"];
+const PEOPLE_STANDARD_LABELS = ["Baptized?", "Thrive", "Last Served", "Team"];
 
 function PeopleSyncCard() {
   const { toast } = useToast();
@@ -2272,6 +2273,13 @@ function PeopleSyncCard() {
                   : lastRun.status === "success"
                     ? `Last ${lastRun.trigger} pull finished ${formatJobTime(lastRun.finishedAt)}: ${lastRun.people.toLocaleString()} people${lastRun.removed ? `, ${lastRun.removed} no longer in Planning Center` : ""}.`
                     : `Last ${lastRun.trigger} pull failed ${formatJobTime(lastRun.finishedAt)}: ${lastRun.message ?? "unknown error"}`}
+                {lastRun.status === "success" && lastRun.groupSync && (
+                  <>
+                    {" "}Group auto-assign: {lastRun.groupSync.added} added, {lastRun.groupSync.removed} removed
+                    {" "}across {lastRun.groupSync.groups} group{lastRun.groupSync.groups === 1 ? "" : "s"}
+                    {lastRun.groupSync.failed.length ? ` (${lastRun.groupSync.failed.length} failed: ${lastRun.groupSync.failed[0].message})` : ""}.
+                  </>
+                )}
               </p>
             )}
 

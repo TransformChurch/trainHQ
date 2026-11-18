@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { useState, useEffect, useRef, createContext, useContext } from "react";
+import { useState, useEffect, useRef, useMemo, createContext, useContext } from "react";
 import { useAuth } from "@/App";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
@@ -25,13 +25,14 @@ import {
   Accordion, AccordionContent, AccordionItem, AccordionTrigger,
 } from "@/components/ui/accordion";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Plus, Trash2, Video, BookOpen, HelpCircle, Users, Pencil, Globe, Lock, Mail, Upload, Link, HardDrive, Image as ImageIcon, FileText, FolderOpen, Shield, X, AlertTriangle } from "lucide-react";
+import { Plus, Trash2, Video, BookOpen, HelpCircle, Users, Pencil, Globe, Lock, Mail, Upload, Link, HardDrive, Image as ImageIcon, FileText, FolderOpen, Shield, X, AlertTriangle, ChevronRight, ChevronsDownUp, ChevronsUpDown, Rows3 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { useUpload } from "@workspace/object-storage-web";
 import type { Video as VideoType, QuizQuestion } from "@workspace/api-client-react";
 import { StorageImage } from "@/lib/storageUrl";
 import { useSiteCopy } from "@/lib/siteCopy";
+import { UserSearchPicker } from "@/components/UserSearchPicker";
 
 type VideoSourceType = "embed" | "drive" | "upload";
 
@@ -664,7 +665,7 @@ function useLinkableDocuments() {
 
 // ── Module manager (inside a track) ─────────────────────────────────────────
 
-function ModuleManager({ trackId }: { trackId: number }) {
+function ModuleManager({ trackId, compact = false }: { trackId: number; compact?: boolean }) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const { canEdit, isAdmin } = useContentPerms();
@@ -723,7 +724,7 @@ function ModuleManager({ trackId }: { trackId: number }) {
       onSuccess: () => {
         toast({ title: "Module created" });
         setOpen(false); setTitle(""); setDesc(""); setOrder("1"); setIsPublic(true); setModuleImageUrl(""); setContentType("video"); setDocumentId("");
-        queryClient.invalidateQueries({ queryKey: getListModulesQueryKey({ trackId }) });
+        queryClient.invalidateQueries({ queryKey: getListModulesQueryKey() });
       },
     });
   };
@@ -747,7 +748,7 @@ function ModuleManager({ trackId }: { trackId: number }) {
       onSuccess: () => {
         toast({ title: "Module updated" });
         setEditingModule(null);
-        queryClient.invalidateQueries({ queryKey: getListModulesQueryKey({ trackId }) });
+        queryClient.invalidateQueries({ queryKey: getListModulesQueryKey() });
       },
       onError: (error) => {
         toast({
@@ -767,7 +768,7 @@ function ModuleManager({ trackId }: { trackId: number }) {
         body: JSON.stringify({ isPublic: !mod.isPublic }),
       });
       toast({ title: `Module set to ${!mod.isPublic ? "Public" : "Private"}` });
-      queryClient.invalidateQueries({ queryKey: getListModulesQueryKey({ trackId }) });
+      queryClient.invalidateQueries({ queryKey: getListModulesQueryKey() });
     } catch {
       toast({ title: "Failed to update visibility", variant: "destructive" });
     } finally {
@@ -889,12 +890,12 @@ function ModuleManager({ trackId }: { trackId: number }) {
       </Dialog>
 
       {(modules as any[])?.sort((a, b) => a.order - b.order).map((mod: any) => (
-        <div key={mod.id} className="border rounded-lg bg-background">
+        <div key={mod.id} className={`border bg-background ${compact ? "rounded-md" : "rounded-lg"}`}>
           <Accordion type="single" collapsible>
             <AccordionItem value={String(mod.id)} className="border-0">
-              <AccordionTrigger className="px-4 py-3 hover:no-underline">
+              <AccordionTrigger className={`px-4 hover:no-underline ${compact ? "py-1.5 text-sm" : "py-3"}`}>
                 <div className="flex items-center gap-2 text-left flex-1 min-w-0">
-                  {mod.imageUrl ? (
+                  {mod.imageUrl && !compact ? (
                     <StorageImage src={mod.imageUrl} alt={mod.title} className="w-8 h-8 rounded object-cover shrink-0 border border-border" />
                   ) : (
                     <Badge variant="outline" className="text-xs shrink-0">{mod.order}</Badge>
@@ -956,7 +957,7 @@ function ModuleManager({ trackId }: { trackId: number }) {
                             deleteModule({ moduleId: mod.id }, {
                               onSuccess: () => {
                                 toast({ title: "Module deleted" });
-                                queryClient.invalidateQueries({ queryKey: getListModulesQueryKey({ trackId }) });
+                                queryClient.invalidateQueries({ queryKey: getListModulesQueryKey() });
                               },
                             });
                           }
@@ -1384,14 +1385,12 @@ function AssignmentManager() {
 
             {assignTo === "user" ? (
               <FormField label="Student">
-                <Select value={selectedUser} onValueChange={setSelectedUser}>
-                  <SelectTrigger><SelectValue placeholder="Select a student..." /></SelectTrigger>
-                  <SelectContent>
-                    {users?.filter(u => u.role === "student").map(u => (
-                      <SelectItem key={u.id} value={u.id}>{u.firstName} {u.lastName} ({u.email})</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <UserSearchPicker
+                  users={(users ?? []).filter(u => u.role === "student")}
+                  value={selectedUser}
+                  onChange={setSelectedUser}
+                  placeholder="Search students by name or email..."
+                />
               </FormField>
             ) : (
               <FormField label="Group">
@@ -2104,18 +2103,21 @@ function DocumentsTab() {
                   <Globe className="w-3.5 h-3.5" /> Individual
                 </button>
               </div>
-              <div className="flex gap-2">
-                <Select value={addId} onValueChange={setAddId}>
-                  <SelectTrigger className="flex-1">
-                    <SelectValue placeholder={addType === "group" ? "Select a group..." : "Select a user..."} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {addType === "group"
-                      ? repoGroups.map(g => <SelectItem key={g.id} value={String(g.id)}>{g.name}</SelectItem>)
-                      : repoUsers.map(u => <SelectItem key={u.id} value={u.id}>{u.firstName} {u.lastName} — {u.email}</SelectItem>)
-                    }
-                  </SelectContent>
-                </Select>
+              <div className={`flex gap-2 ${addType === "user" ? "items-start" : ""}`}>
+                {addType === "group" ? (
+                  <Select value={addId} onValueChange={setAddId}>
+                    <SelectTrigger className="flex-1">
+                      <SelectValue placeholder="Select a group..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {repoGroups.map(g => <SelectItem key={g.id} value={String(g.id)}>{g.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                ) : (
+                  <div className="flex-1 min-w-0">
+                    <UserSearchPicker users={repoUsers} value={addId} onChange={setAddId} />
+                  </div>
+                )}
                 <Button onClick={handleAddGrant} disabled={!addId || addingGrant} size="sm">
                   {addingGrant ? "..." : "Grant"}
                 </Button>
@@ -2131,6 +2133,9 @@ function DocumentsTab() {
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export type AdminContentSection = "modules" | "documents";
+
+const LIBRARY_COLLAPSED_KEY = "tc.adminContent.collapsedTracks";
+const LIBRARY_COMPACT_KEY = "tc.adminContent.compactModules";
 
 export default function AdminContent({ section = "modules" }: { section?: AdminContentSection }) {
   const { copy } = useSiteCopy();
@@ -2171,6 +2176,42 @@ export default function AdminContent({ section = "modules" }: { section?: AdminC
   };
 
   const ctxValue: ContentPermsCtx = { isAdmin, myExternalUserId, grantedIds: myGrantedIds, canEdit };
+
+  // Library view: collapsed tracks + compact module rows, remembered per browser.
+  const { data: allModules } = useListModules(undefined, { query: { queryKey: getListModulesQueryKey() } });
+  const moduleCounts = useMemo(() => {
+    const counts = new Map<number, number>();
+    for (const module of (allModules as any[] | undefined) ?? []) {
+      counts.set(module.trackId, (counts.get(module.trackId) ?? 0) + 1);
+    }
+    return counts;
+  }, [allModules]);
+  const [collapsedTracks, setCollapsedTracks] = useState<Set<number>>(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(LIBRARY_COLLAPSED_KEY) ?? "[]");
+      return new Set(Array.isArray(saved) ? saved.filter((id: unknown) => typeof id === "number") : []);
+    } catch {
+      return new Set();
+    }
+  });
+  const [compactModules, setCompactModules] = useState<boolean>(() => {
+    try { return localStorage.getItem(LIBRARY_COMPACT_KEY) === "1"; } catch { return false; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem(LIBRARY_COLLAPSED_KEY, JSON.stringify([...collapsedTracks])); } catch { /* storage unavailable */ }
+  }, [collapsedTracks]);
+  useEffect(() => {
+    try { localStorage.setItem(LIBRARY_COMPACT_KEY, compactModules ? "1" : "0"); } catch { /* storage unavailable */ }
+  }, [compactModules]);
+  const toggleTrack = (trackId: number) => {
+    setCollapsedTracks(current => {
+      const next = new Set(current);
+      if (next.has(trackId)) next.delete(trackId);
+      else next.add(trackId);
+      return next;
+    });
+  };
+  const allCollapsed = !!tracks?.length && tracks.every(track => collapsedTracks.has(track.id));
 
   const [addTrackOpen, setAddTrackOpen] = useState(false);
   const [trackName, setTrackName] = useState("");
@@ -2333,19 +2374,68 @@ export default function AdminContent({ section = "modules" }: { section?: AdminC
 
       {section === "modules" ? (
           <div className="space-y-4">
-            {tracks?.map(track => (
-              <Card key={track.id}>
-                <CardHeader className="pb-3">
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="flex items-start gap-4 min-w-0">
+            {!!tracks?.length && (
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-sm text-muted-foreground">
+                  {tracks.length} track{tracks.length === 1 ? "" : "s"} · {(allModules as any[] | undefined)?.length ?? 0} modules
+                </p>
+                <div className="flex items-center gap-1.5">
+                  <Button
+                    variant="outline" size="sm" className="h-8"
+                    onClick={() => setCollapsedTracks(allCollapsed ? new Set() : new Set(tracks.map(track => track.id)))}
+                  >
+                    {allCollapsed
+                      ? <><ChevronsUpDown className="w-4 h-4 mr-1.5" /> Expand all</>
+                      : <><ChevronsDownUp className="w-4 h-4 mr-1.5" /> Collapse all</>}
+                  </Button>
+                  <Button
+                    variant={compactModules ? "secondary" : "outline"} size="sm" className="h-8"
+                    onClick={() => setCompactModules(value => !value)}
+                    title="Show modules as slim one-line rows"
+                    aria-pressed={compactModules}
+                  >
+                    <Rows3 className="w-4 h-4 mr-1.5" /> Compact rows
+                  </Button>
+                </div>
+              </div>
+            )}
+            {tracks?.map(track => {
+              const collapsed = collapsedTracks.has(track.id);
+              const moduleCount = moduleCounts.get(track.id) ?? 0;
+              return (
+              <Card key={track.id} className={collapsed ? "shadow-none" : undefined}>
+                <CardHeader className={collapsed ? "px-4 py-2" : "pb-3"}>
+                  <div className={`flex justify-between gap-4 ${collapsed ? "items-center" : "items-start"}`}>
+                    <button
+                      type="button"
+                      onClick={() => toggleTrack(track.id)}
+                      className={`flex min-w-0 flex-1 gap-3 text-left ${collapsed ? "items-center" : "items-start"}`}
+                      aria-expanded={!collapsed}
+                      title={collapsed ? "Expand track" : "Collapse track"}
+                    >
+                      <ChevronRight className={`w-4 h-4 shrink-0 text-muted-foreground transition-transform ${collapsed ? "" : "rotate-90 mt-1.5"}`} />
                       {track.imageUrl && (
-                        <StorageImage src={track.imageUrl} alt={track.name} className="w-14 h-14 rounded-lg object-cover shrink-0 border border-border" />
+                        <StorageImage
+                          src={track.imageUrl}
+                          alt={track.name}
+                          className={`rounded-lg object-cover shrink-0 border border-border ${collapsed ? "w-7 h-7 rounded-md" : "w-14 h-14"}`}
+                        />
                       )}
-                      <div className="min-w-0">
-                        <CardTitle className="text-xl">{track.name}</CardTitle>
-                        {track.description && <p className="text-sm text-muted-foreground mt-1">{track.description}</p>}
+                      <div className="min-w-0 flex-1">
+                        {collapsed ? (
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className="font-semibold truncate">{track.name}</span>
+                            <Badge variant="secondary" className="text-xs shrink-0">{moduleCount} module{moduleCount === 1 ? "" : "s"}</Badge>
+                            {track.description && <span className="hidden md:inline text-sm text-muted-foreground truncate">{track.description}</span>}
+                          </div>
+                        ) : (
+                          <>
+                            <CardTitle className="text-xl">{track.name}</CardTitle>
+                            {track.description && <p className="text-sm text-muted-foreground mt-1">{track.description}</p>}
+                          </>
+                        )}
                       </div>
-                    </div>
+                    </button>
                     <div className="flex items-center gap-1 shrink-0">
                       {isAdmin && (
                         <ManageEditorsDialog contentType="track" contentId={track.id} contentName={track.name} />
@@ -2379,11 +2469,14 @@ export default function AdminContent({ section = "modules" }: { section?: AdminC
                     </div>
                   </div>
                 </CardHeader>
-                <CardContent>
-                  <ModuleManager trackId={track.id} />
-                </CardContent>
+                {!collapsed && (
+                  <CardContent>
+                    <ModuleManager trackId={track.id} compact={compactModules} />
+                  </CardContent>
+                )}
               </Card>
-            ))}
+              );
+            })}
             {tracks?.length === 0 && (
               <Card className="border-dashed bg-muted/10">
                 <CardContent className="p-12 text-center">
