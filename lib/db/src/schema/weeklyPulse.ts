@@ -72,9 +72,11 @@ export const weeklyPulseRunsTable = pgTable("weekly_pulse_runs", {
 
 // The master tracker: one row per number in a run. Query it with
 // weekly_pulse_runs.counts_toward_tracker = true for clean week-by-week,
-// year-over-year series. sourceType is "checkins" | "group" | "form" |
-// "form_field"; for "form_field" rows, detail holds the answer text and
-// fieldLabel the question. sourceId is the Planning Center id, so a series
+// year-over-year series. sourceType is "checkins" | "group" | "group_type" |
+// "form" | "form_field"; for "form_field" rows, detail holds the answer text and
+// fieldLabel the question. Since 2026-11-18, "group" rows carry their group
+// type's name in fieldLabel, and "group_type" rows (sourceId = the group type
+// id) hold each type's total -- the sum of its groups' attendance. sourceId is the Planning Center id, so a series
 // survives a rename in Planning Center. value is NULL when the number
 // couldn't be fetched at all (warning says why) -- never a fake 0.
 export const weeklyPulseMetricsTable = pgTable("weekly_pulse_metrics", {

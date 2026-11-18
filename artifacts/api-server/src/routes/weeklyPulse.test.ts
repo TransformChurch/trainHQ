@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildLatestReportCsv, computeWeekRange, isStandardWeek, metricsFromResults } from "./weeklyPulse";
+import { buildLatestReportCsv, computeWeekRange, groupTypeOf, groupsByType, isStandardWeek, metricsFromResults } from "./weeklyPulse";
 
 test("the Monday cron window counts toward the tracker; a mid-week test does not", () => {
   // Cron fires Monday 11:00 UTC.
@@ -50,4 +50,49 @@ test("latest report CSV escapes values and neutralises spreadsheet formulas", ()
   assert.equal(lines[1], 'Weekly Pulse,2026-09-28,2026-10-05,2026-10-05 11:00,Scheduled,Check-Ins,"Kids, Sunday",,,42,');
   assert.match(lines[2], /,"'=HYPERLINK\(""x""\)",1,$/);
   assert.match(lines[3], /,Groups,G,,,,Not available: 403$/);
+});
+
+const sports = { id: "211724", name: "Sports Groups", position: 4 };
+const mens = { id: "193177", name: "Men's Groups", position: 3 };
+
+test("groups are listed under their type with a total per type", () => {
+  const sections = groupsByType([
+    { sourceId: "g1", name: "Pickleball", count: 12, groupType: sports },
+    { sourceId: "g2", name: "No type", count: 3 },
+    { sourceId: "g3", name: "Basketball", count: 20, groupType: sports },
+    { sourceId: "g4", name: "Men Tue", count: 9, groupType: mens },
+    { sourceId: "g5", name: "Men Thu", count: 0, failed: true, groupType: mens },
+    { sourceId: "g6", name: "Soccer", count: 0, failed: true, groupType: { ...sports } },
+  ]);
+  assert.deepEqual(sections.map((s) => [s.type?.name ?? null, s.groups.map((g) => g.name), s.total]), [
+    ["Men's Groups", ["Men Thu", "Men Tue"], 9],
+    ["Sports Groups", ["Basketball", "Pickleball", "Soccer"], 32],
+    [null, ["No type"], 3],
+  ]);
+  const allFailed = groupsByType([{ sourceId: "g5", name: "Men Thu", count: 0, failed: true, groupType: mens }]);
+  assert.equal(allFailed[0].total, null);
+
+  const rows = metricsFromResults({ checkins: [], forms: [], groups: [
+    { sourceId: "g1", name: "Pickleball", count: 12, groupType: sports },
+    { sourceId: "g3", name: "Basketball", count: 20, groupType: sports },
+  ] });
+  assert.deepEqual(rows.map((r) => [r.sourceType, r.sourceId, r.fieldLabel, r.value]), [
+    ["group", "g3", "Sports Groups", 20],
+    ["group", "g1", "Sports Groups", 12],
+    ["group_type", "211724", "Sports Groups", 32],
+  ]);
+  const csv = buildLatestReportCsv(
+    { configName: "P", weekStart: "2026-11-09", weekEnd: "2026-11-16", ranAt: new Date("2026-11-16T12:00:00Z"), trigger: "scheduled" },
+    rows,
+  ).trimEnd().split("\r\n");
+  assert.match(csv[3], /,Groups: Sports Groups,Sports Groups total,,,32,$/);
+});
+
+test("groupTypeOf reads the included group type", () => {
+  const page = {
+    data: { id: "g1", type: "Group", attributes: { name: "Pickleball" }, relationships: { group_type: { data: { type: "GroupType", id: "211724" } } } },
+    included: [{ id: "211724", type: "GroupType", attributes: { name: "Sports Groups", position: 4 } }],
+  };
+  assert.deepEqual(groupTypeOf(page as never), sports);
+  assert.equal(groupTypeOf({ data: { id: "g2", type: "Group", attributes: {}, relationships: { group_type: { data: null } } } } as never), null);
 });

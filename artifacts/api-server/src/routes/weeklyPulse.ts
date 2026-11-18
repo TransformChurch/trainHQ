@@ -292,7 +292,47 @@ async function fetchFormWeeklyStats(
 // sourceId (the Planning Center id) and failed (the whole fetch threw, so
 // count is a placeholder 0 for the email, not a real number) exist for the
 // tracker -- see weeklyPulseMetricsTable.
-type NamedCount = { sourceId: string; name: string; count: number; warning?: string; failed?: boolean };
+type NamedCount = {
+  sourceId: string;
+  name: string;
+  count: number;
+  warning?: string;
+  failed?: boolean;
+  // Groups only: the Planning Center group type (2026-11-18), so the email
+  // can list groups under their type with a total per type.
+  groupType?: GroupTypeInfo | null;
+};
+export type GroupTypeInfo = { id: string; name: string; position: number | null };
+
+export type GroupTypeSection = {
+  type: GroupTypeInfo | null; // null = groups with no group type
+  groups: NamedCount[];
+  // Sum of the groups' attendance (people in two groups of the type count
+  // twice). null when every group's fetch failed.
+  total: number | null;
+};
+
+// Groups listed under their Planning Center group type (Andrew, 2026-11-18:
+// "see groups individually, but then have the sports groups give a total
+// attendance, men's groups total, women's groups total"). Types in Planning
+// Center's order, groups by name; groups with no type last. Pure; tested.
+export function groupsByType(groups: NamedCount[]): GroupTypeSection[] {
+  const sections = new Map<string, GroupTypeSection>();
+  for (const group of groups) {
+    const key = group.groupType?.id ?? "";
+    const section = sections.get(key) ?? { type: group.groupType ?? null, groups: [], total: null };
+    section.groups.push(group);
+    if (!group.failed) section.total = (section.total ?? 0) + group.count;
+    sections.set(key, section);
+  }
+  for (const section of sections.values()) section.groups.sort((a, b) => a.name.localeCompare(b.name));
+  return [...sections.values()].sort((a, b) => {
+    if (!a.type || !b.type) return a.type ? -1 : b.type ? 1 : 0;
+    const pa = a.type.position ?? Number.MAX_SAFE_INTEGER;
+    const pb = b.type.position ?? Number.MAX_SAFE_INTEGER;
+    return pa - pb || a.type.name.localeCompare(b.type.name);
+  });
+}
 type FormSummary = {
   sourceId: string;
   failed?: boolean;
@@ -303,7 +343,7 @@ type FormSummary = {
   warning?: string;
 };
 
-function buildEmailHtml(
+export function buildEmailHtml(
   config: WeeklyPulseConfig,
   weekRange: { start: string; end: string },
   checkins: NamedCount[],
@@ -320,6 +360,12 @@ function buildEmailHtml(
       <td style="padding:6px 12px;border-bottom:1px solid #e5e5e5;text-align:right;font-weight:600;color:#1a1a1a;">${count}</td>
     </tr>`;
 
+  const totalRow = (label: string, count: number | string) => `
+    <tr>
+      <td style="padding:6px 12px;border-bottom:2px solid #d1d5db;background:#f3f4f6;font-weight:700;color:#111827;">${escapeHtml(label)}</td>
+      <td style="padding:6px 12px;border-bottom:2px solid #d1d5db;background:#f3f4f6;text-align:right;font-weight:700;color:#111827;">${count}</td>
+    </tr>`;
+
   const sections: string[] = [];
   if (checkins.length) {
     sections.push(`
@@ -329,11 +375,22 @@ function buildEmailHtml(
         .join("")}</table>`);
   }
   if (groups.length) {
+    const byType = groupsByType(groups);
+    const typed = byType.some((section) => section.type);
+    const grandTotal = groups.some((group) => !group.failed)
+      ? groups.reduce((sum, group) => sum + (group.failed ? 0 : group.count), 0)
+      : null;
     sections.push(`
       <h3 style="margin:20px 0 4px;font-size:14px;color:#374151;">Groups</h3>
-      <table style="width:100%;border-collapse:collapse;font-size:14px;">${groups
+      ${byType.map((section) => {
+        const label = section.type?.name ?? (typed ? "Other groups" : "");
+        return `
+      ${label ? `<h4 style="margin:14px 0 2px;font-size:13px;color:#4b5563;">${escapeHtml(label)}</h4>` : ""}
+      <table style="width:100%;border-collapse:collapse;font-size:14px;">${section.groups
         .map((item) => row(item.name, item.count, item.warning))
-        .join("")}</table>`);
+        .join("")}${typed && section.type ? totalRow(`${section.type.name} total`, section.total ?? "—") : ""}</table>`;
+      }).join("")}
+      ${typed && byType.length > 1 ? `<table style="width:100%;border-collapse:collapse;font-size:14px;margin-top:12px;">${totalRow("All groups total", grandTotal ?? "—")}</table>` : ""}`);
   }
   for (const form of forms) {
     const breakdownRows = form.fieldBreakdown
@@ -365,6 +422,19 @@ type PulseResults = {
   forms: FormSummary[];
 };
 
+// The group's type from GET /groups/{id}?include=group_type, or null.
+export function groupTypeOf(groupPage: { data?: JsonApiResource | JsonApiResource[] | null; included?: JsonApiResource[] }): GroupTypeInfo | null {
+  const group = Array.isArray(groupPage.data) ? groupPage.data[0] : groupPage.data;
+  if (!group) return null;
+  const typeId = relationshipId(group, "group_type");
+  if (!typeId) return null;
+  const included = (groupPage.included ?? []).find((item) => item.type === "GroupType" && String(item.id) === typeId);
+  const name = text(included?.attributes?.name).trim();
+  if (!name) return null;
+  const position = Number(included?.attributes?.position);
+  return { id: typeId, name, position: Number.isFinite(position) ? position : null };
+}
+
 async function collectWeeklyPulse(
   config: WeeklyPulseConfig,
   accessToken: string,
@@ -394,10 +464,14 @@ async function collectWeeklyPulse(
   const groupsResults: NamedCount[] = [];
   for (const groupId of groupIds) {
     try {
-      const groupPage = await planningCenterRequest(`${GROUPS_BASE}/groups/${encodeURIComponent(groupId)}`, accessToken);
+      const groupPage = await planningCenterRequest(
+        `${GROUPS_BASE}/groups/${encodeURIComponent(groupId)}?include=group_type`,
+        accessToken,
+      );
       const name = firstValue(groupPage.data?.attributes ?? {}, "name") || `Group ${groupId}`;
+      const groupType = groupTypeOf(groupPage);
       const { count, warning } = await fetchGroupWeeklyCount(groupId, accessToken, weekRange.start, weekRange.end);
-      groupsResults.push({ sourceId: groupId, name, count, warning });
+      groupsResults.push({ sourceId: groupId, name, count, warning, groupType });
     } catch (error) {
       groupsResults.push({
         sourceId: groupId,
@@ -443,7 +517,7 @@ async function collectWeeklyPulse(
 }
 
 export type PulseMetricRow = {
-  sourceType: "checkins" | "group" | "form" | "form_field";
+  sourceType: "checkins" | "group" | "group_type" | "form" | "form_field";
   sourceId: string;
   sourceName: string;
   fieldLabel: string | null;
@@ -464,11 +538,22 @@ export function metricsFromResults(results: PulseResults): PulseMetricRow[] {
       value: item.failed ? null : item.count, warning: item.warning ?? null,
     });
   }
-  for (const item of results.groups) {
-    rows.push({
-      sourceType: "group", sourceId: item.sourceId, sourceName: item.name, fieldLabel: null, detail: null,
-      value: item.failed ? null : item.count, warning: item.warning ?? null,
-    });
+  // Groups in the email's order. A group's type name goes in fieldLabel; each
+  // type gets a "group_type" total row (2026-11-18).
+  for (const section of groupsByType(results.groups)) {
+    for (const item of section.groups) {
+      rows.push({
+        sourceType: "group", sourceId: item.sourceId, sourceName: item.name, fieldLabel: section.type?.name ?? null, detail: null,
+        value: item.failed ? null : item.count, warning: item.warning ?? null,
+      });
+    }
+    if (section.type) {
+      rows.push({
+        sourceType: "group_type", sourceId: section.type.id, sourceName: `${section.type.name} total`,
+        fieldLabel: section.type.name, detail: null, value: section.total,
+        warning: section.total === null ? "No group in this type could be loaded." : null,
+      });
+    }
   }
   for (const form of results.forms) {
     rows.push({
@@ -813,6 +898,7 @@ function csvCell(value: unknown): string {
 const SECTION_LABELS: Record<string, string> = {
   checkins: "Check-Ins",
   group: "Groups",
+  group_type: "Groups",
   form: "Forms",
   form_field: "Forms",
 };
@@ -830,7 +916,9 @@ export function buildLatestReportCsv(
     run.weekEnd,
     ranAt,
     runType,
-    SECTION_LABELS[row.sourceType] ?? row.sourceType,
+    (row.sourceType === "group" || row.sourceType === "group_type") && row.fieldLabel
+      ? `Groups: ${row.fieldLabel}`
+      : SECTION_LABELS[row.sourceType] ?? row.sourceType,
     row.sourceName,
     row.sourceType === "form_field" ? (row.fieldLabel ?? "") : row.sourceType === "form" ? "Total submissions" : "",
     row.detail ?? "",
