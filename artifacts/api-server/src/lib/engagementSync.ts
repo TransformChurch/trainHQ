@@ -11,17 +11,18 @@
 //
 //  - checkins_event: attendee check-ins per session (?filter=attendee), and
 //    Planning Center's first-time check-ins (?filter=first_time) for new
-//    guests.
+//    guests. An item can combine several events (current or archived); their
+//    weeks are merged, and changing the event list re-pulls the backfill.
 //  - group / group_type: Groups attendance per meeting; present = not marked
 //    absent (lib/groupAttendance.ts rule). A group type covers every group of
 //    that type that existed during the week, so tracking survives groups
 //    being recreated each season. New guests: first week seen for the item,
 //    once 8+ earlier weeks are on record (lib/engagementMetrics.ts).
 import { db, engagementAttendanceTable, engagementWeeksTable, settingsTable } from "@workspace/db";
-import { and, asc, eq, lt, notInArray } from "drizzle-orm";
+import { and, asc, eq, gte, lt, notInArray } from "drizzle-orm";
 import { addDays, weekStartFor } from "./checkinsHistory";
 import { groupFirstTimers } from "./engagementMetrics";
-import { readEngagementSettings, type TrackedItem } from "./engagement";
+import { itemEventIds, readEngagementSettings, type TrackedItem } from "./engagement";
 import { getValidPlanningCenterAccessToken } from "./planningCenter";
 import { logger } from "./logger";
 import { CHECK_INS_BASE, fetchCollection, relationshipId, text, type JsonApiResource } from "../routes/reports";
@@ -51,7 +52,32 @@ export type EngagementSyncRun = {
   message?: string;
 };
 
-type SyncState = { items: Record<string, { pulledFrom: string; lastSyncedAt: string }>; lastRun: EngagementSyncRun | null };
+// `events`: the Check-Ins event ids last pulled for a combined item, so a
+// changed list re-pulls the whole backfill window.
+type SyncState = { items: Record<string, { pulledFrom: string; lastSyncedAt: string; events?: string[] }>; lastRun: EngagementSyncRun | null };
+
+export const eventsSignature = (ids: string[]) => [...new Set(ids)].sort();
+export function eventsChanged(previous: string[] | undefined, current: string[]): boolean {
+  const before = previous ?? current.slice(0, 1);
+  const after = eventsSignature(current);
+  const sortedBefore = eventsSignature(before);
+  return sortedBefore.length !== after.length || sortedBefore.some((id, index) => id !== after[index]);
+}
+
+// Merges per-event weeks into one list (people present at any of them).
+export function mergeEventWeeks(lists: PulledWeek[][]): PulledWeek[] {
+  const weeks = new Map<string, PulledWeek>();
+  for (const list of lists) {
+    for (const week of list) {
+      const merged = weeks.get(week.weekStart) ?? emptyWeek(week.weekStart, false);
+      merged.sessions += week.sessions;
+      for (const person of week.present) merged.present.add(person);
+      for (const person of week.firstTime) merged.firstTime.add(person);
+      weeks.set(week.weekStart, merged);
+    }
+  }
+  return [...weeks.values()].sort((a, b) => a.weekStart.localeCompare(b.weekStart));
+}
 
 export async function readSyncState(): Promise<SyncState> {
   const rows = await db.select().from(settingsTable).where(eq(settingsTable.key, STATE_KEY)).limit(1);
@@ -76,7 +102,7 @@ export function syncFrom(pulledFrom: string | undefined, thisWeek: string): stri
   return addDays(thisWeek, -7 * REFRESH_WEEKS);
 }
 
-type PulledWeek = {
+export type PulledWeek = {
   weekStart: string;
   sessions: number;
   present: Set<string>;
@@ -215,6 +241,17 @@ async function saveWeeks(item: TrackedItem, weeks: PulledWeek[]): Promise<number
   return saved;
 }
 
+async function dropWeeksNotPulled(item: TrackedItem, from: string, kept: string[]): Promise<void> {
+  for (const table of [engagementWeeksTable, engagementAttendanceTable] as const) {
+    await db.delete(table).where(and(
+      eq(table.itemKind, item.kind),
+      eq(table.itemId, item.id),
+      gte(table.weekStart, from),
+      ...(kept.length ? [notInArray(table.weekStart, kept)] : []),
+    ));
+  }
+}
+
 // Drops weeks past the retention window and items no longer tracked.
 async function prune(items: TrackedItem[], thisWeek: string): Promise<void> {
   const cutoff = addDays(thisWeek, -7 * RETAIN_WEEKS);
@@ -269,13 +306,28 @@ export async function runEngagementSync(
     for (const item of items) {
       try {
         const accessToken = await getToken(settings.dashboard.ownerUserId);
-        const from = syncFrom(state.items[itemKey(item)]?.pulledFrom, thisWeek);
-        const weeks = item.kind === "checkins_event"
-          ? await pullCheckinsEvent(accessToken, item.id, from, delayMs)
-          : await pullGroups(accessToken, item.kind === "group" ? [item.id] : await groupsOfType(accessToken, item.id, from), from, delayMs);
+        const eventIds = itemEventIds(item);
+        const prior = state.items[itemKey(item)];
+        // A changed event list re-pulls the backfill so every week is merged.
+        const repull = item.kind === "checkins_event" && prior && eventsChanged(prior.events, eventIds);
+        const from = syncFrom(repull ? undefined : prior?.pulledFrom, thisWeek);
+        let weeks: PulledWeek[];
+        if (item.kind === "checkins_event") {
+          const lists: PulledWeek[][] = [];
+          for (const eventId of eventIds) lists.push(await pullCheckinsEvent(accessToken, eventId, from, delayMs));
+          weeks = mergeEventWeeks(lists);
+        } else {
+          weeks = await pullGroups(accessToken, item.kind === "group" ? [item.id] : await groupsOfType(accessToken, item.id, from), from, delayMs);
+        }
         run.weeksSaved += await saveWeeks(item, weeks);
-        const previous = state.items[itemKey(item)]?.pulledFrom;
-        state.items[itemKey(item)] = { pulledFrom: previous && previous < from ? previous : from, lastSyncedAt: new Date().toISOString() };
+        // After a re-pull, drop weeks only a removed event had.
+        if (repull) await dropWeeksNotPulled(item, from, weeks.map((week) => week.weekStart));
+        const previous = prior?.pulledFrom;
+        state.items[itemKey(item)] = {
+          pulledFrom: previous && previous < from ? previous : from,
+          lastSyncedAt: new Date().toISOString(),
+          ...(item.kind === "checkins_event" ? { events: eventsSignature(eventIds) } : {}),
+        };
       } catch (error) {
         const typed = error as Error & { status?: number };
         run.failures.push({

@@ -221,7 +221,16 @@ export type TrackedItemKind = "checkins_event" | "group" | "group_type";
 // transform: counts toward the Transform part; tc_college: attending it
 // earns the TC College part (2026-11-10).
 export type TrackedItemRole = "transform" | "tc_college";
-export type TrackedItem = { kind: TrackedItemKind; id: string; name: string; role: TrackedItemRole };
+// A Check-Ins item can combine several events into one card (2026-11-18):
+// `id` is the first event; `extraEvents` are the others (current or
+// archived), merged week by week. Saved data stays keyed by kind + id.
+export type TrackedEvent = { id: string; name: string };
+export type TrackedItem = { kind: TrackedItemKind; id: string; name: string; role: TrackedItemRole; extraEvents?: TrackedEvent[] };
+export const MAX_EVENTS_PER_ITEM = 20;
+
+// Every Check-Ins event id behind an item (just its id for other kinds).
+export const itemEventIds = (item: TrackedItem): string[] =>
+  item.kind === "checkins_event" ? [item.id, ...(item.extraEvents ?? []).map((event) => event.id)] : [item.id];
 
 // Each person's score sorts them into green / yellow / red: green = score >=
 // green, yellow = score >= yellow, else red. In points (out of the total).
@@ -281,12 +290,27 @@ export function normalizeTrackedItems(raw: unknown): TrackedItem[] {
     const key = `${kind}:${id}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    items.push({
+    const item: TrackedItem = {
       kind,
       id,
       name: String(source.name ?? "").trim().slice(0, 120) || id,
       role: source.role === "tc_college" ? "tc_college" : "transform",
-    });
+    };
+    if (kind === "checkins_event" && Array.isArray(source.extraEvents)) {
+      const eventIds = new Set([id]);
+      const extraEvents: TrackedEvent[] = [];
+      for (const raw of source.extraEvents) {
+        if (!raw || typeof raw !== "object") continue;
+        const event = raw as Record<string, unknown>;
+        const eventId = String(event.id ?? "").trim();
+        if (!/^\d{1,20}$/.test(eventId) || eventIds.has(eventId)) continue;
+        eventIds.add(eventId);
+        extraEvents.push({ id: eventId, name: String(event.name ?? "").trim().slice(0, 120) || eventId });
+        if (extraEvents.length >= MAX_EVENTS_PER_ITEM - 1) break;
+      }
+      if (extraEvents.length) item.extraEvents = extraEvents;
+    }
+    items.push(item);
     if (items.length >= MAX_TRACKED_ITEMS) break;
   }
   return items;

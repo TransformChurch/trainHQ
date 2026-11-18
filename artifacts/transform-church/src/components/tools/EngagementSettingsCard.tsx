@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "wouter";
-import { Gauge, Loader2, Mail, Plus, RefreshCw, Save, Trash2 } from "lucide-react";
+import { Gauge, Loader2, Mail, Plus, RefreshCw, Save, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -20,7 +20,8 @@ import { api } from "@/lib/toolApi";
 type Part = "formThrive" | "transform" | "serving" | "tcCollege" | "giving" | "leadership" | "serveClass";
 type Kind = "checkins_event" | "group" | "group_type";
 type Role = "transform" | "tc_college";
-type TrackedItem = { kind: Kind; id: string; name: string; role: Role };
+type TrackedEvent = { id: string; name: string };
+type TrackedItem = { kind: Kind; id: string; name: string; role: Role; extraEvents?: TrackedEvent[] };
 type FormInfo = { id: string; name: string; archived: boolean; submissionCount: number };
 type SyncRun = { status: string; startedAt: string; finishedAt: string | null; itemsChecked: number; weeksSaved: number; failures: { item: string; error: string }[]; message?: string };
 type Settings = {
@@ -43,7 +44,7 @@ type SettingsResponse = {
   syncState: Record<string, { pulledFrom: string; lastSyncedAt: string } | null>;
   lastSync: SyncRun | null;
 };
-type Sources = { checkinsEvents: { id: string; name: string }[]; groups: { id: string; name: string }[]; groupTypes: { id: string; name: string; description: string }[] };
+type Sources = { checkinsEvents: { id: string; name: string; archived?: boolean }[]; groups: { id: string; name: string }[]; groupTypes: { id: string; name: string; description: string }[] };
 
 const PARTS: { key: Part; label: string; help: string }[] = [
   { key: "formThrive", label: "Form / Thrive", help: "Thrive done, or any form submitted" },
@@ -61,6 +62,9 @@ const FIELD_ROWS: { key: "thrive" | "serveClass" | "lastServed"; label: string }
 ];
 const ROLE_LABEL: Record<Role, string> = { transform: "Transform", tc_college: "TC College" };
 const KIND_LABEL: Record<Kind, string> = { checkins_event: "Check-Ins event", group: "Group", group_type: "Group type (every group of this type)" };
+const MAX_EVENTS_PER_ITEM = 20;
+const itemKeyOf = (item: Pick<TrackedItem, "kind" | "id">) => `${item.kind}:${item.id}`;
+const roleFor = (name: string): Role => (/college/i.test(name) ? "tc_college" : "transform");
 const selectClass = "flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm";
 
 export function EngagementSettingsCard() {
@@ -78,6 +82,12 @@ export function EngagementSettingsCard() {
   const [syncing, setSyncing] = useState(false);
   const [testing, setTesting] = useState(false);
   const [showForms, setShowForms] = useState(false);
+  // Check-Ins picker: several events at once, archived ones optional, and
+  // adding to an existing card (addTarget = that card's key).
+  const [showArchived, setShowArchived] = useState(false);
+  const [picked, setPicked] = useState<string[]>([]);
+  const [addTarget, setAddTarget] = useState<string | null>(null);
+  const pickerRef = useRef<HTMLDivElement | null>(null);
   const pollTimer = useRef<number | null>(null);
 
   const load = async (resetDraft = true) => {
@@ -118,11 +128,20 @@ export function EngagementSettingsCard() {
 
   const options = useMemo(() => {
     if (!sources || !draft) return [];
-    const list = pickKind === "checkins_event" ? sources.checkinsEvents : pickKind === "group" ? sources.groups : sources.groupTypes;
-    const tracked = new Set(draft.dashboard.items.map((item) => `${item.kind}:${item.id}`));
     const needle = filter.trim().toLowerCase();
+    if (pickKind === "checkins_event") {
+      // An event can only be on one card.
+      const used = new Set(draft.dashboard.items.filter((item) => item.kind === "checkins_event")
+        .flatMap((item) => [item.id, ...(item.extraEvents ?? []).map((event) => event.id)]));
+      return sources.checkinsEvents
+        .filter((entry) => !used.has(entry.id) && (showArchived || !entry.archived) && (!needle || entry.name.toLowerCase().includes(needle)))
+        .sort((a, b) => Number(!!a.archived) - Number(!!b.archived) || a.name.localeCompare(b.name))
+        .slice(0, 150);
+    }
+    const list = pickKind === "group" ? sources.groups : sources.groupTypes;
+    const tracked = new Set(draft.dashboard.items.map((item) => `${item.kind}:${item.id}`));
     return list.filter((entry) => !tracked.has(`${pickKind}:${entry.id}`) && (!needle || entry.name.toLowerCase().includes(needle))).slice(0, 60);
-  }, [sources, draft, pickKind, filter]);
+  }, [sources, draft, pickKind, filter, showArchived]);
 
   if (loadError) {
     return (
@@ -160,6 +179,43 @@ export function EngagementSettingsCard() {
     excludedFormIds: excluded.has(id) ? draft.excludedFormIds.filter((entry) => entry !== id) : [...draft.excludedFormIds, id],
   });
   const setDashboard = (patch: Partial<Settings["dashboard"]>) => setDraft({ ...draft, dashboard: { ...draft.dashboard, ...patch } });
+  const eventName = (id: string) => sources?.checkinsEvents.find((event) => event.id === id)?.name ?? id;
+  const targetItem = addTarget ? draft.dashboard.items.find((item) => itemKeyOf(item) === addTarget) ?? null : null;
+  const targetRoom = targetItem ? MAX_EVENTS_PER_ITEM - 1 - (targetItem.extraEvents?.length ?? 0) : MAX_EVENTS_PER_ITEM;
+  const togglePicked = (id: string) => setPicked(picked.includes(id) ? picked.filter((entry) => entry !== id) : picked.length >= targetRoom ? picked : [...picked, id]);
+  const finishPicking = () => { setPicked([]); setAddTarget(null); };
+  // Several picked events become one card; the first one is its main event.
+  const addCombined = () => {
+    if (!picked.length) return;
+    const [first, ...rest] = picked;
+    const name = eventName(first);
+    setDashboard({ items: [...draft.dashboard.items, {
+      kind: "checkins_event", id: first, name, role: roleFor(name),
+      ...(rest.length ? { extraEvents: rest.map((id) => ({ id, name: eventName(id) })) } : {}),
+    }] });
+    finishPicking();
+  };
+  const addSeparately = () => {
+    setDashboard({ items: [...draft.dashboard.items, ...picked.map((id) => ({ kind: "checkins_event" as Kind, id, name: eventName(id), role: roleFor(eventName(id)) }))] });
+    finishPicking();
+  };
+  const addToTarget = () => {
+    if (!targetItem || !picked.length) return;
+    setDashboard({ items: draft.dashboard.items.map((item) => itemKeyOf(item) !== addTarget ? item : {
+      ...item, extraEvents: [...(item.extraEvents ?? []), ...picked.map((id) => ({ id, name: eventName(id) }))],
+    }) });
+    finishPicking();
+  };
+  const startAddingTo = (key: string) => {
+    setAddTarget(key);
+    setPicked([]);
+    setPickKind("checkins_event");
+    loadSources();
+    pickerRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+  };
+  const removeEvent = (key: string, eventId: string) => setDashboard({ items: draft.dashboard.items.map((item) => itemKeyOf(item) !== key ? item : {
+    ...item, extraEvents: (item.extraEvents ?? []).filter((event) => event.id !== eventId),
+  }) });
   const fieldLabel = (key: string | null) => data.syncedFields.find((field) => field.key === key)?.label ?? null;
 
   const save = async () => {
@@ -234,7 +290,8 @@ export function EngagementSettingsCard() {
   };
 
   const savedKeys = new Set(data.settings.dashboard.items.map((item) => `${item.kind}:${item.id}`));
-  const unsavedItems = draft.dashboard.items.some((item) => !savedKeys.has(`${item.kind}:${item.id}`)) || draft.dashboard.items.length !== data.settings.dashboard.items.length;
+  const eventsKey = (items: TrackedItem[]) => JSON.stringify(items.map((item) => [item.kind, item.id, (item.extraEvents ?? []).map((event) => event.id)]));
+  const unsavedItems = eventsKey(draft.dashboard.items) !== eventsKey(data.settings.dashboard.items);
   const lastSync = data.lastSync;
 
   return (
@@ -374,11 +431,35 @@ export function EngagementSettingsCard() {
               const key = `${item.kind}:${item.id}`;
               const state = data.syncState[key];
               return (
-                <li key={key} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
-                  <div className="min-w-0">
-                    <p className="font-medium">{item.name}</p>
+                <li key={key} className="flex items-start justify-between gap-3 px-3 py-2 text-sm">
+                  <div className="min-w-0 flex-1 space-y-1">
+                    {item.extraEvents?.length ? (
+                      <Input aria-label="Card name" className="h-8 max-w-sm font-medium" value={item.name}
+                        onChange={(event) => setDashboard({ items: draft.dashboard.items.map((entry) => itemKeyOf(entry) === key ? { ...entry, name: event.target.value } : entry) })} />
+                    ) : <p className="font-medium">{item.name}</p>}
+                    {item.kind === "checkins_event" && (
+                      <div className="flex flex-wrap items-center gap-1">
+                        {item.extraEvents?.length ? (
+                          <>
+                            <span className="rounded-full border px-2 py-0.5 text-xs" title="Main event">{sources ? eventName(item.id) : "Main event"}</span>
+                            {item.extraEvents.map((event) => (
+                              <span key={event.id} className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs">
+                                {event.name}
+                                <button type="button" aria-label={`Remove ${event.name}`} className="text-muted-foreground hover:text-foreground" onClick={() => removeEvent(key, event.id)}>
+                                  <X className="h-3 w-3" />
+                                </button>
+                              </span>
+                            ))}
+                          </>
+                        ) : null}
+                        <Button size="sm" variant="ghost" className="h-6 px-2 text-xs" onClick={() => startAddingTo(key)}
+                          disabled={(item.extraEvents?.length ?? 0) >= MAX_EVENTS_PER_ITEM - 1}>
+                          <Plus className="mr-1 h-3 w-3" /> Add events
+                        </Button>
+                      </div>
+                    )}
                     <p className="text-xs text-muted-foreground">
-                      {KIND_LABEL[item.kind]} · {state ? `history from ${state.pulledFrom}, last synced ${new Date(state.lastSyncedAt).toLocaleDateString()}` : savedKeys.has(key) ? "not synced yet" : "not saved yet"}
+                      {item.extraEvents?.length ? `${item.extraEvents.length + 1} Check-Ins events combined` : KIND_LABEL[item.kind]} · {state ? `history from ${state.pulledFrom}, last synced ${new Date(state.lastSyncedAt).toLocaleDateString()}` : savedKeys.has(key) ? "not synced yet" : "not saved yet"}
                     </p>
                   </div>
                   <div className="flex shrink-0 items-center gap-1">
@@ -401,11 +482,17 @@ export function EngagementSettingsCard() {
               );
             })}
           </ul>
-          <div className="space-y-2 rounded-md border p-3">
+          <div ref={pickerRef} className={`space-y-2 rounded-md border p-3 ${targetItem ? "border-primary" : ""}`}>
+            {targetItem && (
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded bg-muted px-2 py-1.5 text-sm">
+                <span>Adding events to <span className="font-medium">{targetItem.name}</span>. Their attendance is merged into that card.</span>
+                <Button size="sm" variant="ghost" onClick={finishPicking}>Cancel</Button>
+              </div>
+            )}
             <div className="flex flex-wrap items-end gap-2">
               <div className="space-y-1">
                 <Label htmlFor="pick-kind">Add</Label>
-                <select id="pick-kind" className={selectClass} value={pickKind} onFocus={loadSources} onChange={(event) => { setPickKind(event.target.value as Kind); loadSources(); }}>
+                <select id="pick-kind" className={selectClass} value={pickKind} disabled={!!targetItem} onFocus={loadSources} onChange={(event) => { setPickKind(event.target.value as Kind); setPicked([]); loadSources(); }}>
                   <option value="group_type">Group type (recommended for seasonal groups)</option>
                   <option value="group">One group</option>
                   <option value="checkins_event">Check-Ins event</option>
@@ -415,13 +502,49 @@ export function EngagementSettingsCard() {
                 <Label htmlFor="pick-filter">Search</Label>
                 <Input id="pick-filter" value={filter} placeholder="Type to filter…" onFocus={loadSources} onChange={(event) => setFilter(event.target.value)} />
               </div>
+              {pickKind === "checkins_event" && (
+                <label className="flex h-9 items-center gap-2 text-sm">
+                  <Switch checked={showArchived} onCheckedChange={setShowArchived} /> Include archived events
+                </label>
+              )}
             </div>
             {sourcesLoading && <p className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> Loading from Planning Center…</p>}
             {sourcesError && <p className="text-sm text-destructive">{sourcesError}</p>}
             {!sources && !sourcesLoading && !sourcesError && (
               <Button size="sm" variant="outline" onClick={loadSources}>Load events and groups</Button>
             )}
-            {sources && (
+            {sources && pickKind === "checkins_event" && (
+              <>
+                <div className="max-h-64 space-y-1 overflow-y-auto">
+                  {!options.length && <p className="text-sm text-muted-foreground">No matches.</p>}
+                  {options.map((entry) => (
+                    <label key={entry.id} className="flex cursor-pointer items-center justify-between gap-2 rounded px-2 py-1.5 text-sm hover:bg-muted">
+                      <span className="flex min-w-0 items-center gap-2">
+                        <input type="checkbox" checked={picked.includes(entry.id)} onChange={() => togglePicked(entry.id)} />
+                        <span className="truncate">{entry.name}</span>
+                      </span>
+                      {(entry as { archived?: boolean }).archived && <span className="shrink-0 text-xs text-muted-foreground">archived</span>}
+                    </label>
+                  ))}
+                </div>
+                <div className="flex flex-wrap items-center gap-2 border-t pt-2">
+                  <span className="text-xs text-muted-foreground">{picked.length} selected</span>
+                  {targetItem ? (
+                    <Button size="sm" onClick={addToTarget} disabled={!picked.length}><Plus className="mr-1 h-4 w-4" /> Add to {targetItem.name}</Button>
+                  ) : (
+                    <>
+                      <Button size="sm" onClick={addCombined} disabled={!picked.length}>
+                        <Plus className="mr-1 h-4 w-4" /> {picked.length > 1 ? "Add as one combined card" : "Add"}
+                      </Button>
+                      {picked.length > 1 && <Button size="sm" variant="outline" onClick={addSeparately}>Add each as its own card</Button>}
+                    </>
+                  )}
+                  {picked.length > 0 && <Button size="sm" variant="ghost" onClick={() => setPicked([])}>Clear</Button>}
+                </div>
+                <p className="text-xs text-muted-foreground">Combine an event's yearly or archived versions into one card so its history carries over. Up to {MAX_EVENTS_PER_ITEM} events per card.</p>
+              </>
+            )}
+            {sources && pickKind !== "checkins_event" && (
               <div className="max-h-56 space-y-1 overflow-y-auto">
                 {!options.length && <p className="text-sm text-muted-foreground">No matches.</p>}
                 {options.map((entry) => (
@@ -429,7 +552,7 @@ export function EngagementSettingsCard() {
                     key={entry.id}
                     type="button"
                     className="flex w-full items-center justify-between gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-muted"
-                    onClick={() => setDashboard({ items: [...draft.dashboard.items, { kind: pickKind, id: entry.id, name: entry.name, role: /college/i.test(entry.name) ? "tc_college" : "transform" }] })}
+                    onClick={() => setDashboard({ items: [...draft.dashboard.items, { kind: pickKind, id: entry.id, name: entry.name, role: roleFor(entry.name) }] })}
                   >
                     <span className="truncate">{entry.name}</span>
                     <Plus className="h-4 w-4 shrink-0 text-muted-foreground" />
@@ -471,7 +594,7 @@ export function EngagementSettingsCard() {
           <Button variant="outline" onClick={sendTest} disabled={testing || !data.settings.dashboard.items.length}>
             {testing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Mail className="mr-2 h-4 w-4" />} Email me a test
           </Button>
-          {unsavedItems && <span className="text-xs text-amber-700">Save first, then sync the new items.</span>}
+          {unsavedItems && <span className="text-xs text-amber-700">Save first, then sync. Cards with new events re-pull their last 26 weeks.</span>}
         </div>
         <p className="text-xs text-muted-foreground">
           {syncing

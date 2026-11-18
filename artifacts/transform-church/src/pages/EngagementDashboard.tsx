@@ -30,6 +30,7 @@ type Item = {
   id: string;
   name: string;
   role: "transform" | "tc_college";
+  eventCount?: number;
   current: Metrics;
   previous: Metrics;
   trend: TrendPoint[];
@@ -188,7 +189,7 @@ function ItemCard({ item, dashboard }: { item: Item; dashboard: Dashboard }) {
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div className="min-w-0">
             <CardTitle className="text-lg">{item.name}</CardTitle>
-            <p className="text-xs text-muted-foreground">{KIND_LABEL[item.kind]}{item.role === "tc_college" ? " · TC College" : ""}{item.lastWeekWithData ? ` · last attendance week of ${shortDate(item.lastWeekWithData)}` : " · no attendance synced yet"}</p>
+            <p className="text-xs text-muted-foreground">{item.eventCount && item.eventCount > 1 ? `${item.eventCount} Check-Ins events combined` : KIND_LABEL[item.kind]}{item.role === "tc_college" ? " · TC College" : ""}{item.lastWeekWithData ? ` · last attendance week of ${shortDate(item.lastWeekWithData)}` : " · no attendance synced yet"}</p>
           </div>
           <div className="w-56"><ScoreMeter score={current.engagement.score} max={dashboard.maxPoints} /></div>
         </div>

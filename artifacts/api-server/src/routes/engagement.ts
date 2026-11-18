@@ -65,6 +65,8 @@ type ItemDashboard = {
   id: string;
   name: string;
   role: TrackedItem["role"];
+  // Check-Ins events combined into this card.
+  eventCount?: number;
   current: WindowMetrics;
   previous: WindowMetrics;
   trend: ReturnType<typeof trendSeries>;
@@ -129,6 +131,7 @@ export async function buildDashboard(weeks: number, now: Date = new Date()): Pro
     id: item.id,
     name: item.name,
     role: item.role,
+    eventCount: item.kind === "checkins_event" ? 1 + (item.extraEvents?.length ?? 0) : undefined,
     current: windowMetrics(rows, presence, window, context),
     previous: windowMetrics(rows, presence, previousWindow, context),
     trend: trendSeries(rows, presence, lastWeek, weeks, TREND_POINTS),
@@ -357,7 +360,8 @@ router.get("/sources", requireAdmin, async (req, res) => {
         .catch(() => ({ data: [] as JsonApiResource[], included: [] as JsonApiResource[] })),
     ]);
     res.json({
-      checkinsEvents: events.filter((event) => !event.archived).map((event) => ({ id: event.id, name: event.name })),
+      // Archived events too, so a card can combine an event's past runs.
+      checkinsEvents: events.map((event) => ({ id: event.id, name: event.name, archived: event.archived })),
       groups: groups.filter((group) => !group.archived).map((group) => ({ id: group.id, name: group.name })),
       groupTypes: types.data.filter((type) => type.id).map((type) => ({
         id: type.id,
