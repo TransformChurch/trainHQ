@@ -36,3 +36,12 @@ test("normalizeTrackedItems keeps combined Check-Ins events, drops duplicates an
   assert.equal(group.extraEvents, undefined);
   assert.deepEqual(itemEventIds(group), ["5"]);
 });
+
+test("archivedEventInWindow keeps current events and events archived in the last 26 weeks", async () => {
+  const { archivedEventInWindow } = await import("./engagementSync");
+  const now = new Date("2026-11-18T12:00:00Z");
+  assert.equal(archivedEventInWindow({ archived: false, archivedAt: null }, now), true);
+  assert.equal(archivedEventInWindow({ archived: true, archivedAt: "2026-06-01T00:00:00Z" }, now), true);
+  assert.equal(archivedEventInWindow({ archived: true, archivedAt: "2026-05-01T00:00:00Z" }, now), false);
+  assert.equal(archivedEventInWindow({ archived: true, archivedAt: null }, now), false);
+});

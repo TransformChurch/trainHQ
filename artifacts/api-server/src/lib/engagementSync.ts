@@ -64,6 +64,16 @@ export function eventsChanged(previous: string[] | undefined, current: string[])
   return sortedBefore.length !== after.length || sortedBefore.some((id, index) => id !== after[index]);
 }
 
+// The picker only offers archived Check-Ins events archived within the
+// backfill window (26 weeks): older ones have no weeks the sync would pull.
+// An archived event with no archived date is left out.
+export function archivedEventInWindow(event: { archived: boolean; archivedAt: string | null }, now: Date = new Date()): boolean {
+  if (!event.archived) return true;
+  if (!event.archivedAt) return false;
+  const archivedAt = new Date(event.archivedAt).getTime();
+  return Number.isFinite(archivedAt) && archivedAt >= now.getTime() - BACKFILL_WEEKS * 7 * 86_400_000;
+}
+
 // Merges per-event weeks into one list (people present at any of them).
 export function mergeEventWeeks(lists: PulledWeek[][]): PulledWeek[] {
   const weeks = new Map<string, PulledWeek>();

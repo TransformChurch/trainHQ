@@ -44,7 +44,7 @@ type SettingsResponse = {
   syncState: Record<string, { pulledFrom: string; lastSyncedAt: string } | null>;
   lastSync: SyncRun | null;
 };
-type Sources = { checkinsEvents: { id: string; name: string; archived?: boolean }[]; groups: { id: string; name: string }[]; groupTypes: { id: string; name: string; description: string }[] };
+type Sources = { checkinsEvents: { id: string; name: string; archived?: boolean; archivedAt?: string | null }[]; groups: { id: string; name: string }[]; groupTypes: { id: string; name: string; description: string }[] };
 
 const PARTS: { key: Part; label: string; help: string }[] = [
   { key: "formThrive", label: "Form / Thrive", help: "Thrive done, or any form submitted" },
@@ -504,7 +504,7 @@ export function EngagementSettingsCard() {
               </div>
               {pickKind === "checkins_event" && (
                 <label className="flex h-9 items-center gap-2 text-sm">
-                  <Switch checked={showArchived} onCheckedChange={setShowArchived} /> Include archived events
+                  <Switch checked={showArchived} onCheckedChange={setShowArchived} /> Include archived events (last 26 weeks)
                 </label>
               )}
             </div>
@@ -523,7 +523,14 @@ export function EngagementSettingsCard() {
                         <input type="checkbox" checked={picked.includes(entry.id)} onChange={() => togglePicked(entry.id)} />
                         <span className="truncate">{entry.name}</span>
                       </span>
-                      {(entry as { archived?: boolean }).archived && <span className="shrink-0 text-xs text-muted-foreground">archived</span>}
+                      {(() => {
+                        const event = entry as { archived?: boolean; archivedAt?: string | null };
+                        return event.archived ? (
+                          <span className="shrink-0 text-xs text-muted-foreground">
+                            archived{event.archivedAt ? ` ${new Date(event.archivedAt).toLocaleDateString()}` : ""}
+                          </span>
+                        ) : null;
+                      })()}
                     </label>
                   ))}
                 </div>

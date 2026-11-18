@@ -21,6 +21,7 @@ import { addDays, weekStartFor } from "../lib/checkinsHistory";
 import {
   DASHBOARD_WEEK_OPTIONS,
   ENGAGEMENT_PARTS,
+  itemEventIds,
   loadEngagementContext,
   normalizePoints,
   normalizeSettings,
@@ -36,7 +37,7 @@ import {
   type TrackedItem,
 } from "../lib/engagement";
 import { combinedMetrics, trendSeries, windowMetrics, windowWeeks, type PresenceRow, type WeekRow, type WindowMetrics } from "../lib/engagementMetrics";
-import { itemKey, readSyncState, runEngagementSync, type EngagementSyncRun } from "../lib/engagementSync";
+import { archivedEventInWindow, itemKey, readSyncState, runEngagementSync, type EngagementSyncRun } from "../lib/engagementSync";
 import { buildPeopleDashboard, clearSnapshots, retierSnapshots, type Tier } from "../lib/engagementPeople";
 import { readFormsState } from "../lib/engagementForms";
 import { syncedFields } from "../lib/reportPeople";
@@ -353,6 +354,8 @@ router.put("/settings", requireAdmin, async (req, res) => {
 router.get("/sources", requireAdmin, async (req, res) => {
   try {
     const accessToken = await getValidPlanningCenterAccessToken(res.locals.dbUser.id);
+    const settings = await readEngagementSettings();
+    const trackedEventIds = new Set(settings.dashboard.items.flatMap(itemEventIds));
     const [events, groups, types] = await Promise.all([
       listCheckInsEvents(accessToken).catch(() => []),
       listGroups(accessToken).catch(() => []),
@@ -360,8 +363,11 @@ router.get("/sources", requireAdmin, async (req, res) => {
         .catch(() => ({ data: [] as JsonApiResource[], included: [] as JsonApiResource[] })),
     ]);
     res.json({
-      // Archived events too, so a card can combine an event's past runs.
-      checkinsEvents: events.map((event) => ({ id: event.id, name: event.name, archived: event.archived })),
+      // Archived events too (only those archived in the last 26 weeks, plus
+      // any already on a card), so a card can combine an event's past runs.
+      checkinsEvents: events
+        .filter((event) => archivedEventInWindow(event) || trackedEventIds.has(event.id))
+        .map((event) => ({ id: event.id, name: event.name, archived: event.archived, archivedAt: event.archivedAt })),
       groups: groups.filter((group) => !group.archived).map((group) => ({ id: group.id, name: group.name })),
       groupTypes: types.data.filter((type) => type.id).map((type) => ({
         id: type.id,
